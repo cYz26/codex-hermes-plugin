@@ -1,0 +1,21 @@
+{
+  "native_status": {
+    "logged_in": true,
+    "token_expired": null,
+    "source": "pool:device_code",
+    "auth_mode": "chatgpt",
+    "error": null,
+    "home": "/Users/cy/.hermes/profiles/codex-learning-pilot",
+    "auth_root": "/Users/cy/.hermes"
+  },
+  "home": "/Users/cy/.hermes-codex-learning/pilot",
+  "profile_home": "/Users/cy/.hermes/profiles/codex-learning-pilot",
+  "physical_home_unchanged": true,
+  "local_auth_file_created": false,
+  "root_credentials_copied": false,
+  "native_config_version": 52,
+  "old_config_version": 52,
+  "latest_config_version": 52,
+  "effort": "max",
+  "gateway_standalone": true
+}

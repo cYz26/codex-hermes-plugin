@@ -1,0 +1,17 @@
+{
+  "version": "v0.22.7",
+  "native_ruff": "passed",
+  "full_native_check": {
+    "status": "passed",
+    "checks": 14,
+    "exit_code": 0,
+    "health_blocking": 0,
+    "health_advisory": 0,
+    "log": "evidence-v0.22.7-native-check.log"
+  },
+  "diff_whitespace": "passed",
+  "peripheral_F_E9": "passed",
+  "new_core_F_E9": "passed",
+  "native_schema_compatible": true,
+  "patch_replay": "passed"
+}

@@ -1,0 +1,3 @@
+HERMES-CODEX-PROBE.json -text
+patches/** -text
+evidence/** -text

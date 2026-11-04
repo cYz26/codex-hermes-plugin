@@ -1,0 +1,18 @@
+▶ not activated — using HERMES_PYTHON: /Users/cy/.hermes-codex-learning/runtime-v0.22.7/bin/python
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 1 test files (~9 tests) under ['tests/agent/test_learning_service.py']; running with -j 10
+[100.0% |     9/~9 | ✓9 | ✗0] ✓ tests/agent/test_learning_service.py (9✓, 0.4s)
+
+=== Summary: 1 files, 9 tests passed, 0 failed (100% complete) in 0.4s (10 workers) ===
+  Durations cached to test_durations.json (1 files)
+
+=== Per-file subprocess time distribution ===
+  Files:   1
+  Total subprocess CPU-wall: 0.4s  (runner wall: 0.4s, parallelism: 10x)
+  P50: 0.37s  P90: 0.37s  P95: 0.37s  P99: 0.37s  Max: 0.37s
+  <1s: 1 files (100%)  <2s: 1 files (100%)
+  Top 10 slowest:
+      0.37s  tests/agent/test_learning_service.py

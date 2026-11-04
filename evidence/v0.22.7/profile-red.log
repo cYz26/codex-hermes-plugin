@@ -1,0 +1,40 @@
+test_foreign_profile_cannot_redirect_learning_state (test_profile_auth.ProfileAuthTests.test_foreign_profile_cannot_redirect_learning_state) ... ERROR
+test_launchd_carries_the_same_profile_as_cli_and_probe (test_profile_auth.ProfileAuthTests.test_launchd_carries_the_same_profile_as_cli_and_probe) ... FAIL
+test_native_environment_preserves_profile_spelling_and_private_data (test_profile_auth.ProfileAuthTests.test_native_environment_preserves_profile_spelling_and_private_data) ... ERROR
+
+======================================================================
+ERROR: test_foreign_profile_cannot_redirect_learning_state (test_profile_auth.ProfileAuthTests.test_foreign_profile_cannot_redirect_learning_state)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/cy/Dev/agents-dev/hermes-plugin1102/tests/test_profile_auth.py", line 57, in test_foreign_profile_cannot_redirect_learning_state
+    Settings.load(self.config).native_environment()
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Settings' object has no attribute 'native_environment'
+
+======================================================================
+ERROR: test_native_environment_preserves_profile_spelling_and_private_data (test_profile_auth.ProfileAuthTests.test_native_environment_preserves_profile_spelling_and_private_data)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/cy/Dev/agents-dev/hermes-plugin1102/tests/test_profile_auth.py", line 36, in test_native_environment_preserves_profile_spelling_and_private_data
+    self.assertEqual(settings.native_environment()["HERMES_HOME"], str(self.profile))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'Settings' object has no attribute 'native_environment'
+
+======================================================================
+FAIL: test_launchd_carries_the_same_profile_as_cli_and_probe (test_profile_auth.ProfileAuthTests.test_launchd_carries_the_same_profile_as_cli_and_probe)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/cy/Dev/agents-dev/hermes-plugin1102/tests/test_profile_auth.py", line 49, in test_launchd_carries_the_same_profile_as_cli_and_probe
+    self.assertEqual(payload["EnvironmentVariables"]["HERMES_HOME"], str(self.profile))
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '/private/var/folders/r7/rbqfphgx07vb5pmfrs[42 chars]ilot' != '/var/folders/r7/rbqfphgx07vb5pmfrsv8mf6800[60 chars]ilot'
+- /private/var/folders/r7/rbqfphgx07vb5pmfrsv8mf680000gn/T/tmpxv5e920w/learning-data/pilot
+? --------                                                                      -----
++ /var/folders/r7/rbqfphgx07vb5pmfrsv8mf680000gn/T/tmpxv5e920w/account/.hermes/profiles/codex-learning-pilot
+?                                                              +++++++++++++++++++++++++++++++
+
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.006s
+
+FAILED (failures=1, errors=2)

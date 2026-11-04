@@ -1,0 +1,164 @@
+{
+  "date_local": "2026-11-02",
+  "experiment": "Codex App Server automatic lifecycle -> isolated native Hermes learning -> new Codex conversation",
+  "scope": {
+    "codex_desktop_binary": "codex-cli 0.166.0-alpha.5.1",
+    "hermes_tag": "v0.22.5",
+    "hermes_source": "bf0203a794a07aac3ff764972ab9087baa4e4f4e",
+    "models": "Deterministic loopback Responses and Chat Completions fixtures; no real account model inference.",
+    "front_end": "Desktop-bundled App Server over stdio. No exercise of desktop GUI.",
+    "trigger": "Worker was started before chat A. A trusted Stop hook wrote an outbox record. The worker consumed it without a learning prompt from the user. Both native review scopes were deliberately enabled for this fixture."
+  },
+  "chat_a": {
+    "thread": "01a19cd1-2439-7730-b811-b6feda7ad8ea",
+    "turn": "01a19cd1-2441-7d12-9fb8-291d3032bc2f",
+    "status": "completed",
+    "message": "Artifact uses project convention QUARTZ-17 and the CHECK-47 verification passed.",
+    "calls": 2,
+    "hook_events": [
+      {
+        "kind": "UserPromptSubmit",
+        "session": "01a19cd1-2439-7730-b811-b6feda7ad8ea",
+        "turn": "01a19cd1-2441-7d12-9fb8-291d3032bc2f",
+        "user": "Use the QUARTZ-17 build artifact naming convention. Run the CHECK-47 verification and report the result."
+      },
+      {
+        "kind": "PostToolUse",
+        "session": "01a19cd1-2439-7730-b811-b6feda7ad8ea",
+        "turn": "01a19cd1-2441-7d12-9fb8-291d3032bc2f",
+        "tool": "Bash",
+        "result": "QUARTZ-17 CHECK-47"
+      },
+      {
+        "kind": "Stop",
+        "session": "01a19cd1-2439-7730-b811-b6feda7ad8ea",
+        "turn": "01a19cd1-2441-7d12-9fb8-291d3032bc2f",
+        "assistant": "Artifact uses project convention QUARTZ-17 and the CHECK-47 verification passed."
+      }
+    ]
+  },
+  "hermes": {
+    "input_sha256": "8a7a96951b4b68abb1841410ac2006c1e4a68ad1c88f83a212b0fc5b43a4b1f4",
+    "shadow_session": "codex-lab-01a19cd1-2439-7730-b811-b6feda7ad8ea",
+    "origin_transcript_message_count": 4,
+    "review_received_external_text": true,
+    "main_model_calls": 0,
+    "review_model_calls": 3,
+    "pending_memory_write_count": 0,
+    "ledger_entries": 1,
+    "fresh_context_contained_memory": true,
+    "fresh_session_skill_body_loaded": true
+  },
+  "outputs": {
+    "memory": "This project names build artifacts with QUARTZ-17.",
+    "skill_markdown": "---\nname: fixture-artifact-naming\ndescription: Use the verified procedure for the isolated Codex fixture.\n---\n\n# Verified fixture procedure\n\nFor each new build artifact, run the CHECK-47 verification and read its output before reporting completion.\n",
+    "native_and_codex_project_skill_sha256": "eb63942f19081d2409ae0b7c69227061fa42b00bed7968a8fe435fa3bb0dc4fc",
+    "byte_identical": true
+  },
+  "chat_b": {
+    "thread": "01a19cd1-2cc0-77d0-b543-7d177500f718",
+    "turn": "01a19cd1-2cc5-7631-a748-bea2084638e1",
+    "status": "completed",
+    "message": "Use QUARTZ-17 naming with the CHECK-47 verification.",
+    "calls": 2,
+    "user_prompt": "Check the name for the next build artifact. Which convention and verification apply?",
+    "model_input_had_memory_marker_at_start": true,
+    "model_input_had_skill_name_at_start": true,
+    "skill_body_read_through_real_tool": "---\nname: fixture-artifact-naming\ndescription: Use the verified procedure for the isolated Codex fixture.\n---\n\n# Verified fixture procedure\n\nFor each new build artifact, run the CHECK-47 verification and read its output before reporting completion.\n",
+    "same_user_prompt_as_clean_control": true
+  },
+  "clean_control": {
+    "isolated_fresh_chat": {
+      "thread": "01a19cd4-268f-78a1-9c1c-bb082250637f",
+      "turn": "01a19cd4-269b-7d71-8d3d-122091e03ae3",
+      "status": "completed",
+      "message": "No matching recalled convention in input.",
+      "calls": 1
+    },
+    "model_request_memory_marker": false,
+    "model_request_skill_name": false,
+    "provider_same_script": true,
+    "user_prompt_same_as_chat_b": true
+  },
+  "session_search": {
+    "match_count": 3,
+    "roles": [
+      "assistant",
+      "tool",
+      "user"
+    ]
+  },
+  "curator": {
+    "entry": "hermes_cli.curator._cmd_run(dry_run=True), enabled isolated profile",
+    "dry_run_handler_exit": 0,
+    "output": "curator: running DRY-RUN (report only, no mutations)...\ncurator: consolidation is off — running prune-only (deterministic stale/archive). Pass --consolidate or set `curator.consolidate: true` to enable the LLM merge pass.\ncurator: dry-run auto: no changes; llm: skipped (consolidation off)\nauto (preview): 1 candidate skill(s) — no transitions applied in dry-run\ndry-run: no changes applied. Read the report with `hermes curator status` and run `hermes curator run` (no flag) to apply.\n",
+    "skill_sha256_unchanged": true
+  },
+  "separate_provider_probe": {
+    "implementation": "Native MemoryManager with a local recording provider",
+    "before_forwarding": [],
+    "after_forwarding": [
+      "sync_turn",
+      "queue_prefetch"
+    ]
+  },
+  "separate_unattended_guard_probe": {
+    "auto_created_memory_user_and_skill": true,
+    "skill_create_and_patch_ledger_entries": 2,
+    "pending_memory_patch_and_remove": 2
+  },
+  "initial_readback_failure": {
+    "cause": "Tool output budget was 20 tokens and the procedure was truncated. Skill discovery succeeded but the B answer failed the check. The completed run used a 320-token budget and verified the actual procedure."
+  },
+  "outside_scope": [
+    "Production plugin install, macOS login item and long-lived desktop operation",
+    "Inference quality with a real model and real projects",
+    "Production restart, queue recovery, duplicate delivery and fork attribution",
+    "Cross-day scheduled curation and live third-party memory backends",
+    "Dreaming and GEPA installation or runtime"
+  ],
+  "curator_simulated_lifecycle": {
+    "stale_after_simulated_15_days": 1,
+    "archived_after_simulated_31_days": 1,
+    "restored_byte_identical": true,
+    "original_relative_path": "skills/testing/archive-label-fixture/SKILL.md",
+    "restored_relative_path": "skills/archive-label-fixture/SKILL.md"
+  },
+  "source_envelope": {
+    "thread_id": "01a19cd1-2439-7730-b811-b6feda7ad8ea",
+    "turn_id": "01a19cd1-2441-7d12-9fb8-291d3032bc2f",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Use the QUARTZ-17 build artifact naming convention. Run the CHECK-47 verification and report the result."
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "id": "call_fixture1",
+            "type": "function",
+            "function": {
+              "name": "exec_command",
+              "arguments": "{}"
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "name": "exec_command",
+        "tool_call_id": "call_fixture1",
+        "content": "QUARTZ-17 CHECK-47"
+      },
+      {
+        "role": "assistant",
+        "content": "Artifact uses project convention QUARTZ-17 and the CHECK-47 verification passed."
+      }
+    ],
+    "hermes_session_id": "codex-lab-01a19cd1-2439-7730-b811-b6feda7ad8ea",
+    "origin": "scripted-codex-app-server"
+  },
+  "source_sha256_encoding": "UTF-8 json.dumps(source_envelope, ensure_ascii=False), default separators, no trailing newline."
+}

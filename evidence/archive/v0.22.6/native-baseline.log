@@ -1,0 +1,29 @@
+▶ not activated — using HERMES_PYTHON: /Users/cy/.hermes-codex-learning/runtime/bin/python
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+fatal: not a git repository (or any of the parent directories): .git
+▶ launching test runner
+Discovered 6 test files (~142 tests) under ['tests/agent/test_background_review.py', 'tests/agent/test_background_review_usage.py', 'tests/agent/test_background_review_cache_parity.py', 'tests/agent/test_codex_app_server_integration.py', 'tests/tools/test_skill_lock.py', 'tests/tools/test_skill_manager_tool.py']; running with -j 10
+[  4.9% |     7/~142 | ✓7 | ✗0] ✓ tests/agent/test_background_review_usage.py (7✓, 1.2s)
+[  7.0% |    10/~142 | ✓40 | ✗ 0] ✓ tests/tools/test_skill_lock.py (33✓, 2.4s)
+[ 17.6% |    25/~142 | ✓55 | ✗ 0] ✓ tests/agent/test_background_review.py (15✓, 2.6s)
+[ 26.1% |    37/~142 | ✓67 | ✗ 0] ✓ tests/agent/test_background_review_cache_parity.py (12✓, 2.7s)
+[ 80.3% |   114/~142 | ✓152 | ✗  0] ✓ tests/tools/test_skill_manager_tool.py (85✓, 4.3s)
+[100.0% |   142/~142 | ✓183 | ✗  0] ✓ tests/agent/test_codex_app_server_integration.py (31✓, 8.2s)
+
+=== Summary: 6 files, 183 tests passed, 0 failed (100% complete) in 8.2s (10 workers) ===
+  Durations cached to test_durations.json (6 files)
+
+=== Per-file subprocess time distribution ===
+  Files:   6
+  Total subprocess CPU-wall: 21.3s  (runner wall: 8.2s, parallelism: 10x)
+  P50: 2.66s  P90: 8.22s  P95: 8.22s  P99: 8.22s  Max: 8.22s
+  <1s: 0 files (0%)  <2s: 1 files (17%)
+  Top 10 slowest:
+      8.22s  tests/agent/test_codex_app_server_integration.py
+      4.29s  tests/tools/test_skill_manager_tool.py
+      2.66s  tests/agent/test_background_review_cache_parity.py
+      2.60s  tests/agent/test_background_review.py
+      2.38s  tests/tools/test_skill_lock.py
+      1.19s  tests/agent/test_background_review_usage.py

@@ -1,0 +1,108 @@
+▶ not activated — using HERMES_PYTHON: /Users/cy/.hermes-codex-learning/runtime-v0.22.7/bin/python
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 1 test files (~9 tests) under ['tests/agent/test_learning_service.py']; running with -j 10
+[100.0% |     9/~9 | ✓7 | ✗2] ✗ tests/agent/test_learning_service.py (7✓ 2✗, 0.8s)
+
+  ╔╍ Failed: tests/agent/test_learning_service.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+  ║                 "name": "skill_manage", "arguments": json.dumps({"operations": operations})}}]},
+  ║             {"role": "tool", "tool_call_id": "batch", "content": json.dumps({
+  ║                 "success": True, "operations_applied": 2, "results": operations})},
+  ║         ])
+  ║         result = review_outcome(state)
+  ║ >       assert [fact["name"] for fact in result["applied"]] == ["build-verify", "build-verify"]
+  ║ E       AssertionError: assert [None, None] == ['build-verif...build-verify']
+  ║ E         
+  ║ E         At index 0 diff: None != 'build-verify'
+  ║ E         Use -v to get more diff
+  ║ 
+  ║ tests/agent/test_learning_service.py:165: AssertionError
+  ║ ___________ test_prior_v1_batch_receipts_still_recall_updated_skill ____________
+  ║ 
+  ║ service = <agent.learning_service.LearningService object at 0x10939c4d0>
+  ║ 
+  ║     def test_prior_v1_batch_receipts_still_recall_updated_skill(service):
+  ║         outcome = {"applied": [{"tool": "skill_manage", "name": None,
+  ║                                "operation": {"name": "build-verify", "action": "create", "success": True}}]}
+  ║         with service.db:
+  ║             service.db.execute("INSERT INTO attempts VALUES (?,?,'completed',?)",
+  ║                                ("legacy-batch", "intent", json.dumps(outcome)))
+  ║ >       assert "新更新技能：build-verify" in service.read(kind="context")["summary"]
+  ║ E       AssertionError: assert '新更新技能：build-verify' in ''
+  ║ 
+  ║ tests/agent/test_learning_service.py:175: AssertionError
+  ║ =========================== short test summary info ============================
+  ║ FAILED tests/agent/test_learning_service.py::test_native_batch_skill_identity_is_preserved
+  ║ FAILED tests/agent/test_learning_service.py::test_prior_v1_batch_receipts_still_recall_updated_skill
+  ║ ========================= 2 failed, 7 passed in 0.23s ==========================
+  ║
+  ║  Repro: python -m pytest tests/agent/test_learning_service.py
+  ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
+
+=== Summary: 1 files, 7 tests passed, 2 failed; FAILED: 1 of 1 file (100% complete) in 0.8s (10 workers) ===
+
+=== Per-file subprocess time distribution ===
+  Files:   1
+  Total subprocess CPU-wall: 0.8s  (runner wall: 0.8s, parallelism: 10x)
+  P50: 0.76s  P90: 0.76s  P95: 0.76s  P99: 0.76s  Max: 0.76s
+  <1s: 1 files (100%)  <2s: 1 files (100%)
+  Top 10 slowest:
+      0.76s  tests/agent/test_learning_service.py
+
+=== Failure output ===
+
+--- tests/agent/test_learning_service.py ---
+============================= test session starts ==============================
+platform darwin -- Python 3.14.9, pytest-9.1.1, pluggy-1.7.0
+rootdir: /Users/cy/Dev/agents-dev/hermes-learning-core
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 9 items
+
+tests/agent/test_learning_service.py .......FF                           [100%]
+
+=================================== FAILURES ===================================
+________________ test_native_batch_skill_identity_is_preserved _________________
+
+    def test_native_batch_skill_identity_is_preserved():
+        operations = [{"name": "build-verify", "action": "create", "success": True},
+                      {"name": "build-verify", "action": "patch", "success": True}]
+        state = SimpleNamespace(result={"completed": True}, review_usage={}, review_messages=[
+            {"role": "assistant", "tool_calls": [{"id": "batch", "function": {
+                "name": "skill_manage", "arguments": json.dumps({"operations": operations})}}]},
+            {"role": "tool", "tool_call_id": "batch", "content": json.dumps({
+                "success": True, "operations_applied": 2, "results": operations})},
+        ])
+        result = review_outcome(state)
+>       assert [fact["name"] for fact in result["applied"]] == ["build-verify", "build-verify"]
+E       AssertionError: assert [None, None] == ['build-verif...build-verify']
+E         
+E         At index 0 diff: None != 'build-verify'
+E         Use -v to get more diff
+
+tests/agent/test_learning_service.py:165: AssertionError
+___________ test_prior_v1_batch_receipts_still_recall_updated_skill ____________
+
+service = <agent.learning_service.LearningService object at 0x10939c4d0>
+
+    def test_prior_v1_batch_receipts_still_recall_updated_skill(service):
+        outcome = {"applied": [{"tool": "skill_manage", "name": None,
+                               "operation": {"name": "build-verify", "action": "create", "success": True}}]}
+        with service.db:
+            service.db.execute("INSERT INTO attempts VALUES (?,?,'completed',?)",
+                               ("legacy-batch", "intent", json.dumps(outcome)))
+>       assert "新更新技能：build-verify" in service.read(kind="context")["summary"]
+E       AssertionError: assert '新更新技能：build-verify' in ''
+
+tests/agent/test_learning_service.py:175: AssertionError
+=========================== short test summary info ============================
+FAILED tests/agent/test_learning_service.py::test_native_batch_skill_identity_is_preserved
+FAILED tests/agent/test_learning_service.py::test_prior_v1_batch_receipts_still_recall_updated_skill
+========================= 2 failed, 7 passed in 0.23s ==========================
+
+=== 1 file with test failures ===
+  tests/agent/test_learning_service.py  (2 tests failed)

@@ -1,0 +1,244 @@
+{
+  "timestamp": "2026-11-04T01:05:43.315960+00:00",
+  "real_app": false,
+  "source": "explicit_synthetic_acceptance_fixture",
+  "trigger": "explicit_idle_flush_for_contract_verification",
+  "model": {
+    "provider": "openai-codex",
+    "default": "gpt-6.1-sol",
+    "api_mode": "codex_responses"
+  },
+  "effort": "max",
+  "authentication": {
+    "logged_in": true,
+    "token_expired": null,
+    "source": "pool:device_code",
+    "auth_mode": "chatgpt",
+    "error": null,
+    "home": "/Users/cy/.hermes/profiles/codex-learning-pilot",
+    "auth_root": "/Users/cy/.hermes"
+  },
+  "scope": "real-provider-probe-69fe931ccb754496910395759a1cc88d",
+  "handle": "observed-0cedee202503ec1e3f965cb78a7979ff",
+  "receipt": {
+    "id": "real-provider-probe-69fe931ccb754496910395759a1cc88d:observation",
+    "handle": "observed-0cedee202503ec1e3f965cb78a7979ff",
+    "revision": 1,
+    "content_hash": "98950ddc6d23a05b2003714a03513d976addb19e7d1ae14f94e83d4d29b0d170",
+    "new_user_turn": true,
+    "completed_tool_delta": 0,
+    "intent": null,
+    "coverage": [
+      "synthetic_fixture_not_codex_app_hooks"
+    ],
+    "count_confidence": "observed_only"
+  },
+  "review": {
+    "applied": [
+      {
+        "tool": "memory",
+        "action": null,
+        "name": null,
+        "target": "memory",
+        "call_id": "call_b0d33b04ca3a4bc985a42a08203bbabc",
+        "result": {
+          "success": true,
+          "done": true,
+          "target": "memory",
+          "usage": "11% — 252/2,200 chars",
+          "entry_count": 1,
+          "message": "Applied 1 operation(s).",
+          "note": "Write saved. This update is complete — do not repeat it."
+        }
+      },
+      {
+        "tool": "skill_manage",
+        "action": null,
+        "name": null,
+        "target": null,
+        "call_id": "call_c2474e0c4fb74a0e85c92df807c13ef1",
+        "result": {
+          "success": true,
+          "operations_applied": 1,
+          "results": [
+            {
+              "name": "agent-integration-acceptance",
+              "action": "create",
+              "file_path": null,
+              "success": true,
+              "lint_warnings": [
+                {
+                  "severity": "warning",
+                  "rule": "missing-metadata",
+                  "message": "frontmatter is missing 'version'; every peer skill has it."
+                },
+                {
+                  "severity": "warning",
+                  "rule": "missing-metadata",
+                  "message": "frontmatter is missing 'author'; every peer skill has it."
+                },
+                {
+                  "severity": "warning",
+                  "rule": "missing-metadata",
+                  "message": "frontmatter is missing 'license'; every peer skill has it."
+                },
+                {
+                  "severity": "warning",
+                  "rule": "missing-metadata",
+                  "message": "frontmatter is missing metadata.hermes.{tags, related_skills}."
+                },
+                {
+                  "severity": "warning",
+                  "rule": "missing-section",
+                  "message": "no '## When to Use' section found; skills need explicit trigger conditions near the top."
+                }
+              ],
+              "lint_hint": "The write succeeded. These are advisory authoring-convention findings (not blockers) — fix them with skill_manage(action='patch') to match Hermes skill standards."
+            }
+          ]
+        },
+        "operation": {
+          "name": "agent-integration-acceptance",
+          "action": "create",
+          "file_path": null,
+          "success": true,
+          "lint_warnings": [
+            {
+              "severity": "warning",
+              "rule": "missing-metadata",
+              "message": "frontmatter is missing 'version'; every peer skill has it."
+            },
+            {
+              "severity": "warning",
+              "rule": "missing-metadata",
+              "message": "frontmatter is missing 'author'; every peer skill has it."
+            },
+            {
+              "severity": "warning",
+              "rule": "missing-metadata",
+              "message": "frontmatter is missing 'license'; every peer skill has it."
+            },
+            {
+              "severity": "warning",
+              "rule": "missing-metadata",
+              "message": "frontmatter is missing metadata.hermes.{tags, related_skills}."
+            },
+            {
+              "severity": "warning",
+              "rule": "missing-section",
+              "message": "no '## When to Use' section found; skills need explicit trigger conditions near the top."
+            }
+          ],
+          "lint_hint": "The write succeeded. These are advisory authoring-convention findings (not blockers) — fix them with skill_manage(action='patch') to match Hermes skill standards."
+        }
+      },
+      {
+        "tool": "skill_manage",
+        "action": null,
+        "name": null,
+        "target": null,
+        "call_id": "call_9275f2db09774e7389a528ec778e43e5",
+        "result": {
+          "success": true,
+          "operations_applied": 2,
+          "results": [
+            {
+              "name": "agent-integration-acceptance",
+              "action": "patch",
+              "file_path": null,
+              "success": true
+            },
+            {
+              "name": "agent-integration-acceptance",
+              "action": "patch",
+              "file_path": null,
+              "success": true
+            }
+          ]
+        },
+        "operation": {
+          "name": "agent-integration-acceptance",
+          "action": "patch",
+          "file_path": null,
+          "success": true
+        }
+      },
+      {
+        "tool": "skill_manage",
+        "action": null,
+        "name": null,
+        "target": null,
+        "call_id": "call_9275f2db09774e7389a528ec778e43e5",
+        "result": {
+          "success": true,
+          "operations_applied": 2,
+          "results": [
+            {
+              "name": "agent-integration-acceptance",
+              "action": "patch",
+              "file_path": null,
+              "success": true
+            },
+            {
+              "name": "agent-integration-acceptance",
+              "action": "patch",
+              "file_path": null,
+              "success": true
+            }
+          ]
+        },
+        "operation": {
+          "name": "agent-integration-acceptance",
+          "action": "patch",
+          "file_path": null,
+          "success": true
+        }
+      }
+    ],
+    "staged": [],
+    "refused": [],
+    "uncertain": [],
+    "usage": {
+      "model": "gpt-6.1-sol",
+      "provider": "openai-codex",
+      "base_url": "https://chatgpt.com/backend-api/codex",
+      "input_tokens": 16300,
+      "output_tokens": 3252,
+      "cache_read_tokens": 68608,
+      "cache_write_tokens": 0,
+      "reasoning_tokens": 2419,
+      "api_calls": 6,
+      "estimated_cost_usd": 0.0
+    },
+    "error": null,
+    "run_status": "completed",
+    "no_change": false,
+    "id": "real-provider-probe-69fe931ccb754496910395759a1cc88d:attempt",
+    "intent_id": "fc5fd0065adae145f398818bbf9cc1fbd85c6f953e79236e1a6598b531d829c7"
+  },
+  "usage": {
+    "source_execution": null,
+    "native_auxiliary_by_session": {
+      "observed-0cedee202503ec1e3f965cb78a7979ff": {
+        "background_review": {
+          "api_calls": 6,
+          "input_tokens": 16300,
+          "output_tokens": 3252,
+          "cache_read_tokens": 68608,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 2419,
+          "estimated_cost_usd": 0.0
+        }
+      }
+    },
+    "external_provider_usage": null,
+    "attempt_usage_overlaps_native_ledger": true
+  },
+  "close_scope": {
+    "status": "closed",
+    "provider_drain": null
+  },
+  "owner_close": {
+    "provider_drains": []
+  }
+}

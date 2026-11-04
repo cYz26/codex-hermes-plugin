@@ -1,0 +1,49 @@
+▶ not activated — using HERMES_PYTHON: /Users/cy/.hermes-codex-learning/runtime-v0.22.7/bin/python
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 23 test files (~286 tests) under ['tests/agent/test_background_review.py', 'tests/agent/test_background_review_cache_parity.py', 'tests/agent/test_background_review_cost_controls.py', 'tests/agent/test_background_review_input_budget.py', 'tests/agent/test_background_review_list_shapes.py', 'tests/agent/test_background_review_memory_scope.py', 'tests/agent/test_background_review_routed_effort.py', 'tests/agent/test_background_review_summary.py', 'tests/agent/test_background_review_tool_call_guard.py', 'tests/agent/test_background_review_toolset_restriction.py', 'tests/agent/test_background_review_usage.py', 'tests/agent/test_codex_app_server_integration.py', 'tests/tools/test_skill_lock.py', 'tests/tools/test_skill_manager_tool.py', 'tests/agent/test_learning_service.py', 'tests/agent/test_learning_native_loop.py', 'tests/hermes_cli/test_plugin_learning_api.py', 'tests/hermes_cli/test_learning_profile_auth.py', 'tests/hermes_cli/test_auth_profile_fallback.py', 'tests/agent/test_credential_pool_oauth_writethrough.py', 'tests/agent/test_credential_pool_codex_singleton_isolation.py', 'tests/agent/test_credential_pool_profile_oauth_fork.py', 'tests/hermes_cli/test_plugin_capabilities.py']; running with -j 10
+[  1.0% |     3/~286 | ✓3 | ✗0] ✓ tests/agent/test_background_review_list_shapes.py (3✓, 0.9s)
+[  4.5% |    13/~286 | ✓13 | ✗ 0] ✓ tests/agent/test_background_review_cost_controls.py (10✓, 1.2s)
+[  7.0% |    20/~286 | ✓20 | ✗ 0] ✓ tests/agent/test_background_review_usage.py (7✓, 1.2s)
+[  7.7% |    22/~286 | ✓22 | ✗ 0] ✓ tests/agent/test_background_review_routed_effort.py (2✓, 2.2s)
+[  9.4% |    27/~286 | ✓27 | ✗ 0] ✓ tests/agent/test_background_review_summary.py (5✓, 2.3s)
+[ 10.8% |    31/~286 | ✓31 | ✗ 0] ✓ tests/agent/test_background_review_tool_call_guard.py (4✓, 2.4s)
+[ 14.0% |    40/~286 | ✓41 | ✗ 0] ✓ tests/agent/test_background_review_memory_scope.py (10✓, 2.7s)
+[ 14.7% |    42/~286 | ✓43 | ✗ 0] ✓ tests/agent/test_credential_pool_codex_singleton_isolation.py (2✓, 0.6s)
+[ 16.4% |    47/~286 | ✓48 | ✗ 0] ✓ tests/agent/test_credential_pool_oauth_writethrough.py (5✓, 0.9s)
+[ 18.2% |    52/~286 | ✓53 | ✗ 0] ✓ tests/agent/test_background_review_toolset_restriction.py (5✓, 3.4s)
+[ 21.3% |    61/~286 | ✓62 | ✗ 0] ✓ tests/agent/test_learning_service.py (9✓, 0.9s)
+[ 23.4% |    67/~286 | ✓71 | ✗ 0] ✓ tests/agent/test_background_review_input_budget.py (9✓, 3.8s)
+[ 28.7% |    82/~286 | ✓86 | ✗ 0] ✓ tests/agent/test_background_review.py (15✓, 3.9s)
+[ 29.4% |    84/~286 | ✓88 | ✗ 0] ✓ tests/hermes_cli/test_learning_profile_auth.py (2✓, 1.1s)
+[ 33.2% |    95/~286 | ✓99 | ✗ 0] ✓ tests/hermes_cli/test_auth_profile_fallback.py (11✓, 1.3s)
+[ 37.4% |   107/~286 | ✓111 | ✗  0] ✓ tests/agent/test_background_review_cache_parity.py (12✓, 4.2s)
+[ 37.8% |   108/~286 | ✓112 | ✗  0] ✓ tests/hermes_cli/test_plugin_learning_api.py (1✓, 0.8s)
+[ 50.3% |   144/~286 | ✓148 | ✗  0] ✓ tests/hermes_cli/test_plugin_capabilities.py (36✓, 2.2s)
+[ 61.5% |   176/~286 | ✓191 | ✗  0] ✓ tests/agent/test_credential_pool_profile_oauth_fork.py (43✓, 4.0s)
+[ 62.6% |   179/~286 | ✓224 | ✗  0] ✓ tests/tools/test_skill_lock.py (33✓, 3.2s)
+[ 63.3% |   181/~286 | ✓227 | ✗  0] ✓ tests/agent/test_learning_native_loop.py (3✓, 5.4s)
+[ 90.2% |   258/~286 | ✓312 | ✗  0] ✓ tests/tools/test_skill_manager_tool.py (85✓, 5.7s)
+[100.0% |   286/~286 | ✓343 | ✗  0] ✓ tests/agent/test_codex_app_server_integration.py (31✓, 13.6s)
+
+=== Summary: 23 files, 343 tests passed, 0 failed (100% complete) in 14.9s (10 workers) ===
+  Durations cached to test_durations.json (23 files)
+
+=== Per-file subprocess time distribution ===
+  Files:   23
+  Total subprocess CPU-wall: 67.9s  (runner wall: 14.9s, parallelism: 10x)
+  P50: 2.27s  P90: 5.45s  P95: 5.65s  P99: 13.58s  Max: 13.58s
+  <1s: 5 files (22%)  <2s: 9 files (39%)
+  Top 10 slowest:
+     13.58s  tests/agent/test_codex_app_server_integration.py
+      5.65s  tests/tools/test_skill_manager_tool.py
+      5.45s  tests/agent/test_learning_native_loop.py
+      4.18s  tests/agent/test_background_review_cache_parity.py
+      3.96s  tests/agent/test_credential_pool_profile_oauth_fork.py
+      3.87s  tests/agent/test_background_review.py
+      3.81s  tests/agent/test_background_review_input_budget.py
+      3.35s  tests/agent/test_background_review_toolset_restriction.py
+      3.19s  tests/tools/test_skill_lock.py
+      2.67s  tests/agent/test_background_review_memory_scope.py

@@ -1,0 +1,5 @@
+
+=== health (ok) ===
+code health: 14 files vs b200f5bc60e3: 0 blocking, 0 advisory (1.6s)
+
+scripts/check: 14 checks, ok

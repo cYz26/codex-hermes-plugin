@@ -1,0 +1,28 @@
+▶ not activated — using HERMES_PYTHON: /Users/cy/.hermes-codex-learning/runtime-v0.22.7/bin/python
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 6 test files (~53 tests) under ['tests/hermes_cli/test_learning_profile_auth.py', 'tests/agent/test_learning_native_loop.py', 'tests/hermes_cli/test_auth_profile_fallback.py', 'tests/agent/test_credential_pool_oauth_writethrough.py', 'tests/agent/test_credential_pool_codex_singleton_isolation.py', 'tests/agent/test_credential_pool_profile_oauth_fork.py']; running with -j 10
+[  3.8% |     2/~53 | ✓2 | ✗0] ✓ tests/agent/test_credential_pool_codex_singleton_isolation.py (2✓, 1.2s)
+[ 13.2% |     7/~53 | ✓7 | ✗0] ✓ tests/agent/test_credential_pool_oauth_writethrough.py (5✓, 1.3s)
+[ 17.0% |     9/~53 | ✓9 | ✗0] ✓ tests/hermes_cli/test_learning_profile_auth.py (2✓, 1.6s)
+[ 37.7% |    20/~53 | ✓20 | ✗ 0] ✓ tests/hermes_cli/test_auth_profile_fallback.py (11✓, 1.7s)
+[ 98.1% |    52/~53 | ✓63 | ✗ 0] ✓ tests/agent/test_credential_pool_profile_oauth_fork.py (43✓, 5.0s)
+[100.0% |    53/~53 | ✓65 | ✗ 0] ✓ tests/agent/test_learning_native_loop.py (2✓, 6.8s)
+
+=== Summary: 6 files, 65 tests passed, 0 failed (100% complete) in 7.2s (10 workers) ===
+  Durations cached to test_durations.json (6 files)
+
+=== Per-file subprocess time distribution ===
+  Files:   6
+  Total subprocess CPU-wall: 17.5s  (runner wall: 7.2s, parallelism: 10x)
+  P50: 1.71s  P90: 6.78s  P95: 6.78s  P99: 6.78s  Max: 6.78s
+  <1s: 0 files (0%)  <2s: 4 files (67%)
+  Top 10 slowest:
+      6.78s  tests/agent/test_learning_native_loop.py
+      5.00s  tests/agent/test_credential_pool_profile_oauth_fork.py
+      1.71s  tests/hermes_cli/test_auth_profile_fallback.py
+      1.61s  tests/hermes_cli/test_learning_profile_auth.py
+      1.25s  tests/agent/test_credential_pool_oauth_writethrough.py
+      1.16s  tests/agent/test_credential_pool_codex_singleton_isolation.py

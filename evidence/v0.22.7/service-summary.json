@@ -1,0 +1,12 @@
+{
+  "state": "idle",
+  "error": null,
+  "api_version": 1,
+  "observation_projection_gaps": 0,
+  "intent_count": 1,
+  "attempt_count": 1,
+  "native_background_review_api_calls": 6,
+  "persisted_usage_recovered": true,
+  "real_app_hooks_verified": false,
+  "source_evidence_sha256": "5f59dda5d5cc58dec3f0f6f172d6f42ae1dbc88aee6d8cb351d51360e4f7b30a"
+}

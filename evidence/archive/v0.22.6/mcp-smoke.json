@@ -1,0 +1,97 @@
+{
+  "provider": "none",
+  "real_app": false,
+  "responses": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {
+          "tools": {}
+        },
+        "serverInfo": {
+          "name": "hermes-learning",
+          "version": "0.1.2"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "tools": [
+          {
+            "name": "learning_status",
+            "description": "Read Hermes learning progress, applied/staged changes and actual model usage. Does not trigger learning.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          {
+            "name": "context",
+            "description": "Read the pilot project's learned memory and available skill versions. Listing does not count as skill use.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          {
+            "name": "skill_load",
+            "description": "Load the complete, current Hermes learned skill and supporting resources when relevant to the task. Returns a version and delivery receipt.",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "file_path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"capture_coverage_gaps\": [], \"error\": null, \"snapshot\": {\"attempts\": [], \"closures\": [], \"daemon\": \"idle\", \"intents\": [], \"projection_gaps\": [], \"updated_at\": 1793726975.284798, \"usage\": {\"attempt_usage_overlaps_native_ledger\": true, \"external_provider_usage\": null, \"native_auxiliary_by_session\": null, \"source_execution\": null}, \"version\": 1}, \"state\": \"idle\"}"
+          }
+        ],
+        "structuredContent": {
+          "capture_coverage_gaps": [],
+          "error": null,
+          "snapshot": {
+            "attempts": [],
+            "closures": [],
+            "daemon": "idle",
+            "intents": [],
+            "projection_gaps": [],
+            "updated_at": 1793726975.284798,
+            "usage": {
+              "attempt_usage_overlaps_native_ledger": true,
+              "external_provider_usage": null,
+              "native_auxiliary_by_session": null,
+              "source_execution": null
+            },
+            "version": 1
+          },
+          "state": "idle"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "hermes_learning": {
+      "command": "${PLUGIN_ROOT}/scripts/bridge",
+      "args": ["mcp"]
+    }
+  }
+}

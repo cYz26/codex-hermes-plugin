@@ -1,0 +1,10 @@
+{
+  "name": "hermes-learning-local",
+  "interface": {"displayName": "Hermes Learning Local"},
+  "plugins": [{
+    "name": "hermes-learning",
+    "source": {"source": "local", "path": "."},
+    "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+    "category": "Developer Tools"
+  }]
+}

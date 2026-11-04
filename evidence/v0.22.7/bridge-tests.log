@@ -1,0 +1,14 @@
+test_daemon_down_capture_is_durable_and_replay_is_idempotent (test_bridge.BridgeTests.test_daemon_down_capture_is_durable_and_replay_is_idempotent) ... ok
+test_idle_flush_requires_terminal_latest_turn_not_silence (test_bridge.BridgeTests.test_idle_flush_requires_terminal_latest_turn_not_silence) ... ok
+test_missing_source_identity_is_explicit_not_content_hash_counting (test_bridge.BridgeTests.test_missing_source_identity_is_explicit_not_content_hash_counting) ... ok
+test_redacts_credentials_without_changing_ordinary_evidence (test_bridge.BridgeTests.test_redacts_credentials_without_changing_ordinary_evidence) ... ok
+test_running_command_does_not_become_idle_until_late_completion (test_bridge.BridgeTests.test_running_command_does_not_become_idle_until_late_completion) ... ok
+test_scoping_and_context_delivery_are_independent_of_notices (test_bridge.BridgeTests.test_scoping_and_context_delivery_are_independent_of_notices) ... ok
+test_foreign_profile_cannot_redirect_learning_state (test_profile_auth.ProfileAuthTests.test_foreign_profile_cannot_redirect_learning_state) ... ok
+test_launchd_carries_the_same_profile_as_cli_and_probe (test_profile_auth.ProfileAuthTests.test_launchd_carries_the_same_profile_as_cli_and_probe) ... ok
+test_native_environment_preserves_profile_spelling_and_private_data (test_profile_auth.ProfileAuthTests.test_native_environment_preserves_profile_spelling_and_private_data) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.022s
+
+OK

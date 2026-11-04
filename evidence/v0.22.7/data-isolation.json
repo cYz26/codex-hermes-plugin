@@ -1,0 +1,12 @@
+{
+  "exit_code": 0,
+  "duration_seconds": 108.23,
+  "app_learning_files_before": 437,
+  "app_learning_files_after": 437,
+  "app_memories_and_skills_unchanged": true,
+  "profile_auth_file_created": false,
+  "data_home": "/Users/cy/.hermes-codex-learning/pilot",
+  "app_home": "/Users/cy/.hermes",
+  "real_app_hook_evidence": false,
+  "fingerprint_method": "relative file path, size, and mtime_ns; root contents were not copied"
+}

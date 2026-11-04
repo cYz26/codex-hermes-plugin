@@ -1,0 +1,25 @@
+{
+  "installed_version": "0.1.3",
+  "source_cache_match": true,
+  "runtime_files_compared": 17,
+  "real_app": false,
+  "transport": "actual_installed_stdio_mcp_to_launchd_unix_socket",
+  "artifact_content_hash_verified": true,
+  "native_review_api_calls_before": 6,
+  "native_review_api_calls_after": 6,
+  "additional_review_calls": 0,
+  "persisted_usage_recovered_after_restart": true,
+  "verified_methods": [
+    "initialize",
+    "tools/list",
+    "learning_status",
+    "context",
+    "skill_load"
+  ],
+  "skill": {
+    "name": "agent-integration-acceptance",
+    "version": "cdedc3b79209e7548e0bce397010fc621b360b7156f6739fabf85acb168fb566",
+    "content_hash": "62008f41aac118b24aa0d9b36dfd28a071536648cae855acc4c72dfc972afc54"
+  },
+  "source_evidence_sha256": "11b4ebbb66ae6c5613af0859d41b1835dc975a84c720a01baf62772ad828a771"
+}

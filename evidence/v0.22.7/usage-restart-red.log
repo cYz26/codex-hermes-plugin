@@ -1,0 +1,97 @@
+▶ not activated — using HERMES_PYTHON: /Users/cy/.hermes-codex-learning/runtime-v0.22.7/bin/python
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 1 test files (~2 tests) under ['tests/agent/test_learning_native_loop.py']; running with -j 10
+[100.0% |     2/~2 | ✓2 | ✗1] ✗ tests/agent/test_learning_native_loop.py (2✓ 1✗, 7.1s)
+
+  ╔╍ Failed: tests/agent/test_learning_native_loop.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+  ║ 
+  ║ tests/agent/test_learning_native_loop.py ..F                             [100%]
+  ║ 
+  ║ =================================== FAILURES ===================================
+  ║ ____________ test_native_usage_is_read_after_observer_owner_restart ____________
+  ║ 
+  ║ tmp_path = PosixPath('/private/var/tmp/hermes-pytest-501/r-w1k2p_jz/pytest-of-cy/pytest-0/test_native_usage_is_read_afte0')
+  ║ monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110e82330>
+  ║ 
+  ║     def test_native_usage_is_read_after_observer_owner_restart(tmp_path, monkeypatch):
+  ║         from agent.learning_runtime import NativeLearningRuntime
+  ║         from hermes_state import SessionDB
+  ║     
+  ║         home = tmp_path / "usage-profile"
+  ║         home.mkdir()
+  ║         monkeypatch.setenv("HERMES_HOME", str(home))
+  ║         db = SessionDB()
+  ║         db.record_auxiliary_usage("observed-fixture", "background_review", api_call_count=6, input_tokens=123)
+  ║         db.close()
+  ║         runtime = NativeLearningRuntime()
+  ║         try:
+  ║             usage = runtime.usage(["observed-fixture"])
+  ║ >           assert usage["observed-fixture"]["background_review"]["api_calls"] == 6
+  ║                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  ║ E           TypeError: 'NoneType' object is not subscriptable
+  ║ 
+  ║ tests/agent/test_learning_native_loop.py:123: TypeError
+  ║ =========================== short test summary info ============================
+  ║ FAILED tests/agent/test_learning_native_loop.py::test_native_usage_is_read_after_observer_owner_restart
+  ║ ========================= 1 failed, 2 passed in 3.11s ==========================
+  ║
+  ║  Repro: python -m pytest tests/agent/test_learning_native_loop.py
+  ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
+
+=== Summary: 1 files, 2 tests passed, 1 failed; FAILED: 1 of 1 file (100% complete) in 7.1s (10 workers) ===
+
+=== Per-file subprocess time distribution ===
+  Files:   1
+  Total subprocess CPU-wall: 7.1s  (runner wall: 7.1s, parallelism: 10x)
+  P50: 7.10s  P90: 7.10s  P95: 7.10s  P99: 7.10s  Max: 7.10s
+  <1s: 0 files (0%)  <2s: 0 files (0%)
+  Top 10 slowest:
+      7.10s  tests/agent/test_learning_native_loop.py
+
+=== Failure output ===
+
+--- tests/agent/test_learning_native_loop.py ---
+============================= test session starts ==============================
+platform darwin -- Python 3.14.9, pytest-9.1.1, pluggy-1.7.0
+rootdir: /Users/cy/Dev/agents-dev/hermes-learning-core
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.15.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+tests/agent/test_learning_native_loop.py ..F                             [100%]
+
+=================================== FAILURES ===================================
+____________ test_native_usage_is_read_after_observer_owner_restart ____________
+
+tmp_path = PosixPath('/private/var/tmp/hermes-pytest-501/r-w1k2p_jz/pytest-of-cy/pytest-0/test_native_usage_is_read_afte0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x110e82330>
+
+    def test_native_usage_is_read_after_observer_owner_restart(tmp_path, monkeypatch):
+        from agent.learning_runtime import NativeLearningRuntime
+        from hermes_state import SessionDB
+    
+        home = tmp_path / "usage-profile"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        db = SessionDB()
+        db.record_auxiliary_usage("observed-fixture", "background_review", api_call_count=6, input_tokens=123)
+        db.close()
+        runtime = NativeLearningRuntime()
+        try:
+            usage = runtime.usage(["observed-fixture"])
+>           assert usage["observed-fixture"]["background_review"]["api_calls"] == 6
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+E           TypeError: 'NoneType' object is not subscriptable
+
+tests/agent/test_learning_native_loop.py:123: TypeError
+=========================== short test summary info ============================
+FAILED tests/agent/test_learning_native_loop.py::test_native_usage_is_read_after_observer_owner_restart
+========================= 1 failed, 2 passed in 3.11s ==========================
+
+=== 1 file with test failures ===
+  tests/agent/test_learning_native_loop.py  (1 test failed)
