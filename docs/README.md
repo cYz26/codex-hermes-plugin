@@ -1,10 +1,14 @@
 # 文档索引
 
-当前目标为官方 Hermes **v0.22.7**＋Learning API v1 补丁、外围插件 **0.1.3**、模型 **gpt-6.1-sol / Max**。学习服务复用已有 Hermes 登录，学习数据独立。
+当前目标为官方 Hermes **v0.22.7**＋Learning API v1 补丁、外围插件 **0.2.1**、模型 **gpt-6.1-sol / Max**。学习服务复用已有 Hermes 登录，学习数据独立。
 
 | 文档 | 用途 |
 | --- | --- |
+| [全局启用](./GLOBAL-ROLLOUT.zh-CN.md) | 全局采集、项目记忆、共享技能、部署与宿主信任状态 |
 | [整体方案](./ARCHITECTURE.zh-CN.md) | 架构、原生能力边界、认证、数据、触发、反馈、tokens、验收和升级 |
+| [学习 profile 与 Hermes App](./PROFILE-DESKTOP.zh-CN.md) | 后台专用定位、App 切换报错的复现和当前查看方式 |
+| [真实 Codex App 续验](./APP-VALIDATION.zh-CN.md) | 0.1.6 单项目闭环、信任恢复、真实版本交付、通知与边界 |
+| [0.2.2 验收](./RELEASE-0.2.2.zh-CN.md) | Curator 到期、通知点击、注入上限、两组同任务用量和复验命令 |
 | [工程入口](../README.md) | 安装、运行、目录结构和可移植检查命令 |
 | [当前方案摘要](../HERMES-CODEX-PLAN.md) | 当前实现分工与策略 |
 | [Learning API 合同](../HERMES-CODEX-EXTENSION-REVIEW.md) | v1 接口、持久化、故障语义和支持边界 |

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-05T14:30:46.274219+08:00",
+  "status": "passed",
+  "scope": "single local project, actual Codex App tool-created chats A/B; includes B captured followups after hook re-trust",
+  "evidence": {
+    "A": "evidence/v0.22.7/app-chat-a.json",
+    "B_initial": "evidence/v0.22.7/app-chat-b-initial.json",
+    "B_captured": "evidence/v0.22.7/app-chat-b-captured.json",
+    "host_trust": "evidence/v0.22.7/app-hooks-retrusted.json",
+    "runtime": "evidence/v0.22.7/peripheral-v0.1.6-runtime.json",
+    "B_automatic_review": "evidence/v0.22.7/app-chat-b-review.json"
+  },
+  "gates": {
+    "A_real_App_execution": true,
+    "A_automatic_native_learning": true,
+    "B_initial_implicit_recall": true,
+    "B_post_retrust_hook_capture": true,
+    "B_post_retrust_native_body_delivery": true,
+    "B_delivered_A_artifact_version": true,
+    "B_fixture_business_checks": true,
+    "user_chat_feedback_observed": true,
+    "B_automatic_native_learning": true,
+    "user_system_notification_observed": true
+  },
+  "limits": {
+    "B_initial_hooks_missing": true,
+    "B_version_verification_was_explicit": true,
+    "causal_quality_improvement_verified": false,
+    "normal_composer_entry_path_tested": false,
+    "cross_project_rollout_tested": false,
+    "full_App_lifecycle_tested": false,
+    "Curator_real_due_cycle_tested": false,
+    "actual_cost_comparison_available": false,
+    "strict_256_token_cap_implemented": false,
+    "os_notification_visibility": "observed_by_user_for_B_completed_review"
+  },
+  "automatic_cycles": {
+    "A_applied": 10,
+    "B_applied": 3,
+    "both_review_api_calls": 8,
+    "historical_synthetic_probe_api_calls": 6,
+    "actual_fee_usd": null
+  }
+}

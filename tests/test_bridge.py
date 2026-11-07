@@ -38,16 +38,19 @@ class BridgeTests(unittest.TestCase):
         hook(second, self.settings)
         self.assertEqual(len(self.store.pending()), 2)
 
-    def test_scoping_and_context_delivery_are_independent_of_notices(self):
+    def test_hook_delivers_context_without_consuming_learning_notices(self):
         self.store.notice({"id": "review-1", "message": "已更新技能"})
         atomic_json(self.settings.state / "context.json", {"version": "v1", "summary": "验证前保留输入证据"})
         first = hook(self.event("SessionStart"), self.settings)
-        self.assertIn("已更新", first["systemMessage"])
+        self.assertNotIn("systemMessage", first)
         self.assertIn("验证前", first["hookSpecificOutput"]["additionalContext"])
         self.assertEqual(hook(self.event("UserPromptSubmit", prompt="next"), self.settings), {})
         second_chat = hook({**self.event("SessionStart"), "session_id": "chat-b"}, self.settings)
         self.assertIn("hookSpecificOutput", second_chat)
         self.assertEqual(hook({**self.event("Stop"), "cwd": "/unrelated"}, self.settings), {})
+        self.assertEqual(hook(self.event("Stop"), self.settings), {})
+        self.assertTrue(any(json.loads(row["payload"])["hook_event_name"] == "Stop" for row in self.store.pending()))
+        self.assertIsNone(self.store.db.execute("SELECT 1 FROM deliveries WHERE consumer='chat-ui'").fetchone())
         self.assertEqual(len(self.store.consume("os-notification")), 1)
 
     def test_running_command_does_not_become_idle_until_late_completion(self):
@@ -97,6 +100,31 @@ class BridgeTests(unittest.TestCase):
         bridge.idle_reviews()
         self.assertEqual(len(api.flushes), 1)
         bridge.store.close()
+
+    def test_completed_chat_can_learn_while_another_main_chat_is_running(self):
+        from dataclasses import replace
+        from hermes_codex_learning.daemon import Bridge
+
+        class API:
+            def __init__(self):
+                self.flushes = []
+
+            def open(self, source):
+                return {"handle": source["chat"]}
+
+            def maintenance(self, **kwargs):
+                self.flushes.append(kwargs)
+
+        api = API()
+        bridge = Bridge(replace(self.settings, idle_seconds=0, idle_interval=0), api)
+        try:
+            self.merge(self.event("UserPromptSubmit", prompt="Task A"))
+            self.merge(self.event("Stop", last_assistant_message="Done"))
+            self.merge(self.event("UserPromptSubmit", session_id="chat-b", turn_id="turn-b", prompt="Monitor A"))
+            bridge.idle_reviews()
+            self.assertEqual(api.flushes, [{"handle": "chat-a", "idle_flush": True}])
+        finally:
+            bridge.store.close()
 
 
 if __name__ == "__main__":

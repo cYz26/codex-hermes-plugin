@@ -1,0 +1,167 @@
+{
+  "source_attempt": "8e0dffb2-d1c1-4402-b511-8857146ac07d",
+  "source_project": "/Users/cy/Dev/dev001",
+  "source_trigger": "native_threshold",
+  "source_attempt_status": "completed",
+  "source_applied_to_shared_skill": [
+    {
+      "action": "patch",
+      "name": "agent-integration-acceptance",
+      "file_path": null,
+      "success": true
+    },
+    {
+      "action": "patch",
+      "name": "agent-integration-acceptance",
+      "file_path": "references/receipt-evidence.md",
+      "success": true
+    }
+  ],
+  "target_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+  "target_plugin_version": "0.2.1",
+  "deliveries": [
+    {
+      "source_event_id": "0dd7e3ac-b394-480c-abbe-b6f49e3b166e",
+      "actual_caller_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "version": "ddaf6aad02f2c25ca7a1236ffb1784ff2baa317f25c1237ef76bd7a1884aded0",
+      "file_path": "references/global-rollout.md",
+      "content_hash": "58cfeb7e05cabc2209644294fe1f3cee8087448942fa7ef7af81f9379710913f",
+      "source_projects": [
+        "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "/Users/cy/Dev/dev001"
+      ],
+      "status": "recorded",
+      "evidence": {
+        "source_event": [
+          "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+          "01a1b608-bea4-7c13-93cb-61c20cd0b9a4",
+          "exec-98f04b5a-bd7f-49eb-ada0-ff8d111932a4"
+        ],
+        "stage": "body_delivered"
+      }
+    },
+    {
+      "source_event_id": "b87395ed-c137-400d-a9dc-ed45420d16fd",
+      "actual_caller_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "version": "ddaf6aad02f2c25ca7a1236ffb1784ff2baa317f25c1237ef76bd7a1884aded0",
+      "file_path": "SKILL.md",
+      "content_hash": "1e12c4557a80fbc85fc0e5ff93b34ac910b04d621c578b09f6b0f5084450a861",
+      "source_projects": [
+        "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "/Users/cy/Dev/dev001"
+      ],
+      "status": "recorded",
+      "evidence": {
+        "source_event": [
+          "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+          "01a1b608-bea4-7c13-93cb-61c20cd0b9a4",
+          "exec-45fa4a02-265c-4c9d-9a25-e49791baddf3"
+        ],
+        "stage": "body_delivered"
+      }
+    },
+    {
+      "source_event_id": "61a9875c-f348-402f-97cc-167c40961957",
+      "actual_caller_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "version": "ddaf6aad02f2c25ca7a1236ffb1784ff2baa317f25c1237ef76bd7a1884aded0",
+      "file_path": "references/receipt-evidence.md",
+      "content_hash": "0afb901d9549ccc75b52ff1cd7ff44135e9e91778e74758085f4504cf54bec34",
+      "source_projects": [
+        "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "/Users/cy/Dev/dev001"
+      ],
+      "status": "recorded",
+      "evidence": {
+        "source_event": [
+          "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+          "01a1b608-bea4-7c13-93cb-61c20cd0b9a4",
+          "exec-8d74bd82-736d-4548-8f32-ce15dc0f9cae"
+        ],
+        "stage": "body_delivered"
+      }
+    }
+  ],
+  "target_access": "actual_App_MCP",
+  "claim": "Native body delivery of a shared procedure across real projects. Source review predates 0.2.1 verification training.",
+  "during_two_project_loop": {
+    "name": "agent-integration-acceptance",
+    "source_project": "/Users/cy/Dev/dev001",
+    "source_attempt": "6619a148-facb-443d-80db-0783cc1b56d7",
+    "target_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+    "version": "678c66358559b2ba85966825b0f81491e19800edc5da7fc7e6a8672384c9e2a5",
+    "deliveries": [
+      {
+        "source_event_id": "392c57af-b38a-4905-b725-bed4a537c29c",
+        "caller_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "request_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "source_projects": [
+          "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "/Users/cy/Dev/dev001"
+        ],
+        "file_path": "references/receipt-evidence.md",
+        "content_hash": "96c49e4d9bc8277daa222c108520647f060681cada406467b14a70215e399236",
+        "version": "678c66358559b2ba85966825b0f81491e19800edc5da7fc7e6a8672384c9e2a5",
+        "status": "recorded",
+        "source_event": [
+          "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+          "01a1b608-bea4-7c13-93cb-61c20cd0b9a4",
+          "exec-7292a53e-66ea-4ecc-b8cb-dfeb4695422e"
+        ],
+        "stage": "body_delivered"
+      },
+      {
+        "source_event_id": "15bc1ccb-7929-4975-9b16-bba1e38468da",
+        "caller_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "request_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "source_projects": [
+          "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "/Users/cy/Dev/dev001"
+        ],
+        "file_path": "SKILL.md",
+        "content_hash": "03db872925b0e6d4d2aad7e4b4014550688bbb8d046346fef9b978127d62f849",
+        "version": "678c66358559b2ba85966825b0f81491e19800edc5da7fc7e6a8672384c9e2a5",
+        "status": "recorded",
+        "source_event": [
+          "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+          "01a1b608-bea4-7c13-93cb-61c20cd0b9a4",
+          "exec-f94cc0aa-f623-44b1-bb38-9d37786f1ac7"
+        ],
+        "stage": "body_delivered"
+      }
+    ],
+    "artifact_files": [
+      {
+        "path": "SKILL.md",
+        "content_hash": "03db872925b0e6d4d2aad7e4b4014550688bbb8d046346fef9b978127d62f849",
+        "contains_test_labels": {
+          "A": false,
+          "B": false
+        }
+      },
+      {
+        "path": "references/global-rollout.md",
+        "content_hash": "58cfeb7e05cabc2209644294fe1f3cee8087448942fa7ef7af81f9379710913f",
+        "contains_test_labels": {
+          "A": false,
+          "B": false
+        }
+      },
+      {
+        "path": "references/receipt-evidence.md",
+        "content_hash": "96c49e4d9bc8277daa222c108520647f060681cada406467b14a70215e399236",
+        "contains_test_labels": {
+          "A": false,
+          "B": false
+        }
+      }
+    ],
+    "source_operations": [
+      {
+        "action": "patch",
+        "file_path": "references/receipt-evidence.md",
+        "name": "agent-integration-acceptance",
+        "success": true
+      }
+    ]
+  }
+}

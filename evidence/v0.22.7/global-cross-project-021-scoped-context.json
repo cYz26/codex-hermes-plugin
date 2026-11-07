@@ -1,0 +1,52 @@
+{
+  "transport": "read-only live bridge scoped context RPC",
+  "version": "0.2.1",
+  "before": {
+    "time": "2026-11-07T21:09:23.066137+08:00",
+    "labels_already_in_published_memories": {
+      "A": false,
+      "B": false
+    }
+  },
+  "after": {
+    "A": {
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "own_in_full_scope": true,
+      "other_in_full_scope": false,
+      "own_in_hook_summary": false,
+      "other_in_hook_summary": false,
+      "memory_origin": [
+        {
+          "target": "MEMORY.md",
+          "entry_digest": "0c81c2e9726f51713acc8a1503b1b72f93d21aab723fc7a8e2848e89ded9658a",
+          "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "other_label_in_entry": false
+        }
+      ],
+      "scope_version": "5ec0ddf08a993171f7b8442ceb123d7d6db295181340ec5e8365eb9cbbf08e73"
+    },
+    "B": {
+      "project": "/Users/cy/Dev/dev001",
+      "own_in_full_scope": true,
+      "other_in_full_scope": false,
+      "own_in_hook_summary": true,
+      "other_in_hook_summary": false,
+      "memory_origin": [
+        {
+          "target": "MEMORY.md",
+          "entry_digest": "58249d89411190859053fe0d98f41a464df10c8f5444bace9cc326f71f52a9bb",
+          "project": "/Users/cy/Dev/dev001",
+          "other_label_in_entry": false
+        }
+      ],
+      "scope_version": "3d08326d402b8a5955552241f1061140959a480c764965355aa3adfd6e613fa5"
+    },
+    "unscoped": {
+      "memory_targets": [],
+      "labels_present": {
+        "A": false,
+        "B": false
+      }
+    }
+  }
+}

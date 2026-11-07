@@ -1,6 +1,6 @@
 # Codex 执行、Hermes 原生学习：当前方案
 
-2026-11-04，v0.22.7 已部署并完成本轮回归。运行说明见 [README](./README.md)，证据和剩余 App 验收见 [IMPLEMENTATION](./IMPLEMENTATION.md)。
+2026-11-07，v0.22.7 核心搭配外围 0.2.2。全局采集和个人知识库召回见 [全局启用记录](./docs/GLOBAL-ROLLOUT.zh-CN.md)，当前运行说明与验收分别见 [README](./README.md) 和 [0.2.2 验收](./docs/RELEASE-0.2.2.zh-CN.md)。
 
 ## 基线与扩展边界
 
@@ -10,7 +10,7 @@ Codex App 执行业务；外围插件负责真实 hooks、身份与覆盖缺口�
 
 ## 认证与数据
 
-学习数据仍独占 `/Users/cy/.hermes-codex-learning/pilot`。通过原生 profile 入口 `/Users/cy/.hermes/profiles/codex-learning-pilot` 继承现有 Hermes App 的认证；目录入口指向独立学习 home，凭据不复制，刷新按原生锁和源感知回写执行。配置 `gateway.standalone: true`，根 gateway 不接管此 profile。
+学习数据仍独占 `/Users/cy/.hermes-codex-learning/pilot`。通过隐藏入口 `/Users/cy/.hermes/profiles/.codex-learning-pilot` 和原生认证回退机制继承现有 Hermes App 的认证；目录入口指向独立学习 home，凭据不复制，刷新按原生锁和源感知回写执行。原生 profile 枚举跳过点号开头的入口，因此 App 与 Bots 不再展示它。后台通过 `bridge.json` 的显式 home 绑定运行，保留 `gateway.standalone: true`。
 
 模型固定 `gpt-6.1-sol / openai-codex / codex_responses`，用户指定 `agent.reasoning_effort: max`。同模型 review 继承该配置，不读取 Codex App 的模型选择或认证文件。已有 Hermes 登录无需再次授权。
 
@@ -20,12 +20,12 @@ Codex App 执行业务；外围插件负责真实 hooks、身份与覆盖缺口�
 
 journal 原子记录观察、计数、intent 和 receipt；原生转录以稳定 UID 投影。结果区分生效、暂存、拒绝和不明，未知工作不盲目重试。原生批量工具结果保留技能身份；旧 v1 收据可继续召回。owner 重启后读取持久化原生 usage。
 
-用户提示来自真实结果：hook 的 `systemMessage`、空闲时的系统通知，以及下一次安全点补收。模型通过约 256 tokens 的增量上下文获知成果；技能正文按需读取。通知用程序模板，不为通知额外启动模型。加载、采用和验证有效分别记录。
+系统通知基于原生复盘结果，点击打开本地回执。模型通过每次最多 256 字节的 hook `additionalContext` 获知项目经验，需要时通过 MCP 读取完整上下文或技能正文。通知使用程序模板。加载、采用和验证有效分别记录。
 
 ## 验证与升级
 
-本轮官方对照 328 项、带补丁 343 项、外围 9 项、原生检查 14 项通过。现有账号已完成真实模型复盘：1 条记忆、1 个创建后继续修订的技能；原 App 记忆／技能在验证时间窗内未变。已安装 MCP 能召回并读取真实技能，重启后 review usage 保持 6 次，读取未增加复盘调用。
+2026-11-04 原始核心验收中，官方对照 328 项、带补丁 343 项、外围 9 项、原生检查 14 项通过。现有账号已完成真实模型复盘：1 条记忆、1 个创建后继续修订的技能；原 App 记忆／技能在验证时间窗内未变。已安装 MCP 能召回并读取真实技能，重启后 review usage 保持 6 次，读取未增加复盘调用。
 
-真实模型输入明确标记为验收 fixture；真实 App hooks 信任、A→B 自动学习召回、提示样式及成本对照仍需单独验收。不会将本轮原生／stdio 测试冒充 App 证据。保留原生 token 分项，无法获取的使用／费用标为未知，不把缓存或双份账本重复累计。
+历史隔离探针与真实 App 验收分开记录。0.1.6 通过单项目 App 闭环，0.2.1 通过两个项目的自动学习、召回和共享技能验证。0.2.2 追加真实到期 Curator、点击通知、严格注入上限和两组同任务用量。证据和已知边界见 [发布验收](./docs/RELEASE-0.2.2.zh-CN.md)。
 
 Hermes 更新时先保留一致性快照，在官方稳定版候选中重放本项目补丁、回归后再切换。Codex 更新主要复核外围采集和提示适配。v1 保持 POSIX/in-process、单 home 单 owner；不承诺任意新版本自动兼容。

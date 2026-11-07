@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "date": "2026-11-07T20:39:53.831922+08:00",
+  "status": "global_enabled_and_current_App_capture_verified",
+  "capture_scope": "all_local_main_chats_with_actual_absolute_cwd",
+  "knowledge_policy": "personal_library_scoped_memory_shared_skills",
+  "native_patch_changed": false,
+  "native_files_match_manifest": 14,
+  "unit_regressions_passed": 32,
+  "installed_runtime_files_match": 21,
+  "host_trust_ready_in_cwds": [
+    "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+    "/Users/cy/Dev/dev001",
+    "/Users/cy"
+  ],
+  "user_retrusted": true,
+  "trust_database_modified_by_agent": false,
+  "actual_App_capture": true,
+  "actual_App_MCP": true,
+  "native_skill_body_delivered": 1,
+  "new_multi_project_App_learning_cycle": false,
+  "prior_single_project_App_learning_cycle": "passed_on_0.1.6",
+  "native_model_auth_and_write_policy_config_unchanged": true,
+  "profile_local_auth_file_exists": false,
+  "model_calls_started_by_scope_checks": 0,
+  "service_state": "idle",
+  "service_error": null,
+  "evidence": {
+    "runtime": "evidence/v0.22.7/global-runtime.json",
+    "host_trust": "evidence/v0.22.7/global-hooks-retrusted.json",
+    "actual_App_capture": "evidence/v0.22.7/global-app-capture.json",
+    "actual_App_MCP": "evidence/v0.22.7/global-app-mcp.json"
+  },
+  "boundaries": [
+    "local main chats; subagents and cloud/remote runners not accepted",
+    "current App chat exercised; no separate new project end-to-end learning cycle",
+    "keyword relevance is not semantic classification or tenant isolation",
+    "unscoped external provider recall withheld in Codex global context",
+    "native due Curator cycle and causal quality/cost comparison not rerun"
+  ],
+  "snapshot": "/Users/cy/.hermes-codex-learning/backups/before-global-20261107-202539"
+}

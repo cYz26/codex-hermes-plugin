@@ -1,6 +1,6 @@
 # 验证材料与证据边界
 
-当前发布基线为 Hermes v0.22.7＋Learning API v1，外围插件 0.1.3。根目录 [ACCEPTANCE.json](../ACCEPTANCE.json) 为可提交摘要，[INDEX.json](./INDEX.json) 记录整理前文件名、整理后位置、原始字节 SHA-256 与公开范围。
+当前基线为 Hermes v0.22.7＋Learning API v1，外围插件 0.2.2。[ACCEPTANCE.json](../ACCEPTANCE.json) 记录各版本的验收边界，[INDEX.json](./INDEX.json) 记录公开范围和原始字节 SHA-256。下表为初版基线，新增实测见 [0.2.2 验收](../docs/RELEASE-0.2.2.zh-CN.md)。
 
 | 类型 | 记录 |
 | --- | --- |

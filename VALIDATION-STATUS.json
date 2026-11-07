@@ -1,0 +1,113 @@
+{
+  "date": "2026-11-07",
+  "objective": "Real Codex App capture -> automatic native Hermes learning -> later App recall",
+  "phase": "0.2.2_release_acceptance_passed",
+  "preserved": [
+    "existing workspace changes",
+    "shared login",
+    "independent learning data",
+    "hidden worker entry"
+  ],
+  "confirmed": {
+    "hermes_app_sessions_and_bots_hidden": {
+      "result": true,
+      "evidence": "user observation in this chat"
+    },
+    "plugin_installed_and_enabled": true,
+    "hook_trust_records_present": true,
+    "initial_real_hook_events": 0,
+    "app_mcp_startup": "actual App root/A/B calls completed",
+    "mcp_packaging_fixed_version": "0.1.4",
+    "bridge_tests_passed": 38,
+    "installed_stdio_and_source_parity": true,
+    "actual_app_mcp_call": true,
+    "peripheral_version": "0.2.2",
+    "post_upgrade_hook_trust": "7 trusted in both acceptance projects",
+    "runtime_file_parity": 22,
+    "chat_feedback_visible": "user confirmed; only chat notice observed",
+    "system_notification_visible": "user confirmed fresh B review notification",
+    "global_capture": true,
+    "actual_cross_project_automatic_learning": true,
+    "actual_cross_project_closed_loop": true,
+    "app_tool_created_recall": true,
+    "actual_notification_click": true,
+    "strict_256_token_context_cap": true,
+    "paired_usage": true,
+    "actual_curator_due": true
+  },
+  "current_work": "Completed App recall, Curator, notification click, context cap and two measured usage comparisons",
+  "next": [],
+  "chat_creation": "user explicitly authorized creating and sequentially running A and B",
+  "actual_app_closed_loop_accepted": true,
+  "model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "api_mode": "codex_responses",
+    "reasoning_effort": "max"
+  },
+  "capture_scope": "global",
+  "app_chats": {
+    "A": {
+      "thread_id": "01a1a8fd-8c82-7bd1-b3b3-ca49b1bc04f6",
+      "host_id": "local",
+      "title": "Hermes 接入验收 A：回执报告器",
+      "status": "completed: real RED then 6 tests passed",
+      "followup_turn": "01a1a918-8734-7c83-bf3a-1f7d4f0b9794"
+    },
+    "B": {
+      "thread_id": "01a1a924-e927-7582-bcfe-87a9563fcc44",
+      "host_id": "local",
+      "title": "Hermes 接入验收 B：经验召回与报告扩展",
+      "status": "15 business tests and 3 boundary assertions passed; captured followups projected; native body_delivered matches A skill version",
+      "turn_id": "01a1a924-e9ea-7c83-8f19-a8a414ab30f5",
+      "followup_turns": [
+        "01a1aa54-7203-77c0-bfcc-58d97751b4c4",
+        "01a1aa55-eec1-77b3-95f4-65da52afa9de"
+      ]
+    }
+  },
+  "found_issues": [
+    "App create_thread prompt is in parent hook receipt, not child UserPromptSubmit",
+    "global idle blocks finished chat while coordinator is active",
+    "App-generated suggestion prompts need exclusion",
+    "launchd proxy environment differs from interactive/App environment",
+    "plugin upgrade changed executable content fingerprint; current hooks modified"
+  ],
+  "pre_015_snapshot": "/Users/cy/.hermes-codex-learning/backups/before-0.1.5-20261105-080942",
+  "review_a_attempt": "0d07f293-9b2f-42b9-a176-ffca95f51742",
+  "network_diagnostic": {
+    "direct": "ConnectTimeout",
+    "existing_proxy": "connected; unauthenticated HEAD 404",
+    "credentials_changed": false
+  },
+  "updated_at": "2026-11-07T23:18:53.027858+08:00",
+  "review_a_successful_attempt": "3c90bbf0-7126-4e1b-b76e-c03c8e3f9c6e",
+  "review_b_successful_attempt": "1229e789-dd0b-4a30-a753-75ff085a323c",
+  "completed_scope": "0.2.1 two-project training and recall; 0.2.2 App recall recheck and release acceptance",
+  "global_rollout": {
+    "evidence": "evidence/v0.22.7/global-rollout.json",
+    "new_multi_project_App_learning_cycle": true
+  },
+  "cross_project_verification": {
+    "status": "passed",
+    "version": "0.2.1",
+    "recall_evidence": "evidence/v0.22.7/global-cross-project-021-auto-recall.json",
+    "recall_paths": {
+      "A": "scoped_mcp",
+      "B": "hook"
+    }
+  },
+  "finalization": {
+    "candidate_version": "0.2.2",
+    "state": "passed",
+    "evidence": {
+      "curator": "evidence/v0.22.7/final-curator-due.json",
+      "notification": "evidence/v0.22.7/final-notification-click.json",
+      "budget": "evidence/v0.22.7/final-hook-budget.json",
+      "recall": "evidence/v0.22.7/final-app-recall.json",
+      "recovery": "evidence/v0.22.7/final-worker-recovery.json",
+      "threshold_cost": "evidence/v0.22.7/final-cost-threshold.json",
+      "idle_cost": "evidence/v0.22.7/final-cost-idle.json"
+    }
+  }
+}

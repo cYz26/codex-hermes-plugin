@@ -1,0 +1,429 @@
+{
+  "version": "0.2.1",
+  "runtime_files": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "matches": true,
+      "sha256": "d746817e20f7673b770cd8411a80f0f2801fbcdaf70fe88667c254a8ec65345f"
+    },
+    {
+      "path": ".mcp.json",
+      "matches": true,
+      "sha256": "3b392ceb1dc48bc8c2a28a39af520a46da2648d0fb8bef2eadef96b4d4876f21"
+    },
+    {
+      "path": "hermes-plugin/__init__.py",
+      "matches": true,
+      "sha256": "c7a44b48020ddeb7cfa93c6e5883b68f127dbf882fc7d17c8ed0883236e1f80d"
+    },
+    {
+      "path": "hermes-plugin/plugin.yaml",
+      "matches": true,
+      "sha256": "8b9de4e4275182b8be6b4fd32ca341fbd961dac9e444df83126c54f96457bc49"
+    },
+    {
+      "path": "hooks/hooks.json",
+      "matches": true,
+      "sha256": "aa9be656d3948f102ac00711e979fa95a12c33862b908976f9b1409fd71dd6e7"
+    },
+    {
+      "path": "scripts/bridge",
+      "matches": true,
+      "sha256": "a53341f034359f51642725105f425f3bb44f134f113b8f4bbd12222290050688"
+    },
+    {
+      "path": "scripts/serve.py",
+      "matches": true,
+      "sha256": "53dedc59d797a8f667af684622a10e5770a7d627c321c41a96136c9abc9d098a"
+    },
+    {
+      "path": "skills/hermes-learned-experience/SKILL.md",
+      "matches": true,
+      "sha256": "2500deb8eb8ad8364cec79fe826b29069080d43e8041fe62a5b9a8ed05f3a770"
+    },
+    {
+      "path": "src/hermes_codex_learning/__init__.py",
+      "matches": true,
+      "sha256": "3273e462e772a24ccd66c10cd0b850eefee5567d880c29627398f05afd58030a"
+    },
+    {
+      "path": "src/hermes_codex_learning/authentication.py",
+      "matches": true,
+      "sha256": "e7a45ff6279e50d39c0797d438295484f64f2eb1f69beb52bfa09fe66b206797"
+    },
+    {
+      "path": "src/hermes_codex_learning/capture.py",
+      "matches": true,
+      "sha256": "73ce2df9f650c7c303eb598d145da039bdfe2844ef5b0e8909c447c9dca9867a"
+    },
+    {
+      "path": "src/hermes_codex_learning/cli.py",
+      "matches": true,
+      "sha256": "59d1b2e2d3e103069432b14124b2f7b71a3d58aaf6b70853febd2e511683cb87"
+    },
+    {
+      "path": "src/hermes_codex_learning/config.py",
+      "matches": true,
+      "sha256": "c1debbff3d97fdedb7d92d955e9b5dcc91f8af04e614701b023b807424e3c22d"
+    },
+    {
+      "path": "src/hermes_codex_learning/daemon.py",
+      "matches": true,
+      "sha256": "879cb93d868b60fec154566cc987c5d7a7f9174728a1baa167d4dd89ef69db16"
+    },
+    {
+      "path": "src/hermes_codex_learning/delegation.py",
+      "matches": true,
+      "sha256": "7acd8b4273dd0c4a6cfd92de60c24ce073ffd1f4b4d5b7f0568b8d1f1b6936dd"
+    },
+    {
+      "path": "src/hermes_codex_learning/ipc.py",
+      "matches": true,
+      "sha256": "1f07d295b144fa6ff78365347f06b569afcee74baaa5850f5b6c5aa15f0c0be7"
+    },
+    {
+      "path": "src/hermes_codex_learning/knowledge.py",
+      "matches": true,
+      "sha256": "305b2d942e176f386e11e69ea6d2d6946d467e3f193186940773d9386ffbb46f"
+    },
+    {
+      "path": "src/hermes_codex_learning/mcp.py",
+      "matches": true,
+      "sha256": "8fc27ccc1271346ef7f00049adc52df1484e77c08b97646fa5ebb99aa24a979e"
+    },
+    {
+      "path": "src/hermes_codex_learning/normalize.py",
+      "matches": true,
+      "sha256": "4269d367856df10899ff51a7e3314ee39cc564d5af508d7269416a13d1d5311d"
+    },
+    {
+      "path": "src/hermes_codex_learning/notify.py",
+      "matches": true,
+      "sha256": "15ae3250f6c51f61647b4b0fa875209b4b5d21a0b8844d9e6b28413a93af80a3"
+    },
+    {
+      "path": "src/hermes_codex_learning/store.py",
+      "matches": true,
+      "sha256": "e2f6b7cc8b02c0615be7ce1d16d32c27ea94a55094b00991d63b30b747bab20f"
+    }
+  ],
+  "official_hooks_list": [
+    {
+      "schema_version": 1,
+      "plugin": "hermes-learning@hermes-learning-local",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "ready": false,
+      "scope": "fresh CLI configuration; actual Desktop execution must be checked separately",
+      "trust_changed": false,
+      "hooks_executed": false,
+      "entries": [
+        {
+          "cwd": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "hooks": [
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:pre_tool_use:0:0",
+              "eventName": "preToolUse",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 13,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:5e104e825fad9808e663c825b225a40433d4539514bfc70252224bbc92e78761/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:post_tool_use:0:0",
+              "eventName": "postToolUse",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": 256,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 14,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:2c12a01b376e8730f640a9fd9168fd5447fbe2f9674ce0bc869816674a8a41e0/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:session_start:0:0",
+              "eventName": "sessionStart",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": 256,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 15,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:02b2df94485b5cfaa9aacd88771df4bb8f0e2a8173f3db3d92967c000f73eec1/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:session_end:0:0",
+              "eventName": "sessionEnd",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 3,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 16,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:2090d6d0fa3ac2a27ddd6db1aefda2ce3355654921ba89d3e845370e2c20986a/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:user_prompt_submit:0:0",
+              "eventName": "userPromptSubmit",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": 256,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 17,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:669217e8212071db7246f9650f156311ba225571740048164736caf4c722e49d/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:stop:0:0",
+              "eventName": "stop",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 18,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:b1dfd6a07684cdf6295541d0aa26223b3d3de347bf85eb2139fe572551420171/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:interrupt:0:0",
+              "eventName": "interrupt",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 2,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 19,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:e4d201e17cbcdc3712f746f5e3f6ed9b66f7c5b31686e037ce85a0390ea67551/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            }
+          ],
+          "errors": [],
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "schema_version": 1,
+      "plugin": "hermes-learning@hermes-learning-local",
+      "project": "/Users/cy/Dev/dev001",
+      "ready": false,
+      "scope": "fresh CLI configuration; actual Desktop execution must be checked separately",
+      "trust_changed": false,
+      "hooks_executed": false,
+      "entries": [
+        {
+          "cwd": "/Users/cy/Dev/dev001",
+          "hooks": [
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:pre_tool_use:0:0",
+              "eventName": "preToolUse",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 13,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:5e104e825fad9808e663c825b225a40433d4539514bfc70252224bbc92e78761/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:post_tool_use:0:0",
+              "eventName": "postToolUse",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": 256,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 14,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:2c12a01b376e8730f640a9fd9168fd5447fbe2f9674ce0bc869816674a8a41e0/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:session_start:0:0",
+              "eventName": "sessionStart",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": 256,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 15,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:02b2df94485b5cfaa9aacd88771df4bb8f0e2a8173f3db3d92967c000f73eec1/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:session_end:0:0",
+              "eventName": "sessionEnd",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 3,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 16,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:2090d6d0fa3ac2a27ddd6db1aefda2ce3355654921ba89d3e845370e2c20986a/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:user_prompt_submit:0:0",
+              "eventName": "userPromptSubmit",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": 256,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 17,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:669217e8212071db7246f9650f156311ba225571740048164736caf4c722e49d/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:stop:0:0",
+              "eventName": "stop",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 5,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 18,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:b1dfd6a07684cdf6295541d0aa26223b3d3de347bf85eb2139fe572551420171/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            },
+            {
+              "key": "hermes-learning@hermes-learning-local:hooks/hooks.json:interrupt:0:0",
+              "eventName": "interrupt",
+              "handlerType": "command",
+              "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook",
+              "async": false,
+              "matcher": null,
+              "timeoutSec": 2,
+              "statusMessage": null,
+              "additionalContextLimit": null,
+              "sourcePath": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.2.1/hooks/hooks.json",
+              "source": "plugin",
+              "pluginId": "hermes-learning@hermes-learning-local",
+              "environmentId": null,
+              "displayOrder": 19,
+              "enabled": true,
+              "isManaged": false,
+              "currentHash": "sha256:e4d201e17cbcdc3712f746f5e3f6ed9b66f7c5b31686e037ce85a0390ea67551/sha256:1bf370891195237e01af017a376463ac11878c7be84b326aaad2d78c6ecdd31f",
+              "trustStatus": "modified"
+            }
+          ],
+          "errors": [],
+          "warnings": []
+        }
+      ]
+    }
+  ],
+  "service_restarted": false
+}

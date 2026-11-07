@@ -69,4 +69,6 @@ def merge_event(store: Store, row: dict) -> dict | None:
 
 
 def observation(data: dict) -> dict:
-    return {**data, "tools": list(data["tools"].values())}
+    # The neutral API receives the provenance in user/coverage; the full join stays in the bridge.
+    return {**{key: value for key, value in data.items() if key != "task_input_provenance"},
+            "tools": list(data["tools"].values())}

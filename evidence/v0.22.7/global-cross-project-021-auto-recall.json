@@ -1,0 +1,58 @@
+{
+  "status": "passed",
+  "version": "0.2.1",
+  "marker": "HER-021-RECALL-AUTO",
+  "origin": "Codex_App_create_thread_with_live_hooks",
+  "projects": {
+    "A": {
+      "chat": "01a1b63a-2229-7d92-9470-e5200c9fbd1a",
+      "turn": "01a1b63a-22f5-7833-baca-f31bbde84342",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "label_sha256": "2b8a7ed84f13e4923dd223cef1160ac80e9e0cb5d0b59d54c13e59375238d19e",
+      "training_chat": "01a1b619-ecf5-7381-b7c7-5cf28160af7d",
+      "source_event": "d9a91c03-e7c0-4ca1-8eb8-295ba7b5363b",
+      "parent_chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "parent_turn": "01a1b638-efc9-72f3-8345-8f8c9ccad2ef",
+      "parent_tool_call": "exec-26e8e012-5f4b-4d7a-9195-c6d181ad140f",
+      "stop_event": "c6dd94ee-b92f-41ae-aa55-22dcefb8df0c",
+      "projection": "projected",
+      "recall_path": "scoped_mcp",
+      "hook_context_sha256": [
+        "b9de2a5fd9c097779691a169b51ae1a7e21431cc7b8de54cf18c88b98aa4d90e"
+      ],
+      "tools": [
+        {
+          "event": "345d5001-e4b8-4199-b914-5165f8241472",
+          "tool": "Bash",
+          "call_id": "exec-7c44b596-2a3a-4f8b-97d6-47f5caa6a78d"
+        },
+        {
+          "event": "541bcdfe-ca9e-4b79-891c-561af635467e",
+          "tool": "mcp__hermes_learning__context",
+          "call_id": "exec-c468dddb-20cc-4733-94df-a8954568cc10",
+          "own_label_returned": true
+        }
+      ],
+      "foreign_label_in_transcript": false
+    },
+    "B": {
+      "chat": "01a1b63a-24a1-7ad2-aa7c-e9d527a7e61d",
+      "turn": "01a1b63a-2522-7a01-aa42-841c8bfbebfe",
+      "project": "/Users/cy/Dev/dev001",
+      "label_sha256": "40575ee8b888164acdcce22b59e09194ac2ad28f5106997f3b07d711a14372b7",
+      "training_chat": "01a1b61a-3de5-7b63-be18-40140dc3da7b",
+      "source_event": "8407dde5-1735-4641-ab42-b3d0e6438227",
+      "parent_chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "parent_turn": "01a1b638-efc9-72f3-8345-8f8c9ccad2ef",
+      "parent_tool_call": "exec-6459412e-5536-4c45-a7aa-1c3cf3f5875d",
+      "stop_event": "d69ee6f7-d692-471b-ba52-70db6ece8247",
+      "projection": "projected",
+      "recall_path": "hook",
+      "hook_context_sha256": [
+        "be42830ef77145757dd05fb71d78e4cf7481c6aaf08ac13ebf15daee59088480"
+      ],
+      "tools": [],
+      "foreign_label_in_transcript": false
+    }
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "implementation_version": "0.1.6",
+  "cache": "/Users/cy/.codex/plugins/cache/hermes-learning-local/hermes-learning/0.1.6",
+  "runtime_file_count": 18,
+  "runtime_matches": true,
+  "files": [
+    {
+      "path": "scripts/bridge",
+      "sha256": "a53341f034359f51642725105f425f3bb44f134f113b8f4bbd12222290050688",
+      "matches": true
+    },
+    {
+      "path": "scripts/serve.py",
+      "sha256": "53dedc59d797a8f667af684622a10e5770a7d627c321c41a96136c9abc9d098a",
+      "matches": true
+    },
+    {
+      "path": ".mcp.json",
+      "sha256": "3b392ceb1dc48bc8c2a28a39af520a46da2648d0fb8bef2eadef96b4d4876f21",
+      "matches": true
+    },
+    {
+      "path": "hooks/hooks.json",
+      "sha256": "aa9be656d3948f102ac00711e979fa95a12c33862b908976f9b1409fd71dd6e7",
+      "matches": true
+    },
+    {
+      "path": ".codex-plugin/plugin.json",
+      "sha256": "f247726dbff79430bdf3fd68f6134635b616137c1409959ae386c5a24c7775ab",
+      "matches": true
+    },
+    {
+      "path": "skills/hermes-learned-experience/SKILL.md",
+      "sha256": "a8dd95476b1f254244f5d6b73ec1a9fcfbc92d9d8be4babea9c8a982d4da8250",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/__init__.py",
+      "sha256": "283daa969b7917aa5b7596d4d523b7b47ca8a724359da77b92e0f8d2ecd41d7d",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/authentication.py",
+      "sha256": "e7a45ff6279e50d39c0797d438295484f64f2eb1f69beb52bfa09fe66b206797",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/capture.py",
+      "sha256": "eaf2e6f7985eee7d33792c31fe4de48fbc0a6d6d44fc41f80b651c80005652fa",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/cli.py",
+      "sha256": "09a90e93bdd59325de13ee7728c13d7705cae4c07071989e20ec211d8daad4c2",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/config.py",
+      "sha256": "04926e2c763e136d34e84eec9ecb21ea15fceb0f58945a9aba0cc3c56df3f060",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/daemon.py",
+      "sha256": "f56b7068580e0caf6ff0139ed80755689a8f21e04961d7f7091ce652f389188f",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/delegation.py",
+      "sha256": "b916dcd0179089b7976cb88191f1d505cbc4abcb6d9143a3c17cd26d9d6a14b2",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/ipc.py",
+      "sha256": "1f07d295b144fa6ff78365347f06b569afcee74baaa5850f5b6c5aa15f0c0be7",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/mcp.py",
+      "sha256": "ab6bf5b89693dfd26c1b6b9527b0369b216b1ba2b97a0e5bd456375dc541f201",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/normalize.py",
+      "sha256": "4269d367856df10899ff51a7e3314ee39cc564d5af508d7269416a13d1d5311d",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/notify.py",
+      "sha256": "f1671044f97ca0ec83a4bd8e8957deb9295ec163ed49640e47f1eade2e4b92dc",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/store.py",
+      "sha256": "abb4e0380a0431291572e5e5f6ae2d066f111b21202af2d6e6afe213de658479",
+      "matches": true
+    }
+  ],
+  "scope": "runtime file parity only; current hooks require host trust",
+  "app_mcp_completed_calls": true,
+  "installed_stdio": {
+    "handshake": "2024-11-05",
+    "tools": [
+      "learning_status",
+      "context",
+      "skill_load"
+    ],
+    "status_read": true,
+    "worker_state": "idle",
+    "worker_error": null,
+    "hooks_environment_removed": true,
+    "model_called": false
+  }
+}

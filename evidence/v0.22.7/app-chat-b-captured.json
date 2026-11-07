@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-05T14:14:31.978233+08:00",
+  "chat": "01a1a924-e927-7582-bcfe-87a9563fcc44",
+  "initial_task_turn": "01a1a924-e9ea-7c83-8f19-a8a414ab30f5",
+  "initial_task_capture_gap_preserved": true,
+  "initial_implicit_recall_evidence": "evidence/v0.22.7/app-chat-b-initial.json",
+  "followup_read_reason": "explicit read-only version/delivery verification; not claimed as spontaneous retrieval",
+  "turns": [
+    {
+      "source": {
+        "chat": "01a1a924-e927-7582-bcfe-87a9563fcc44",
+        "executor": "Codex App",
+        "host": "7f1986f1-99e6-447f-871a-dd2fd735a792",
+        "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "turn": "01a1aa54-7203-77c0-bfcc-58d97751b4c4"
+      },
+      "status": "completed",
+      "observed": true,
+      "projection": "projected",
+      "task_input_provenance": {
+        "kind": "app_public_readback_hook",
+        "parent_chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+        "parent_tool_call": "exec-ecde8344-2d64-43e1-b199-97d96cd3f73d",
+        "parent_turn": "01a1aa53-21fb-7c21-9e4e-a5e8a80a5ae9",
+        "read_event": "d48af8b8-87b3-43ff-8596-a9bfdc1b5ad1",
+        "source_event": "2d5a4469-4475-49cb-997d-cd21dd199a0c"
+      },
+      "tool_count": 3
+    },
+    {
+      "source": {
+        "chat": "01a1a924-e927-7582-bcfe-87a9563fcc44",
+        "executor": "Codex App",
+        "host": "7f1986f1-99e6-447f-871a-dd2fd735a792",
+        "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+        "turn": "01a1aa55-eec1-77b3-95f4-65da52afa9de"
+      },
+      "status": "completed",
+      "observed": true,
+      "projection": "projected",
+      "task_input_provenance": {
+        "kind": "app_public_readback_hook",
+        "parent_chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+        "parent_tool_call": "exec-7636c3fb-b91d-4f14-b2db-f28d17f34fc9",
+        "parent_turn": "01a1aa53-21fb-7c21-9e4e-a5e8a80a5ae9",
+        "read_event": "47f0a3e4-0a4c-4247-b1fb-e72dd584e546",
+        "source_event": "d1fd9455-2e58-4648-a719-91c6daabdad6"
+      },
+      "tool_count": 2
+    }
+  ],
+  "hook_counts": {
+    "SessionEnd": 1,
+    "SessionStart": 1,
+    "PreToolUse": 5,
+    "PostToolUse": 5,
+    "Stop": 2
+  },
+  "hook_event_ids": [
+    "13dbcc83-a7e7-4ca1-b8be-29457bbd5302",
+    "ee2942a6-0a8c-4a9f-a842-d5adcc2c9eee",
+    "9985ee0b-5925-431a-a789-5ffb3594301b",
+    "8ac6a7eb-eadd-434d-bba9-c6fb17f592b6",
+    "73b58787-76fd-41cb-9521-2df6b8503597",
+    "55ce81d8-44ba-41b2-990e-6a346ad98b66",
+    "740d4de4-855d-4c27-b01c-ea7475cff065",
+    "99c0e3cd-f022-49e6-9356-260f989efe88",
+    "da33ce02-82f3-4d4b-a193-10b5c16dba8d",
+    "e8ac2799-24c7-4001-a212-75405a18dbef",
+    "2d766f22-e5e4-43bf-99f3-ce88ec7b7ce6",
+    "26b239f1-f941-43b8-8104-60994f9dd127",
+    "fe2debd0-302f-43b3-b853-792595be0827",
+    "e9df3574-deeb-4b20-badc-c935fe893a08"
+  ],
+  "all_events_delivered": true,
+  "skill_reads": [
+    {
+      "hook_event_id": "2d766f22-e5e4-43bf-99f3-ce88ec7b7ce6",
+      "source_event": [
+        "01a1a924-e927-7582-bcfe-87a9563fcc44",
+        "01a1aa55-eec1-77b3-95f4-65da52afa9de",
+        "exec-c6abd4a5-0f2a-4a41-9f48-e9c0d67ad5b2"
+      ],
+      "name": "agent-integration-acceptance",
+      "file_path": "SKILL.md",
+      "version": "bbd68ab88ad61883019ea3615ef6186cc789a6e7f81d1848b9d9ed7c8ef99fca",
+      "content_hash": "01559dcc3940d62b49d65277f05acef15265e3fd8410933d2fd369e6ac282529",
+      "files": {
+        "SKILL.md": "01559dcc3940d62b49d65277f05acef15265e3fd8410933d2fd369e6ac282529",
+        "references/receipt-evidence.md": "75a9551d1c7fd4a2538af350007955e2d5b87767deddd0ac64ceec13439c9c93"
+      },
+      "matches_A_version": true,
+      "matches_A_file": true,
+      "native_delivery": {
+        "name": "agent-integration-acceptance",
+        "version": "bbd68ab88ad61883019ea3615ef6186cc789a6e7f81d1848b9d9ed7c8ef99fca",
+        "status": "recorded",
+        "evidence": {
+          "source_event": [
+            "01a1a924-e927-7582-bcfe-87a9563fcc44",
+            "01a1aa55-eec1-77b3-95f4-65da52afa9de",
+            "exec-c6abd4a5-0f2a-4a41-9f48-e9c0d67ad5b2"
+          ],
+          "stage": "body_delivered"
+        }
+      }
+    },
+    {
+      "hook_event_id": "fe2debd0-302f-43b3-b853-792595be0827",
+      "source_event": [
+        "01a1a924-e927-7582-bcfe-87a9563fcc44",
+        "01a1aa55-eec1-77b3-95f4-65da52afa9de",
+        "exec-ffb88194-b2df-4996-9872-a58cb6016873"
+      ],
+      "name": "agent-integration-acceptance",
+      "file_path": "references/receipt-evidence.md",
+      "version": "bbd68ab88ad61883019ea3615ef6186cc789a6e7f81d1848b9d9ed7c8ef99fca",
+      "content_hash": "75a9551d1c7fd4a2538af350007955e2d5b87767deddd0ac64ceec13439c9c93",
+      "files": {
+        "SKILL.md": "01559dcc3940d62b49d65277f05acef15265e3fd8410933d2fd369e6ac282529",
+        "references/receipt-evidence.md": "75a9551d1c7fd4a2538af350007955e2d5b87767deddd0ac64ceec13439c9c93"
+      },
+      "matches_A_version": true,
+      "matches_A_file": true,
+      "native_delivery": {
+        "name": "agent-integration-acceptance",
+        "version": "bbd68ab88ad61883019ea3615ef6186cc789a6e7f81d1848b9d9ed7c8ef99fca",
+        "status": "recorded",
+        "evidence": {
+          "source_event": [
+            "01a1a924-e927-7582-bcfe-87a9563fcc44",
+            "01a1aa55-eec1-77b3-95f4-65da52afa9de",
+            "exec-ffb88194-b2df-4996-9872-a58cb6016873"
+          ],
+          "stage": "body_delivered"
+        }
+      }
+    }
+  ],
+  "business_tests": {
+    "passed": 15,
+    "exit_code": 0,
+    "boundary_assertions_passed": 3,
+    "scope": "fixture/report conversion; not proof of learning efficacy"
+  },
+  "business_files": {
+    "pilot-project/receipt_report.py": "bb0b9eca2c6e745c4f55b5185642685b3eab6ca21eb47e64c00dea4d4b8c5510",
+    "pilot-project/test_receipt_report.py": "759f58b995666f4bc1494b4757dd43b2c8b4d1786bad337c9b0177677d366915"
+  },
+  "stage_claims": {
+    "body_delivered": true,
+    "adoption": "B implementation and followup exercise the matching rules, which were also required by the task",
+    "causal_quality_improvement_verified": false
+  },
+  "notification": {
+    "chat_feedback_consumed": true,
+    "chat_visibility": "observed_by_user",
+    "os_visibility": "observed_by_user_after_subsequent_B_review",
+    "user_report": "只看到聊天提示",
+    "report_scope": "after hook re-trust; no new review-finished event yet in this window",
+    "B_review_evidence": "evidence/v0.22.7/app-chat-b-review.json"
+  }
+}

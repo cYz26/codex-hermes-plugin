@@ -1,0 +1,192 @@
+{
+  "phase": "training",
+  "worker": {
+    "last_error": null,
+    "last_idle_request": 1794056961.7682931,
+    "state": "reviewing"
+  },
+  "projects": {
+    "A": {
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "expected_label_sha256": "2b8a7ed84f13e4923dd223cef1160ac80e9e0cb5d0b59d54c13e59375238d19e",
+      "published_memory": [
+        {
+          "target": "MEMORY.md",
+          "entry_digest": "0c81c2e9726f51713acc8a1503b1b72f93d21aab723fc7a8e2848e89ded9658a",
+          "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "other_label_in_entry": false
+        }
+      ],
+      "matched_prompts": 1,
+      "chat": "01a1b619-ecf5-7381-b7c7-5cf28160af7d",
+      "turn": "01a1b619-ef33-7d81-b055-3c99d692d782",
+      "prompt_event": "04a1193b-59f1-4974-8ed7-a4b08e3a23e8",
+      "prompt_contains_neither_label": true,
+      "prompt_delivered": true,
+      "events": {
+        "SessionStart": 1,
+        "UserPromptSubmit": 1,
+        "PreToolUse": 3,
+        "PostToolUse": 3,
+        "Stop": 1
+      },
+      "events_all_delivered": true,
+      "bound_projects": [
+        "/Users/cy/Dev/agents-dev/hermes-plugin1102"
+      ],
+      "terminal_event": "433ce26e-5605-4ce4-b54f-b879df61721c",
+      "terminal_kind": "Stop",
+      "final_sha256": "79078b0e27048dd88a4f59129cf8a8f61122d07919686ae35a8c4147cae8abba",
+      "final_has_own_label": true,
+      "final_has_other_label": false,
+      "final_unknown": false,
+      "context_delivered_version": "2aac32c75333d032d60dae53f6646c6878cd0c2774e454f45a2d6999b31177e1",
+      "fixture_calls": [
+        {
+          "event_id": "4b8ddf1d-8c4a-4d16-b261-4fa7155ed167",
+          "call_id": "exec-62ba7706-2ad6-42bb-9144-5e30f2b63931",
+          "own_label_in_result": true,
+          "other_label_in_result": false,
+          "checks": null,
+          "exit_code": null
+        },
+        {
+          "event_id": "5e06b80b-51cd-4b8a-9ff8-fb903f3ab814",
+          "call_id": "exec-d9f8f1d5-7e9c-4350-b4a5-b76e6aedc0fd",
+          "own_label_in_result": true,
+          "other_label_in_result": false,
+          "checks": {
+            "same_scope_and_verified_artifact": true,
+            "foreign_scope_same_version_and_hash_rejected": true,
+            "same_scope_wrong_hash_rejected": true
+          },
+          "exit_code": null
+        }
+      ],
+      "observed_handle": "observed-6a90b6906e159eb71511a0426701bdbe",
+      "observations": [
+        {
+          "id": "433ce26e-5605-4ce4-b54f-b879df61721c",
+          "revision": 1,
+          "projection": "projected"
+        }
+      ],
+      "attempts": [
+        {
+          "id": "ea4ac0bc-f058-48b1-a7c8-1757069b0d50",
+          "intent": "c6f75be57d0360496aadd111576b4b520a3f513ed47a734cd1c3bc67c9b2a57e",
+          "revision": 1,
+          "reason": "idle_flush",
+          "status": "completed",
+          "applied_operations": 3,
+          "memory_operations": 1,
+          "skills": [
+            "agent-integration-acceptance"
+          ],
+          "staged": 0,
+          "uncertain": 0,
+          "usage": {
+            "model": "gpt-6.1-sol",
+            "provider": "openai-codex",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "input_tokens": 22070,
+            "output_tokens": 2731,
+            "cache_read_tokens": 92672,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 1639,
+            "api_calls": 6,
+            "estimated_cost_usd": 0.0
+          }
+        }
+      ]
+    },
+    "B": {
+      "project": "/Users/cy/Dev/dev001",
+      "expected_label_sha256": "40575ee8b888164acdcce22b59e09194ac2ad28f5106997f3b07d711a14372b7",
+      "published_memory": [
+        {
+          "target": "MEMORY.md",
+          "entry_digest": "58249d89411190859053fe0d98f41a464df10c8f5444bace9cc326f71f52a9bb",
+          "project": "/Users/cy/Dev/dev001",
+          "other_label_in_entry": false
+        }
+      ],
+      "matched_prompts": 1,
+      "chat": "01a1b61a-3de5-7b63-be18-40140dc3da7b",
+      "turn": "01a1b61a-4039-7643-b01d-1dcf69d156da",
+      "prompt_event": "42e7c4ee-a7b3-4947-81e7-3e945e414dfb",
+      "prompt_contains_neither_label": true,
+      "prompt_delivered": true,
+      "events": {
+        "SessionStart": 1,
+        "UserPromptSubmit": 1,
+        "PreToolUse": 1,
+        "PostToolUse": 1,
+        "Stop": 1
+      },
+      "events_all_delivered": true,
+      "bound_projects": [
+        "/Users/cy/Dev/dev001"
+      ],
+      "terminal_event": "ef191270-f1f8-4103-912f-26739c83e62f",
+      "terminal_kind": "Stop",
+      "final_sha256": "8141d6b06f84a829eb64c429a84a5602864e29bc56568f80e39410089b85f032",
+      "final_has_own_label": true,
+      "final_has_other_label": false,
+      "final_unknown": false,
+      "context_delivered_version": "efce912bc9afa2e4b0b352a75a3d293f13a8acf61d9583b9574ded2b2caa70cb",
+      "fixture_calls": [
+        {
+          "event_id": "2e409271-b83b-483f-874c-db174fdc5222",
+          "call_id": "exec-edc99768-f2d5-47cb-8cc0-f8360a1eaebd",
+          "own_label_in_result": true,
+          "other_label_in_result": false,
+          "checks": {
+            "same_scope_and_verified_artifact": true,
+            "foreign_scope_same_version_and_hash_rejected": true,
+            "same_scope_wrong_hash_rejected": true
+          },
+          "exit_code": null
+        }
+      ],
+      "observed_handle": "observed-6e0b0602ca8e1e4a721b9e387c2d450d",
+      "observations": [
+        {
+          "id": "ef191270-f1f8-4103-912f-26739c83e62f",
+          "revision": 1,
+          "projection": "projected"
+        }
+      ],
+      "attempts": [
+        {
+          "id": "6619a148-facb-443d-80db-0783cc1b56d7",
+          "intent": "14364f94638297bbc74f4ff25c42ffb6f04d89ddf6359901b85698553cecbd8b",
+          "revision": 1,
+          "reason": "idle_flush",
+          "status": "completed",
+          "applied_operations": 2,
+          "memory_operations": 1,
+          "skills": [
+            "agent-integration-acceptance"
+          ],
+          "staged": 0,
+          "uncertain": 0,
+          "usage": {
+            "model": "gpt-6.1-sol",
+            "provider": "openai-codex",
+            "base_url": "https://chatgpt.com/backend-api/codex",
+            "input_tokens": 19847,
+            "output_tokens": 1632,
+            "cache_read_tokens": 68096,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 1069,
+            "api_calls": 5,
+            "estimated_cost_usd": 0.0
+          }
+        }
+      ]
+    }
+  },
+  "observed_source": "normal_Codex_App_composer_then_native_Hermes_automatic_review",
+  "version": "0.2.1"
+}

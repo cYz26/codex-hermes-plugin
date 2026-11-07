@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "observed_at": "2026-11-07T20:48:04.822802+08:00",
+  "provenance": "actual_Codex_App_hooks",
+  "authoritative_event": {
+    "id": "57c592c1-631a-42aa-be12-0bede10e0001",
+    "bridge_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+    "cwd": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+    "hook_event_name": "UserPromptSubmit",
+    "session_id": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+    "turn_id": "01a1b608-bea4-7c13-93cb-61c20cd0b9a4"
+  },
+  "foreign_tool_events": [
+    {
+      "id": "1a8b06ad-7a0f-4bac-9ec3-9eec66c44754",
+      "bridge_project": "/Users/cy/Dev/agents-dev/hermes-learning-core",
+      "cwd": "/Users/cy/Dev/agents-dev/hermes-learning-core",
+      "hook_event_name": "PostToolUse",
+      "session_id": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "tool_use_id": "exec-c2006fff-1fef-42d5-ab08-5b8cd7bfa107",
+      "turn_id": "01a1b608-bea4-7c13-93cb-61c20cd0b9a4"
+    },
+    {
+      "id": "57ce86c5-c4f6-45fb-8a3e-e913a73902ed",
+      "bridge_project": "/Users/cy/Dev/agents-dev/hermes-learning-core",
+      "cwd": "/Users/cy/Dev/agents-dev/hermes-learning-core",
+      "hook_event_name": "PreToolUse",
+      "session_id": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "tool_use_id": "exec-c2006fff-1fef-42d5-ab08-5b8cd7bfa107",
+      "turn_id": "01a1b608-bea4-7c13-93cb-61c20cd0b9a4"
+    }
+  ],
+  "foreign_scope_context_delivered": true,
+  "foreign_memory_present": false,
+  "result": "post_tool_used_command_directory_as_recall_scope"
+}

@@ -1,0 +1,23 @@
+{
+  "implementation_version": "0.1.4",
+  "source": "installed config resolved by native codex mcp get; exact argv and cwd; no placeholder expansion",
+  "real_app_mcp_call": false,
+  "server_stdio_connected": true,
+  "runtime_files_match_source": true,
+  "runtime_files_checked": 16,
+  "tool_names": [
+    "learning_status",
+    "context",
+    "skill_load"
+  ],
+  "service_state": "idle",
+  "service_error": null,
+  "context_version": "e7a899b75125892ccb6e14d439a0e89ca8d864eb3c6c06f893afca396454dbc7",
+  "native_review_api_calls": 6,
+  "new_model_calls": 0,
+  "packaging_regression": {
+    "red": "FileNotFoundError for literal PLUGIN_ROOT command",
+    "green": "10 bridge tests pass"
+  },
+  "actual_app_hook_acceptance": false
+}

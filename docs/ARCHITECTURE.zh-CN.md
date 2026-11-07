@@ -1,10 +1,10 @@
 # Codex 执行、Hermes 学习：整体方案
 
-保存日期：2026-11-04。目标基线为官方 **Hermes v0.22.7 / `b200f5bc60e31588ba2cb60e288029c4a54ba5fa`**，外围插件 **0.1.3**，Learning API **v1**。本文整理当前实现；实际结果以 [实施记录](../IMPLEMENTATION.md)及 [验收摘要](../ACCEPTANCE.json)为准。
+更新日期 2026-11-07。基线为官方 **Hermes v0.22.7 / `b200f5bc60e31588ba2cb60e288029c4a54ba5fa`**，外围插件 **0.2.2**，Learning API **v1**。验收见 [0.2.2 实测记录](./RELEASE-0.2.2.zh-CN.md)和 [验收摘要](../ACCEPTANCE.json)。
 
 ## 目标与分工
 
-用户继续在 Codex App 中执行任务。真实 hooks 自动采集执行证据并持久化，后台 Hermes 负责复盘、记忆、技能和维护；用户不需要手动要求总结。成果通过聊天提示、系统通知和后续任务的上下文／技能读取回到 Codex。
+用户继续在 Codex App 中执行任务。真实 hooks 自动采集执行证据并持久化，后台 Hermes 负责复盘、记忆、技能和维护。用户可从系统通知查看学习回执。后续 Codex 回合通过 hook 上下文及 MCP 获取经验。
 
 ```mermaid
 flowchart TD
@@ -15,7 +15,7 @@ flowchart TD
     E --> F[原生记忆、技能、写入保护与技能锁]
     D --> G[原生 Curator 与 provider 生命周期]
     F --> H[真实结果与版本化学习产物]
-    H --> I[聊天提示与 macOS 通知]
+    H --> I[macOS 通知和本地回执]
     H --> J[增量上下文与 MCP 按需读取技能]
     J --> A
 ```
@@ -38,12 +38,12 @@ flowchart TD
 
 ## 认证复用与数据独立
 
-学习服务使用原生 named profile 机制继承已有 Hermes 的 OpenAI 登录。目录入口保留 `root/profiles/name` 的拼写，指向专用学习数据目录；核心在每次调用中绑定该数据目录。
+学习服务使用原生根目录推导和认证回退机制继承已有 Hermes 的 OpenAI 登录。目录入口保留 `root/profiles/entry` 的拼写，指向专用学习数据目录；入口名以点号开头，原生 profile 枚举不会展示它。核心在每次调用中绑定独立的数据目录。
 
 ```text
 现有 Hermes 根目录
   auth.json                         现有认证库，由原生机制管理
-  profiles/codex-learning-pilot  →   独立学习 home
+  profiles/.codex-learning-pilot →   独立学习 home（不参与 profile 列表）
 
 独立学习 home
   config.yaml                       新配置，Max、原生 review、独立 gateway
@@ -56,7 +56,9 @@ flowchart TD
 
 学习 profile 配置 `gateway.standalone: true`，主 gateway 的服务集合排除它，专用 launchd 服务拥有其学习生命周期。现有 Hermes 的配置、记忆、技能和会话不作为新学习 profile 的初始化来源。
 
-当前部署的数据目录为 `/Users/cy/.hermes-codex-learning/pilot`；原生入口为 `/Users/cy/.hermes/profiles/codex-learning-pilot`。这些是本机部署记录；安装到其他机器时使用 [README](../README.md)中的显式路径参数。
+后台学习 worker 不作为 Hermes App 的可交互 Bot。旧的可见入口导致过 `Runtime not ready`／`profile_mismatch`，现已改用隐藏入口；真实 App REST 和 Bots RPC 列表均不再返回它，根登录继承和学习数据保持原样。后台命令通过 bridge 绑定运行，不使用 `hermes -p .codex-learning-pilot`。用户继续使用原有 Hermes App profile；[诊断与隐藏记录](./PROFILE-DESKTOP.zh-CN.md)列出原因和范围。
+
+当前部署的数据目录为 `/Users/cy/.hermes-codex-learning/pilot`；隐藏入口为 `/Users/cy/.hermes/profiles/.codex-learning-pilot`。这些是本机部署记录；安装到其他机器时使用 [README](../README.md)中的显式路径参数。旧验收记录中的可见入口属于隐藏前的部署快照。
 
 ## 模型配置
 
@@ -90,11 +92,11 @@ auxiliary:
 
 ## 反馈与后续召回
 
-用户提示根据真实结果生成。hooks 的 `systemMessage` 在支持的安全点显示，后台空闲完成可派发系统通知；系统是否展示和 App 的具体提示样式分别验收。无新增成果时默认不弹系统通知，失败和暂存也不显示成已生效。
+macOS 通知根据真实结果生成，点击打开对应的本地回执。回执列出复盘时间、已应用的操作、等待批准的变更及失败。无新增成果时默认保持静默。历史 0.1.6 的聊天提示另见 [单项目验收](./APP-VALIDATION.zh-CN.md)。
 
-模型通过有作用域和版本的增量上下文感知成果，单次宿主上限约 256 tokens。技能正文通过 MCP 按需加载，保留正文、资源 hash、版本和原生 readiness 信息。批量写入保留技能身份，旧 v1 收据也能召回更新后的技能。
+每次 hook 返回的完整 `additionalContext` 最多 256 个 UTF-8 字节，包含标题、项目路径、摘要和 MCP 入口。每个普通字节级 BPE token 至少对应一个字节，因此单次注入最多 256 tokens。Codex 的 `additionalContextLimit` 仍作为宿主溢写设置，宿主消息封装另计。技能正文通过 MCP 按需加载，保留正文、资源哈希、版本和原生 readiness 信息。
 
-聊天、模型上下文和系统通知分别消费，重启避免重复播报。通知使用程序模板，不为通知额外调用模型或唤醒 Codex。正文交付、采用和验证有效是不同事实；只有相应证据才能记录相应阶段。
+模型上下文和系统通知分别记录消费。通知由程序模板生成，避免为通知调用模型或唤醒 Codex。交付正文、实际采用和业务验证各有独立证据。
 
 ## 与原生 Hermes 的一致性和差异
 
@@ -102,13 +104,13 @@ auxiliary:
 
 区别在于业务历史来自 Codex：观察会话需要规范化外部工具结果；Hermes 没有执行主任务，不能保证复用 Codex 的缓存；空闲补充增加了原生阈值之外的触发。Codex 侧提示、技能交付和使用证据由宿主适配负责。这些差异不能被描述为与原生交互完全等价。
 
-v1 支持边界为 macOS／POSIX、in-process 插件、单 home 单 owner、独立单项目主聊天。子 agent、跨机器部署和多 owner 并行尚未验收。
+v1 支持边界为 macOS／POSIX、in-process 插件、单 home 单 owner。外围 0.2.0 将采集扩展至本机所有项目主聊天，保留各自来源身份；个人知识库共享通用技能，项目记忆按来源范围召回。子 agent、跨机器部署和多 owner 并行尚未验收。
 
 ## Tokens 与费用
 
 采集、排队、去重和程序通知不调用模型。额外消耗主要来自跨运行时的缓存差异、空闲补充，以及成果返回 Codex 的输入上下文。原生复盘本就消耗 tokens，不能将其全部算成桥接新增开销。
 
-保留原生分项口径，区分来源任务、复盘与其他辅助调用，不把 attempt 和 native ledger 重复相加。不可获得的 usage／实际费用为未知，不填零；原生 OAuth 路由的 `estimated_cost_usd=0` 不代表实际免费。当前未完成相同任务、相同触发条件下的原生对照成本实验。
+分开统计来源任务、复盘和其他辅助调用。复盘按 native ledger 计一次。原生阈值和短任务空闲补充均有同任务对照。报告列出各次未缓存输入、缓存读取及输出，订阅的逐任务实付费用保留为未知。[实测用量](./RELEASE-0.2.2.zh-CN.md#同任务成本)
 
 ## 已有证据与剩余工作
 
@@ -116,13 +118,13 @@ v1 支持边界为 macOS／POSIX、in-process 插件、单 home 单 owner、独�
 | --- | --- |
 | 官方 v0.22.7 原版相关回归 | 328 项通过 |
 | 加补丁后的原生和扩展回归 | 343 项通过 |
-| 外围桥接 | 9 项通过 |
+| 外围桥接 | 0.2.2 的 38 项通过 |
 | 原生完整检查 | 14 项通过，health 无阻断或 advisory |
 | 真实 provider | 复用现有登录，6 次原生 review API 调用，新增 1 条记忆、创建并修订 1 项技能 |
 | 数据隔离 | 验收时间窗内原 App 437 个记忆／技能文件的元数据指纹一致 |
 | 已安装 MCP | 状态、召回、完整技能、版本和内容 hash 通过；重启后 usage 恢复，读取未新增复盘 |
 
-真实模型输入明确标记为验收 fixture；stdio MCP 测试也不冒充 App 内调用。真实 Codex App hooks 信任、聊天 A 自动学习→聊天 B 召回、提示样式、系统通知可见性、完整 App 生命周期及质量／成本对照仍待验收。
+表中的 6 次真实模型调用来自历史隔离探针。App 独立通过单项目闭环及跨项目学习、共享技能交付和项目专属记忆隔离验收。0.2.2 又在实际 App 复验受限摘要和范围召回，并实测 Curator 到期维护、点击通知及两组用量对照。[全局启用记录](./GLOBAL-ROLLOUT.zh-CN.md) · [0.2.2 实测记录](./RELEASE-0.2.2.zh-CN.md)
 
 证据按版本保存在 [evidence](../evidence/README.md)，原始私有运行回执本地保留；公开摘要不携带 live delivery token。历史研究和旧探针列于 [文档索引](./README.md)，不替代当前验收。
 
@@ -130,6 +132,6 @@ v1 支持边界为 macOS／POSIX、in-process 插件、单 home 单 owner、独�
 
 Hermes 更新先停止本学习服务并保留一致性快照，在新官方稳定版候选中重放补丁，运行原生及插件合同回归，再切换解释器和服务。数据兼容性与回退单独验证，旧运行时在验证完成前保留。
 
-回退学习数据和服务定义时不恢复根账号的旧认证副本，避免回放已轮换 token。Codex 更新主要验证 hooks 字段、身份、信任、提示和 MCP；核心补丁按 API 行为合同维护，不依赖旧定制版更新器。
+回退学习数据和服务定义时不恢复根账号的旧认证副本，避免回放已轮换 token。Codex 或插件更新后先运行 scripts/check_codex_hooks.py，并在官方界面处理 modified；hooks 文件不变也不能代替信任检查。再验证实际 App hooks 字段、身份、提示和 MCP；核心补丁按 API 行为合同维护，不依赖旧定制版更新器。
 
 本仓库只保存工程与可提交的验证材料。运行时、账号认证、真实学习数据、回退快照与机器私有回执不进入 Git；整体工程推送不等于重新部署或新增 App 验收。

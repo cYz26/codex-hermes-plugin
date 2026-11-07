@@ -1,0 +1,179 @@
+{
+  "version": "0.2.0",
+  "runtime_files": [
+    {
+      "path": ".codex-plugin/plugin.json",
+      "sha256": "ae5993afa7bf82901b4670dbcc79dca86d4544f02f8e5295b20901bed91e7e02",
+      "matches": true
+    },
+    {
+      "path": ".mcp.json",
+      "sha256": "3b392ceb1dc48bc8c2a28a39af520a46da2648d0fb8bef2eadef96b4d4876f21",
+      "matches": true
+    },
+    {
+      "path": "hermes-plugin/__init__.py",
+      "sha256": "c7a44b48020ddeb7cfa93c6e5883b68f127dbf882fc7d17c8ed0883236e1f80d",
+      "matches": true
+    },
+    {
+      "path": "hermes-plugin/plugin.yaml",
+      "sha256": "03ff2878b3cecec4d08c6436692b773d0c86426d14b0c358380284e82f2bfa9f",
+      "matches": true
+    },
+    {
+      "path": "hooks/hooks.json",
+      "sha256": "aa9be656d3948f102ac00711e979fa95a12c33862b908976f9b1409fd71dd6e7",
+      "matches": true
+    },
+    {
+      "path": "scripts/bridge",
+      "sha256": "a53341f034359f51642725105f425f3bb44f134f113b8f4bbd12222290050688",
+      "matches": true
+    },
+    {
+      "path": "scripts/serve.py",
+      "sha256": "53dedc59d797a8f667af684622a10e5770a7d627c321c41a96136c9abc9d098a",
+      "matches": true
+    },
+    {
+      "path": "skills/hermes-learned-experience/SKILL.md",
+      "sha256": "cfb6b139382a8aab70b156944f26d5ff5b7546110eadd2853cbe13b4c999d3af",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/__init__.py",
+      "sha256": "caa6bb6bd171e1ebac20dcfb127cb4ecf2dc2ddfaf8fe26f047807a0c18a7cb6",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/authentication.py",
+      "sha256": "e7a45ff6279e50d39c0797d438295484f64f2eb1f69beb52bfa09fe66b206797",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/capture.py",
+      "sha256": "3fda3fbb5525f220a63277bd794d3b99b40eae93710628f3479a4a3226083222",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/cli.py",
+      "sha256": "59d1b2e2d3e103069432b14124b2f7b71a3d58aaf6b70853febd2e511683cb87",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/config.py",
+      "sha256": "c1debbff3d97fdedb7d92d955e9b5dcc91f8af04e614701b023b807424e3c22d",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/daemon.py",
+      "sha256": "879cb93d868b60fec154566cc987c5d7a7f9174728a1baa167d4dd89ef69db16",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/delegation.py",
+      "sha256": "7acd8b4273dd0c4a6cfd92de60c24ce073ffd1f4b4d5b7f0568b8d1f1b6936dd",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/ipc.py",
+      "sha256": "1f07d295b144fa6ff78365347f06b569afcee74baaa5850f5b6c5aa15f0c0be7",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/knowledge.py",
+      "sha256": "305b2d942e176f386e11e69ea6d2d6946d467e3f193186940773d9386ffbb46f",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/mcp.py",
+      "sha256": "8fc27ccc1271346ef7f00049adc52df1484e77c08b97646fa5ebb99aa24a979e",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/normalize.py",
+      "sha256": "4269d367856df10899ff51a7e3314ee39cc564d5af508d7269416a13d1d5311d",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/notify.py",
+      "sha256": "15ae3250f6c51f61647b4b0fa875209b4b5d21a0b8844d9e6b28413a93af80a3",
+      "matches": true
+    },
+    {
+      "path": "src/hermes_codex_learning/store.py",
+      "sha256": "e2f6b7cc8b02c0615be7ce1d16d32c27ea94a55094b00991d63b30b747bab20f",
+      "matches": true
+    }
+  ],
+  "stdio_initialized": true,
+  "exact_installed_manifest": true,
+  "new_tool_schemas": [
+    {
+      "name": "learning_status",
+      "description": "Read Hermes learning progress, applied/staged changes and actual model usage. Does not trigger learning.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "context",
+      "description": "Read Hermes personal knowledge: project-scoped memories and relevant shared skills. Pass the current task's absolute cwd and a short task query; omitted cwd returns no project memory. Listing is not skill use.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cwd": {
+            "type": "string"
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "skill_load",
+      "description": "Load a current shared Hermes skill/resource with version and source provenance. Pass the task's absolute cwd; check applicability of project-specific examples. A delivery receipt does not prove adoption.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "file_path": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "service_state": "idle",
+  "error": null,
+  "capture_scope": "global",
+  "pilot_memory_returned": true,
+  "foreign_project_memory_withheld": true,
+  "missing_cwd_memory_withheld": true,
+  "cross_project_skill_recalled": true,
+  "skill": {
+    "name": "agent-integration-acceptance",
+    "version": "5447ea9f1a9a878f7ab25f46b764a2acd89c8237b41c56eb0cfef3501c40a6d9",
+    "content_hash": "e314bd5e3882422e5fe1228bb8a066411f7c22f42eb6b741b315bdee69f9ce42",
+    "request_project": "/Users/cy/Dev/dev001",
+    "source_projects": [
+      "/Users/cy/Dev/agents-dev/hermes-plugin1102"
+    ]
+  },
+  "model_calls_started_by_checks": 0,
+  "real_App_MCP_claim": false
+}

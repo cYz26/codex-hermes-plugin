@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "chat": "01a1a924-e927-7582-bcfe-87a9563fcc44",
+  "turn": "01a1a924-e9ea-7c83-8f19-a8a414ab30f5",
+  "status": "completed",
+  "started_at": 1793839131,
+  "completed_at": 1793839319,
+  "provenance": "official Codex read_thread for actual App chat",
+  "business_tests": {
+    "passed": 15,
+    "exit_code": 0
+  },
+  "tool_calls": [
+    {
+      "id": "exec-cd49083e-a658-4914-875c-5a77abdc536c",
+      "server": "hermes_learning",
+      "tool": "context",
+      "arguments": {},
+      "status": "completed"
+    },
+    {
+      "id": "exec-1dcbbdf1-c4f4-4e89-9cee-4b957a45bb92",
+      "server": "hermes_learning",
+      "tool": "skill_load",
+      "arguments": {
+        "name": "agent-integration-acceptance"
+      },
+      "status": "completed"
+    },
+    {
+      "id": "exec-ac890ee4-5677-4c65-8549-23498d163604",
+      "server": "hermes_learning",
+      "tool": "skill_load",
+      "arguments": {
+        "name": "agent-integration-acceptance",
+        "file_path": "references/receipt-evidence.md"
+      },
+      "status": "completed"
+    }
+  ],
+  "business_test_commands": [
+    {
+      "id": "exec-ab45aadc-584b-43a1-ab3b-85879c115fc8",
+      "command": "/bin/zsh -lc \"python3 -B -m unittest discover -s pilot-project -p 'test_receipt_report.py' -v\"",
+      "status": "completed",
+      "exit_code": 0,
+      "output": {
+        "text": "test_estimated_zero_is_not_actual_zero (test_receipt_report.ReceiptReportTests.test_estimated_zero_is_not_actual_zero) ... ok\ntest_missing_usage_and_fee_remain_unknown (test_receipt_report.ReceiptReportTests.test_missing_usage_and_fee_remain_unknown) ... ok\ntest_partial_failure_keeps_successful_writes (test_receipt_report.ReceiptReportTests.test_partial_failure_keeps_successful_writes) ... ok\ntest_real_app_capture_requires_host_identity_and_observed_hooks (test_receipt_report.ReceiptReportTests.test_real_app_capture_requires_host_identity_and_observed_hooks) ... ok\ntest_skill_delivery_adoption_and_validation_are_separate (test_receipt_report.ReceiptReportTests.test_skill_delivery_adoption_and_validation_are_separate) ... ok\ntest_synthetic_model_probe_does_not_prove_app_capture (test_receipt_report.ReceiptReportTests.test_synthetic_model_probe_does_not_prove_app_capture) ... ok\n\n----------------------------------------------------------------------\nRan 6 tests in 0.000s\n\nOK\n",
+        "truncated": false
+      }
+    },
+    {
+      "id": "exec-ec93dc16-8897-4f7a-bb55-11b0140cdb4a",
+      "command": "/bin/zsh -lc \"python3 -B -m unittest discover -s pilot-project -p 'test_*.py' -v\"",
+      "status": "completed",
+      "exit_code": 0,
+      "output": {
+        "text": "test_estimated_zero_is_not_actual_zero (test_receipt_report.ReceiptReportTests.test_estimated_zero_is_not_actual_zero) ... ok\ntest_missing_usage_and_fee_remain_unknown (test_receipt_report.ReceiptReportTests.test_missing_usage_and_fee_remain_unknown) ... ok\ntest_partial_failure_keeps_successful_writes (test_receipt_report.ReceiptReportTests.test_partial_failure_keeps_successful_writes) ... ok\ntest_real_app_capture_requires_host_identity_and_observed_hooks (test_receipt_report.ReceiptReportTests.test_real_app_capture_requires_host_identity_and_observed_hooks) ... ok\ntest_skill_delivery_adoption_and_validation_are_separate (test_receipt_report.ReceiptReportTests.test_skill_delivery_adoption_and_validation_are_separate) ... ok\ntest_synthetic_model_probe_does_not_prove_app_capture (test_receipt_report.ReceiptReportTests.test_synthetic_model_probe_does_not_prove_app_capture) ... ok\ntest_complete_app_identity_sample_with_validated_skill_and_actual_fee (test_receipt_report.RenderMarkdownTests.test_complete_app_identity_sample_with_validated_skill_and_actual_fee) ... ok\ntest_estimates_never_replace_unknown_actual_fee (test_receipt_report.RenderMarkdownTests.test_estimates_never_replace_unknown_actual_fee) ... ok\ntest_explicit_zero_values_are_preserved (test_receipt_report.RenderMarkdownTests.test_explicit_zero_values_are_preserved) ... ok\ntest_incomplete_app_samples_are_not_reported_as_verified (test_receipt_report.RenderMarkdownTests.test_incomplete_app_samples_are_not_reported_as_verified) ... ok\ntest_missing_and_null_values_are_unknown (test_receipt_report.RenderMarkdownTests.test_missing_and_null_values_are_unknown) ... ok\ntest_partial_failure_preserves_applied_changes_and_usage (test_receipt_report.RenderMarkdownTests.test_partial_failure_preserves_applied_changes_and_usage) ... ok\ntest_renderer_uses_describe_receipt_without_mutating_input (test_receipt_report.RenderMarkdownTests.test_renderer_uses_describe_receipt_without_mutating_input) ... ok\ntest_skill_loading_adoption_and_validation_remain_distinct (test_receipt_report.RenderMarkdownTests.test_skill_loading_adoption_and_validation_remain_distinct) ... ok\ntest_synthetic_sample_stays_synthetic_after_successful_learning (test_receipt_report.RenderMarkdownTests.test_synthetic_sample_stays_synthetic_after_successful_learning) ... ok\n\n----------------------------------------------------------------------\nRan 15 tests in 0.001s\n\nOK\n",
+        "truncated": false
+      }
+    }
+  ],
+  "capture": {
+    "hook_events": 0,
+    "reason": "installed v0.1.6 hooks marked modified by host; not manually backfilled"
+  },
+  "claim_limits": [
+    "MCP calls completed; native usage receipt remains issued until a real PostToolUse is collected",
+    "sample tests validate the report function, not the integration by themselves",
+    "later captured B follow-up required for closed-loop acceptance"
+  ]
+}

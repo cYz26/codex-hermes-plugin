@@ -9,10 +9,10 @@ from . import __version__
 TOOLS = [
     {"name": "learning_status", "description": "Read Hermes learning progress, applied/staged changes and actual model usage. Does not trigger learning.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "context", "description": "Read the pilot project's learned memory and available skill versions. Listing does not count as skill use.",
-     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "skill_load", "description": "Load the complete, current Hermes learned skill and supporting resources when relevant to the task. Returns a version and delivery receipt.",
-     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "file_path": {"type": "string"}},
+    {"name": "context", "description": "Read Hermes personal knowledge: project-scoped memories and relevant shared skills. Pass the current task's absolute cwd and a short task query; omitted cwd returns no project memory. Listing is not skill use.",
+     "inputSchema": {"type": "object", "properties": {"cwd": {"type": "string"}, "query": {"type": "string"}}, "additionalProperties": False}},
+    {"name": "skill_load", "description": "Load a current shared Hermes skill/resource with version and source provenance. Pass the task's absolute cwd; check applicability of project-specific examples. A delivery receipt does not prove adoption.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "file_path": {"type": "string"}, "cwd": {"type": "string"}},
                      "required": ["name"], "additionalProperties": False}},
 ]
 

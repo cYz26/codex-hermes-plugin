@@ -17,7 +17,7 @@ class ProfileAuthTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         self.home = self.root / "learning-data" / "pilot"
         self.home.mkdir(parents=True)
-        self.profile = self.root / "account" / ".hermes" / "profiles" / "codex-learning-pilot"
+        self.profile = self.root / "account" / ".hermes" / "profiles" / ".codex-learning-pilot"
         self.profile.parent.mkdir(parents=True)
         self.profile.symlink_to(self.home, target_is_directory=True)
         self.config = self.home / "bridge.json"
@@ -54,6 +54,29 @@ class ProfileAuthTests(unittest.TestCase):
         data["profile_home"] = str(self.root / "account/.hermes/profiles/someone-else")
         self.config.write_text(json.dumps(data), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "profile.*home"):
+            Settings.load(self.config).native_environment()
+
+    def test_explicit_network_environment_reaches_launchd_without_copying_auth(self):
+        from hermes_codex_learning.cli import launchd
+
+        data = json.loads(self.config.read_text())
+        data["network_environment"] = {"HTTPS_PROXY": "http://127.0.0.1:8118", "NO_PROXY": "localhost,127.0.0.1,::1"}
+        self.config.write_text(json.dumps(data))
+        with patch("hermes_codex_learning.cli.Path.home", return_value=self.root / "account"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                launchd(SimpleNamespace(settings=str(self.config), replace=False, start=False))
+        path = self.root / "account/Library/LaunchAgents/com.cy.hermes-codex-learning.pilot.plist"
+        env = plistlib.loads(path.read_bytes())["EnvironmentVariables"]
+        self.assertEqual(env["HTTPS_PROXY"], "http://127.0.0.1:8118")
+        self.assertEqual(env["NO_PROXY"], "localhost,127.0.0.1,::1")
+        self.assertEqual(env["HERMES_HOME"], str(self.profile))
+        self.assertFalse((self.home / "auth.json").exists())
+
+    def test_network_environment_cannot_be_used_for_unrelated_process_settings(self):
+        data = json.loads(self.config.read_text())
+        data["network_environment"] = {"PYTHONPATH": "/another/runtime"}
+        self.config.write_text(json.dumps(data))
+        with self.assertRaisesRegex(ValueError, "network_environment"):
             Settings.load(self.config).native_environment()
 
 

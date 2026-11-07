@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+NETWORK_ENV_KEYS = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+                              "http_proxy", "https_proxy", "all_proxy", "no_proxy"})
 
 
 @dataclass(frozen=True)
@@ -16,6 +19,15 @@ class Settings:
     idle_interval: float = 600
     notifications: bool = True
     profile_home: Path | None = None
+    network_environment: dict[str, str] = field(default_factory=dict)
+    capture_scope: str = "project"
+    excluded_projects: tuple[str, ...] = ()
+
+    def __post_init__(self):
+        if self.capture_scope not in {"project", "global"}:
+            raise ValueError("capture_scope must be project or global")
+        if any(not Path(path).is_absolute() for path in self.excluded_projects):
+            raise ValueError("excluded_projects must contain absolute paths")
 
     def native_environment(self) -> dict[str, str]:
         launch_home = self.profile_home or self.home
@@ -23,7 +35,11 @@ class Settings:
             launch_home.parent.name != "profiles" or launch_home.resolve() != self.home.resolve()
         ):
             raise ValueError("profile home must name this learning home under a Hermes profiles directory")
-        return {"HERMES_HOME": str(launch_home), "HERMES_RUNTIME_DIR": str(self.home.parent / "tools")}
+        if (not isinstance(self.network_environment, dict) or set(self.network_environment) - NETWORK_ENV_KEYS
+                or any(not isinstance(value, str) for value in self.network_environment.values())):
+            raise ValueError("network_environment accepts only standard proxy environment strings")
+        return {**self.network_environment, "HERMES_HOME": str(launch_home),
+                "HERMES_RUNTIME_DIR": str(self.home.parent / "tools")}
 
     @property
     def state(self) -> Path:
@@ -34,7 +50,24 @@ class Settings:
         return self.state / "bridge.sock"
 
     def contains(self, cwd: str) -> bool:
-        return Path(cwd).resolve().is_relative_to(self.project.resolve())
+        return self.project_for(cwd) is not None
+
+    def project_for(self, cwd: str | None) -> str | None:
+        # Hook cwd is an actual local host path, never the MCP server's plugin cwd.
+        if not isinstance(cwd, str) or not cwd or not Path(cwd).is_absolute():
+            return None
+        path = Path(cwd).resolve()
+        if any(path.is_relative_to(Path(excluded).resolve()) for excluded in self.excluded_projects):
+            return None
+        if path.is_relative_to(self.project.resolve()):
+            return str(self.project.resolve())  # Preserve the pilot's existing identity.
+        if self.capture_scope != "global":
+            return None
+        # A .git file is also a root (worktree/submodule). No shell or network lookup.
+        for candidate in (path, *path.parents):
+            if (candidate / ".git").exists():
+                return str(candidate)
+        return str(path)  # Non-Git and projectless chats keep their actual host cwd.
 
     @classmethod
     def load(cls, path: str | Path | None = None) -> Settings:
@@ -47,4 +80,7 @@ class Settings:
             idle_interval=float(data.get("idle_interval", 600)),
             notifications=bool(data.get("notifications", True)),
             profile_home=Path(data["profile_home"]).expanduser().absolute() if data.get("profile_home") else None,
+            network_environment=data.get("network_environment", {}),
+            capture_scope=data.get("capture_scope", "project"),
+            excluded_projects=tuple(data.get("excluded_projects", [])),
         )

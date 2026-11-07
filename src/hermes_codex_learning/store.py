@@ -88,12 +88,20 @@ class Store:
             self.db.execute("INSERT OR IGNORE INTO notices(id,payload,created) VALUES (?,?,?)",
                             (event["id"], dumps(event), time.time()))
 
-    def consume(self, consumer: str, limit: int = 3) -> list[dict]:
+    def consume(self, consumer: str, limit: int = 3, *, project: str | None = None,
+                chat: str | None = None, legacy_project: str | None = None) -> list[dict]:
         # Claim before returning: process crashes may lose a display, never replay it forever.
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            scope_sql, scope_args = "", []
+            if project is not None:
+                scope_sql = (" AND (json_extract(n.payload,'$.project')=? OR "
+                             "(json_extract(n.payload,'$.project') IS NULL AND ?=?)) "
+                             "AND (json_extract(n.payload,'$.chat') IS NULL OR json_extract(n.payload,'$.chat')=?)")
+                scope_args = [project, project, legacy_project, chat]
             rows = self.db.execute("SELECT seq,payload FROM notices n WHERE NOT EXISTS "
-                                   "(SELECT 1 FROM deliveries d WHERE d.consumer=? AND d.seq=n.seq) ORDER BY seq LIMIT ?",
-                                   (consumer, limit)).fetchall()
+                                   "(SELECT 1 FROM deliveries d WHERE d.consumer=? AND d.seq=n.seq)" + scope_sql + " ORDER BY seq LIMIT ?",
+                                   [consumer, *scope_args, limit]).fetchall()
             for row in rows:
                 self.db.execute("INSERT INTO deliveries VALUES (?,?)", (consumer, row["seq"]))
         return [json.loads(r["payload"]) for r in rows]

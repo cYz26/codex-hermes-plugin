@@ -1,9 +1,33 @@
 from __future__ import annotations
 
 import subprocess
+import time
+from pathlib import Path
+
+from .review_receipt import receipt_text
+from .store import atomic_json, digest
+
+APP_NAME = "Hermes 学习"
+APP_ID = "com.cy.hermes-learning-notifier"
+APP_EXECUTABLE = "HermesLearningNotifier"
+
+
+def notifier_app() -> Path:
+    return Path.home() / "Applications" / f"{APP_NAME}.app"
+
+
+def should_notify(event: dict) -> bool:
+    return event["kind"] == "review.finished" and bool(
+        event.get("applied") or event.get("staged") or event.get("run_status") != "completed"
+    )
 
 
 def message(event: dict) -> str:
+    text = _message(event)
+    return f"[{Path(event['project']).name}] {text}" if event.get("project") else text
+
+
+def _message(event: dict) -> str:
     kind = event.get("kind")
     if kind == "review.started":
         return "Hermes 正在整理本轮经验"
@@ -22,10 +46,17 @@ def message(event: dict) -> str:
     return "Hermes 已完成复盘，本轮没有新增经验"
 
 
-def macos_notification(text: str) -> dict:
-    # Pass strings as argv, never interpolate untrusted learning content into AppleScript.
-    script = 'on run argv\n display notification (item 2 of argv) with title (item 1 of argv)\nend run'
-    result = subprocess.run(["/usr/bin/osascript", "-e", script, "Hermes 学习", text],
-                            capture_output=True, text=True, timeout=10)
-    return {"dispatched": result.returncode == 0, "visibility": "unknown",
-            "error": result.stderr.strip() if result.returncode else None}
+def macos_notification(state: Path, event: dict) -> dict:
+    path = state / "receipts" / (digest(event["id"]) + ".json")
+    record = {"dispatched": False, "visibility": "unknown", "transport": APP_ID}
+    try:
+        if not path.exists():
+            detail = event.get("receipt") or receipt_text(event, {}, event.get("created", time.time()))
+            atomic_json(path, {"summary": event["message"], "text": detail})
+        record["receipt_path"] = str(path)
+        binary = notifier_app() / "Contents" / "MacOS" / APP_EXECUTABLE
+        result = subprocess.run([str(binary), "--post", str(path)], capture_output=True, text=True, timeout=10)
+        return {**record, "dispatched": result.returncode == 0,
+                "error": (result.stderr.strip() or f"Notifier exited with {result.returncode}") if result.returncode else None}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {**record, "error": str(exc)}

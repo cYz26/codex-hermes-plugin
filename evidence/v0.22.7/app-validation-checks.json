@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-05T14:22:27.398339+08:00",
+  "implementation_version": "0.1.6",
+  "bridge_tests": {
+    "passed": 20,
+    "failed": 0,
+    "command": "python3 -B scripts/check_release.py"
+  },
+  "evidence_checks": {
+    "actual_receipts_accepted": true,
+    "wrong_version_rejected": true,
+    "issued_delivery_rejected": true,
+    "unprojected_turn_rejected": true
+  },
+  "business_tests": {
+    "A_passed": 6,
+    "B_passed": 15,
+    "B_direct_boundaries_passed": 3
+  },
+  "native_patch_modified_this_turn": false,
+  "installed_runtime_modified_after_user_trust": false,
+  "scope": "local offline checks plus actual saved App receipts; no model calls",
+  "updated_at": "2026-11-05T14:32:59.489153+08:00",
+  "final_host_hooks_trusted": true,
+  "negative_cases_rejected": [
+    "wrong_version",
+    "issued_delivery",
+    "unprojected_turn"
+  ],
+  "native_patch_manifest_files_verified": 14,
+  "installed_runtime_files_verified": 18,
+  "new_model_calls_in_checks": 0,
+  "user_feedback_confirmed": {
+    "chat": true,
+    "system": true
+  }
+}

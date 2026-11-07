@@ -1,0 +1,108 @@
+{
+  "generated_at": "2026-11-05T00:06:03.545779+08:00",
+  "status": "peripheral_app_validation_in_progress",
+  "implementation_version": "0.1.4",
+  "upstream": {
+    "tag": "v0.22.7",
+    "base_commit": "b200f5bc60e31588ba2cb60e288029c4a54ba5fa",
+    "patch_sha256": "9d4776a3d480ebabf1972252a928d50f12a4325dade42c627a1ce4f7ba610675",
+    "source_committed": false
+  },
+  "learning_model": {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "api_mode": "codex_responses",
+    "reasoning_effort": "max"
+  },
+  "authentication": {
+    "method": "native_profile_root_fallback",
+    "existing_hermes_login_reused": true,
+    "additional_login_required": false,
+    "credentials_copied": false,
+    "profile_auth_file_created": false
+  },
+  "deployment": {
+    "learning_data_isolated": true,
+    "gateway_multiplexer_excludes_profile": true,
+    "service_state": "idle",
+    "service_error": null,
+    "capture_scope": "one explicitly configured integration project including pilot-project, main chats only; no transcript backfill",
+    "hidden_worker_entry": true
+  },
+  "verification": {
+    "official_baseline": {
+      "files": 19,
+      "passed": 328,
+      "failed": 0
+    },
+    "modified_native": {
+      "files": 23,
+      "passed": 343,
+      "failed": 0
+    },
+    "auth_subset": {
+      "passed": 65,
+      "part_of_modified_native": true
+    },
+    "bridge": {
+      "passed": 10,
+      "failed": 0,
+      "implementation_version": "0.1.4"
+    },
+    "native_checks": {
+      "checks": 14,
+      "passed": true
+    },
+    "patch_replay": true,
+    "installed_runtime_cache_matches": true,
+    "installed_mcp_stdio": true,
+    "actual_app_hook_acceptance": false
+  },
+  "real_provider_probe": {
+    "run_status": "completed",
+    "input_provenance": "synthetic_acceptance_fixture_not_app_hooks",
+    "applied_operations": 4,
+    "memory_changes": 1,
+    "distinct_learned_skills": [
+      "agent-integration-acceptance"
+    ],
+    "staged": 0,
+    "api_calls": 6,
+    "native_usage_raw": {
+      "model": "gpt-6.1-sol",
+      "provider": "openai-codex",
+      "base_url": "https://chatgpt.com/backend-api/codex",
+      "input_tokens": 16300,
+      "output_tokens": 3252,
+      "cache_read_tokens": 68608,
+      "cache_write_tokens": 0,
+      "reasoning_tokens": 2419,
+      "api_calls": 6,
+      "estimated_cost_usd": 0.0
+    },
+    "actual_fee_usd": null,
+    "source_execution_usage": null,
+    "implementation_version": "0.1.3"
+  },
+  "data_isolation": {
+    "app_learning_files_before": 437,
+    "app_learning_files_after": 437,
+    "app_memories_and_skills_unchanged": true,
+    "profile_auth_file_created": false,
+    "fingerprint_method": "relative file path, size, and mtime_ns; root contents were not copied"
+  },
+  "remaining": {
+    "real_app_hook_trust": "not_verified",
+    "real_app_A_to_B_learning": "not_run",
+    "chat_notification_style": "not_verified",
+    "os_notification_visibility": "unknown",
+    "real_cost_comparison": "not_measured",
+    "hermes_app_profile_visibility": "hidden; confirmed by user in Sessions and Bots",
+    "app_mcp_startup": "package fixed and installed; fresh App connection pending"
+  },
+  "historical_probe_sha256": "79c042e1e6d3acfd91adf9a882d568197312efda248a0384bf738ee23fd03142",
+  "local_detail_sha256": "9eae1ef734097070faa0641f9c156b95632d9d6b88e8c486d20fde9a03d64cf9",
+  "evidence_index": "evidence/INDEX.json",
+  "previous_custom_code_config_data_inputs": [],
+  "baseline_acceptance": "evidence/v0.22.7/acceptance-v0.1.3.json"
+}

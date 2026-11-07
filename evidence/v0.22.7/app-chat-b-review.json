@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-11-05T14:28:00.869835+08:00",
+  "chat": "01a1a924-e927-7582-bcfe-87a9563fcc44",
+  "handle": "observed-cf0eb314c31ac3493c1992c791680dfb",
+  "attempt": "1229e789-dd0b-4a30-a753-75ff085a323c",
+  "intent": {
+    "id": "198f4af1ba2fa546effa05c305d075652269efd6cbe3ec454a8fd7613ef3979a",
+    "handle": "observed-cf0eb314c31ac3493c1992c791680dfb",
+    "revision": 2,
+    "memory": true,
+    "skills": true,
+    "reason": "idle_flush"
+  },
+  "run_status": "completed",
+  "operations": [
+    {
+      "name": "agent-integration-acceptance",
+      "action": "patch",
+      "file_path": null,
+      "success": true
+    },
+    {
+      "name": "agent-integration-acceptance",
+      "action": "patch",
+      "file_path": null,
+      "success": true
+    },
+    {
+      "name": "agent-integration-acceptance",
+      "action": "patch",
+      "file_path": "references/receipt-evidence.md",
+      "success": true
+    }
+  ],
+  "staged": 0,
+  "refused": 0,
+  "uncertain": 0,
+  "usage_raw": {
+    "model": "gpt-6.1-sol",
+    "provider": "openai-codex",
+    "base_url": "https://chatgpt.com/backend-api/codex",
+    "input_tokens": 23858,
+    "output_tokens": 3931,
+    "cache_read_tokens": 59776,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 2517,
+    "api_calls": 4,
+    "estimated_cost_usd": 0.0
+  },
+  "actual_fee_usd": null,
+  "manual_review_trigger": false,
+  "native_thresholds_changed": false,
+  "artifacts_after_B_review": {
+    "agent-integration-acceptance": {
+      "version": "b76376212e7697c701fa1b51785aa23406463f2b6a5b803d389e49a9256abff2",
+      "files": {
+        "SKILL.md": "d0a020fc9cd759311b872e93e9477794d1d1fa90927ce8181b256804de75e9b4",
+        "references/receipt-evidence.md": "b94a58187bde039a4ba0ebca79b1bd87d6580485cec079ceb1a6c647e62d9d43"
+      }
+    }
+  },
+  "notification": {
+    "message": "Hermes 已学习：3 项变更生效",
+    "created_at": "2026-11-05T14:25:26.489542+08:00",
+    "result": {
+      "dispatched": true,
+      "error": null,
+      "visibility": "unknown"
+    },
+    "user_visibility": "observed_by_user",
+    "user_report": "看到了系统通知",
+    "user_reported_at": "2026-11-05T14:30:46.274219+08:00"
+  }
+}

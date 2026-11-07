@@ -1,0 +1,15 @@
+{
+  "actual_App_MCP": true,
+  "caller_chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+  "own_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+  "own_memory_targets": [
+    "MEMORY.md"
+  ],
+  "other_project": "/Users/cy/Dev/dev001",
+  "other_project_memory_targets": [],
+  "shared_skill_found": true,
+  "capture_scope": "global",
+  "error": null,
+  "observed_review_calls": 18,
+  "claim": "Explicit scoped retrieval from the current App chat; not an execution in the other project"
+}

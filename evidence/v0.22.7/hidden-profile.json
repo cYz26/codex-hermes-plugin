@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-11-04T23:21:50.188219+08:00",
+  "base_version": "v0.22.7",
+  "base_commit": "b200f5bc60e31588ba2cb60e288029c4a54ba5fa",
+  "scope": "hidden background entry; no App/core code patch",
+  "entry": {
+    "previous_name": "codex-learning-pilot",
+    "current_name": ".codex-learning-pilot",
+    "previous_link_removed": true,
+    "physical_data_moved": false,
+    "normal_named_profile": false,
+    "startup": "explicit HERMES_HOME from bridge settings"
+  },
+  "native_contract": {
+    "status": "passed",
+    "probe": "probes/check_hidden_profile.py",
+    "probe_sha256": "0af7d71da6c04da95e20fd3cdb203a4ea3865d0eaac7ce9ae136710a3b30e5d6",
+    "temporary_dummy_credentials_only": true,
+    "enumeration_omits_hidden": true,
+    "oauth_fallback_and_refresh_writeback": true,
+    "learning_api_data_isolation": true
+  },
+  "live_checks": {
+    "app_rest": {
+      "method": "GET /api/profiles",
+      "before": [
+        "default",
+        "codex-learning-pilot",
+        "coding"
+      ],
+      "after": [
+        "default",
+        "coding"
+      ]
+    },
+    "bots_rpc": {
+      "method": "profiles.list",
+      "before": [
+        "default",
+        "coding",
+        "codex-learning-pilot"
+      ],
+      "after": [
+        "default",
+        "coding"
+      ]
+    },
+    "service": {
+      "state": "idle",
+      "error": null
+    },
+    "authentication": {
+      "logged_in": true,
+      "same_root": true,
+      "same_source": true,
+      "profile_auth_json_created": false
+    },
+    "learning_memory_and_skill_sha256_unchanged_files": 313,
+    "persisted_review_api_calls_before": 6,
+    "persisted_review_api_calls_after": 6,
+    "bridge_tests": {
+      "passed": 9,
+      "failed": 0
+    },
+    "app_active_profile": "default",
+    "direct_app_ui_verified": false,
+    "ui_observation_limitation": "computer-use interface timeout"
+  },
+  "deployment": {
+    "learning_service_restarted": true,
+    "app_restarted": false,
+    "credentials_copied": false,
+    "initial_launchd_bootstrap": "transient exit 5 while previous registration was retiring",
+    "recovery": "restored original service, then waited for owner locks and registration before bounded reload"
+  },
+  "new_model_calls": 0,
+  "real_provider_probe_rerun": false,
+  "actual_codex_app_hook_acceptance": false,
+  "historical_acceptance_records_rewritten": false
+}

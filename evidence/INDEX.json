@@ -162,6 +162,246 @@
       "path": "evidence/v0.22.7/usage-restart-red.log",
       "sha256": "870b9d22f27f0532477901e5a49e67f445c020adcd6cbcc2fd1a4055b149bdda",
       "visibility": "repository"
+    },
+    {
+      "original": "hidden-profile.json",
+      "path": "evidence/v0.22.7/hidden-profile.json",
+      "sha256": "39c2f59f6460181ab35cfb7782bebaa5c5706d9905fd56c0bc50524fa97e0402",
+      "visibility": "repository"
+    },
+    {
+      "original": "peripheral-v0.1.4-mcp.json",
+      "path": "evidence/v0.22.7/peripheral-v0.1.4-mcp.json",
+      "sha256": "b1264221c16459330c0e2fef1e83258849f612a1f9eee553dfe85317893c85b4",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-chat-a.json",
+      "path": "evidence/v0.22.7/app-chat-a.json",
+      "sha256": "a21dee2e78290408bdf19078142fb515d72945bb016ec80e5fc7d37a8486ddfc",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-chat-b-initial.json",
+      "path": "evidence/v0.22.7/app-chat-b-initial.json",
+      "sha256": "2fbcdf1348b4d16e3e9f253fe1acd9ce1f55b443cbc6d93fe21615cc7772c7b4",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-hooks-after-upgrade.json",
+      "path": "evidence/v0.22.7/app-hooks-after-upgrade.json",
+      "sha256": "11c02b321114dada0a88036eb9f4804fe7108b6097a7eceab39f77469b32afc1",
+      "visibility": "repository"
+    },
+    {
+      "original": "peripheral-v0.1.6-runtime.json",
+      "path": "evidence/v0.22.7/peripheral-v0.1.6-runtime.json",
+      "sha256": "7c7602f86050e759f73d75cff0ce1a852187dc48802234ffa8cd7acc207e8756",
+      "visibility": "repository"
+    },
+    {
+      "original": "acceptance-v0.1.3.json",
+      "path": "evidence/v0.22.7/acceptance-v0.1.3.json",
+      "sha256": "714aa6daf10d8477208d69683c8b18d222e84be3dcf3680eeea49b29ec864375",
+      "visibility": "repository"
+    },
+    {
+      "original": "acceptance-v0.1.4.json",
+      "path": "evidence/v0.22.7/acceptance-v0.1.4.json",
+      "sha256": "53eb945c9563312cd6aa9b36367c53854c6fb2875c7fec54ebe85aae527cc056",
+      "visibility": "repository"
+    },
+    {
+      "original": "acceptance-v0.1.5.json",
+      "path": "evidence/v0.22.7/acceptance-v0.1.5.json",
+      "sha256": "4c5323f4ba94920b28e64d18b52055f8a3fafc2e7add093729c7d6d34d41d243",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-hooks-retrusted.json",
+      "path": "evidence/v0.22.7/app-hooks-retrusted.json",
+      "sha256": "748e5dda20af6ddd1de88c659cb965e95a3c8091c0dcb8f64f6d29f448707100",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-chat-b-captured.json",
+      "path": "evidence/v0.22.7/app-chat-b-captured.json",
+      "sha256": "6cb79359252eb3c1348d590d2fd4d1e61ea84e29e503526030505b27c210641c",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-closed-loop.json",
+      "path": "evidence/v0.22.7/app-closed-loop.json",
+      "sha256": "11b764b6bbfa1004fe73dbd83d419fafe9dad51021ed35e60c58d31e8b5f63ca",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-chat-b-review.json",
+      "path": "evidence/v0.22.7/app-chat-b-review.json",
+      "sha256": "f1183cb37e6b480435eccfa39f156f21ad57e54f7dcd2255bf9dad047069b71e",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-validation-checks.json",
+      "path": "evidence/v0.22.7/app-validation-checks.json",
+      "sha256": "1f6a05fac9f8465282eaa10a3d055abc82e64347ccc608c893a0603ce5b14d4b",
+      "visibility": "repository"
+    },
+    {
+      "original": "app-release-checks.log",
+      "path": "evidence/v0.22.7/app-release-checks.log",
+      "sha256": "9e8e62e1f45eeb7feca6b49fac58333200b9420e0647b386a9b3522647db7329",
+      "visibility": "repository"
+    },
+    {
+      "path": "evidence/v0.22.7/acceptance-v0.1.6.json",
+      "visibility": "repository",
+      "sha256": "5f7ac9061781217bc54fbcf8a4266b8e21e6a5a5c5d731044a730fcc606fbfbf",
+      "scope": "Preserved 0.1.6 single-project App acceptance before global rollout"
+    },
+    {
+      "path": "evidence/v0.22.7/global-app-capture.json",
+      "visibility": "repository",
+      "sha256": "99e6d4f20d169090fd23f36a0e0576e043c14925ea852395b6f459fba97477cf",
+      "scope": "0.2.0 global rollout; provenance and exercised scope recorded per file"
+    },
+    {
+      "path": "evidence/v0.22.7/global-app-mcp.json",
+      "visibility": "repository",
+      "sha256": "790786f91ace985ec072c375e9143a6392fe345313ecd0d8fdcee7816908a44a",
+      "scope": "0.2.0 global rollout; provenance and exercised scope recorded per file"
+    },
+    {
+      "path": "evidence/v0.22.7/global-hooks-after-upgrade.json",
+      "visibility": "repository",
+      "sha256": "4fa1e1824737044b8ab6897889ec17e2bcd842612fc4e135bdf894ab762cca33",
+      "scope": "0.2.0 global rollout; provenance and exercised scope recorded per file"
+    },
+    {
+      "path": "evidence/v0.22.7/global-hooks-retrusted.json",
+      "visibility": "repository",
+      "sha256": "49d8ffa713fa534089da4f996fcfa4e39d59870b0026006b4c6fc19ac9d8d84c",
+      "scope": "0.2.0 global rollout; provenance and exercised scope recorded per file"
+    },
+    {
+      "path": "evidence/v0.22.7/global-rollout.json",
+      "visibility": "repository",
+      "sha256": "441aa3cd76ba4e588c8a165aa20c9af24f7c69ccaf5ae52de18ac021c69e829c",
+      "scope": "0.2.0 global rollout; provenance and exercised scope recorded per file"
+    },
+    {
+      "path": "evidence/v0.22.7/global-runtime.json",
+      "visibility": "repository",
+      "sha256": "7b83ed0b99f9c1133e07803549964dc19e84b68f1bd853cc0e64e1e9708991d4",
+      "scope": "0.2.0 global rollout; provenance and exercised scope recorded per file"
+    },
+    {
+      "path": "evidence/v0.22.7/global-release-checks.log",
+      "visibility": "repository",
+      "sha256": "a3d37719cb1822ac2e9fe87e8b84a5a5d8645ef9d0ecfbcaa0f5562d9ac49544",
+      "scope": "0.2.0 offline release checks and 32 portable regressions; no model call"
+    },
+    {
+      "path": "evidence/v0.22.7/acceptance-v0.2.0.json",
+      "visibility": "repository",
+      "sha256": "fca976b7bb532502733b135f49235fbeda4138b8f00d979bf7f72a4a2e06a4a4",
+      "scope": "Preserved 0.2.0 global deployment evidence"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-cwd-repro.json",
+      "visibility": "repository",
+      "sha256": "9df2be388c24c690c05cafb60197f9ee1882d6104457e920cbf06aff657004a5",
+      "scope": "Actual 0.2.0 App workspace scope counterexample without memory payloads"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-021-installed.json",
+      "visibility": "repository",
+      "sha256": "65802bd498864706afaad655ef05e74514b763b87878d362697a5569faff35b8",
+      "scope": "0.2.1 App cross-project verification; exact exercised scope in this receipt"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-021-scope-probe.json",
+      "visibility": "repository",
+      "sha256": "890c7680c4571c1d5bf4eabb3cd7bab9c7be81bdd56910ae17cc3565e8227867",
+      "scope": "Live project workspace and scoped memory checks on 0.2.1"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-021-shared-skill.json",
+      "visibility": "repository",
+      "sha256": "34abd7c5d075cccd43d74665b2fae93e8a46ca7dbcace731286ccb1af70d67cb",
+      "scope": "0.2.1 App cross-project verification; exact exercised scope in this receipt"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-021-training-host.json",
+      "visibility": "repository",
+      "sha256": "2e5df5724bd2f4aab3b41316afbec6c31e146fd50f38a27441fbd5e6e2b13a44",
+      "scope": "0.2.1 App cross-project verification; exact exercised scope in this receipt"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-021-training.json",
+      "visibility": "repository",
+      "sha256": "588f592e458c784b633d807e5208ce0a715c8f544e9806a8eaf9fb0049f4ab00",
+      "scope": "0.2.1 App cross-project verification; exact exercised scope in this receipt"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-021-scoped-context.json",
+      "visibility": "repository",
+      "sha256": "8d55ca9b98370952d502ba4d0189346fc946957ea487cfd10b83573cf5901674",
+      "scope": "Live project workspace and scoped memory checks on 0.2.1"
+    },
+    {
+      "path": "evidence/v0.22.7/global-cross-project-021-auto-recall.json",
+      "visibility": "repository",
+      "sha256": "f8ebe75e804ff253e879c20e77979f3019d1e3001c74696ba3bba4025261aa9c",
+      "scope": "Two real fresh App chats created through Codex tools, exact own label recall, model context and projection; digests only"
+    },
+    {
+      "path": "evidence/v0.22.7/acceptance-v0.2.1.json",
+      "sha256": "acddb5ec5bd95aa6e4ec810340cff627831b036a1ebe6f35bf674f7ed7e8893c",
+      "visibility": "repository",
+      "scope": "Preserved 0.2.1 full cross-project loop"
+    },
+    {
+      "path": "evidence/v0.22.7/final-curator-due.json",
+      "sha256": "176ee5e75eff836e0729d5896a8ec2163e724f7de8598da0dcef1974c33ebd0d",
+      "visibility": "repository",
+      "scope": "Native Curator due and idle gates exercised by the isolated worker poll"
+    },
+    {
+      "path": "evidence/v0.22.7/final-hook-budget.json",
+      "sha256": "7ac66ddf08806cd086a1fd941ae8845398d03490eff1959fd0f843e71c0e7c7c",
+      "visibility": "repository",
+      "scope": "Trusted installed Codex hook output limit and code digests"
+    },
+    {
+      "path": "evidence/v0.22.7/final-notification-click.json",
+      "sha256": "a29caa2f1f57ef74f66ad86c6051b1052f5c33550160cdaaeb8afa5f6a7bd24a",
+      "visibility": "repository",
+      "scope": "Real macOS notification click confirmed by the user and receipt window readback"
+    },
+    {
+      "path": "evidence/v0.22.7/final-cost-threshold.json",
+      "sha256": "4da12e354ab6f5da905bc3866667c8651edb8952173252e33d0da33427d8fd23",
+      "visibility": "repository",
+      "scope": "Matched task at the native threshold with recorded provider usage"
+    },
+    {
+      "path": "evidence/v0.22.7/final-cost-idle.json",
+      "sha256": "a1b1b5bf5f16a788f536d373fae0fed82796f5ac4f8ea3c9b1d918b656fd096b",
+      "visibility": "repository",
+      "scope": "Matched short task with the bridge idle supplement and recorded provider usage"
+    },
+    {
+      "path": "evidence/v0.22.7/final-worker-recovery.json",
+      "sha256": "6bd3a22cba49373742db97802142c4b78e50cdeb91010c31b9996f2d72012d27",
+      "visibility": "repository",
+      "scope": "Live daemon recovery, intact learning scope and checkpoint backlog delivery"
+    },
+    {
+      "path": "evidence/v0.22.7/final-app-recall.json",
+      "sha256": "5ac65de92d06a1959fb7d74cbc3578ded061f4ae116408bf89049712488fa48b",
+      "visibility": "repository",
+      "scope": "Real 0.2.2 App hook and MCP project recall and native projection"
     }
   ],
   "private_records": "Retained locally under evidence/private and intentionally excluded from Git. Public summaries omit live delivery receipts."

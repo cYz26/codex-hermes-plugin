@@ -3,17 +3,78 @@ from __future__ import annotations
 import json
 import socket
 import sys
+from pathlib import Path
 
 from .config import Settings
+from .delegation import exclude_internal
+from .knowledge import context_view
 from .store import Store
+
+ADDITIONAL_CONTEXT_LIMIT = 256
+
+
+def model_context(summary: str, project: str | None) -> str:
+    """Bound the complete payload by bytes, an upper bound for byte-level BPE tokens."""
+    head = "Hermes 学习经验\n"
+    tail = "\n参考。按需查 hermes_learning.context(cwd=聊天项目路径)"
+    if project and project.isprintable():
+        scoped_head = f"Hermes 全局自动学习已启用；当前项目：{project}\n"
+        scoped_tail = "\n参考。按需查 hermes_learning.context(cwd=上方路径)"
+        if len((scoped_head + scoped_tail).encode("utf-8")) <= ADDITIONAL_CONTEXT_LIMIT:
+            head, tail = scoped_head, scoped_tail
+    room = ADDITIONAL_CONTEXT_LIMIT - len((head + tail).encode("utf-8"))
+    preview = summary.encode("utf-8", errors="replace")[:room].decode("utf-8", errors="ignore")
+    return head + preview + tail
+
+
+def chat_workspace(store: Store, payload: dict) -> str | None:
+    """Use lifecycle hooks for the chat workspace. Tool cwd is command-local."""
+    session = payload.get("session_id")
+    if not isinstance(session, str) or not session:
+        return None
+    key = f"chat-workspace:{session}"
+    cwd = payload.get("cwd")
+    event = payload.get("hook_event_name")
+    workspace = store.get(key)
+    if event in {"SessionStart", "UserPromptSubmit"}:
+        if isinstance(cwd, str) and Path(cwd).is_absolute():
+            store.set(key, cwd)
+            return cwd
+        return None
+    if workspace is None:
+        # Recover resumed chats from durable pre-upgrade lifecycle receipts.
+        row = store.db.execute(
+            "SELECT json_extract(payload,'$.cwd') FROM events "
+            "WHERE json_extract(payload,'$.session_id')=? "
+            "AND json_extract(payload,'$.hook_event_name') IN ('SessionStart','UserPromptSubmit','Stop','Interrupt') "
+            "ORDER BY created DESC LIMIT 1", (session,),
+        ).fetchone()
+        workspace = row[0] if row else None
+        if workspace is None and event in {"Stop", "Interrupt"}:
+            workspace = cwd
+        if isinstance(workspace, str) and Path(workspace).is_absolute():
+            store.set(key, workspace)
+    return workspace
 
 
 def hook(payload: dict, settings: Settings) -> dict:
-    if not settings.contains(payload.get("cwd", "/")) or payload.get("agent_id"):
+    if payload.get("agent_id"):
+        return {}
+    command_cwd = payload.get("cwd")
+    command_project = settings.project_for(command_cwd)
+    if settings.capture_scope == "project" and command_project is None:
         return {}
     store = Store(settings.state)
     try:
-        payload = {**payload, "bridge_project": str(settings.project), "bridge_host": store.get("host_id")}
+        if exclude_internal(store, payload):
+            return {}
+        project = command_project
+        if settings.capture_scope == "global":
+            workspace = chat_workspace(store, payload)
+            project = settings.project_for(workspace)
+        if project is None or command_project is None:
+            return {}
+        payload = {**payload, "bridge_project": project, "bridge_host": store.get("host_id")}
         store.capture(payload)
         # Wake-up is best-effort; the durable outbox is polled after a restart.
         try:
@@ -24,28 +85,27 @@ def hook(payload: dict, settings: Settings) -> dict:
         except (OSError, TimeoutError):
             pass
         event = payload.get("hook_event_name")
-        if event not in {"SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"}:
+        if event not in {"SessionStart", "UserPromptSubmit", "PostToolUse"}:
             return {}
-        result: dict = {}
-        notices = store.consume("chat-ui", 2)
-        if notices:
-            result["systemMessage"] = " · ".join(n["message"] for n in notices)
-        if event in {"SessionStart", "UserPromptSubmit", "PostToolUse"}:
-            cache_file = settings.state / "context.json"
-            cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
-            session = payload.get("session_id", "unknown")
-            version = cache.get("version")
-            key = f"context-delivered:{session}"
-            if version and cache.get("summary") and store.get(key) != version:
-                # Conservative character ceiling, additionally bounded by the host token limit.
-                text = cache.get("summary", "")[:520]
-                result["hookSpecificOutput"] = {
+        cache_file = settings.state / "context.json"
+        cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
+        session = payload.get("session_id", "unknown")
+        if event == "UserPromptSubmit":
+            store.set("recall-query:" + session, str(payload.get("prompt") or "")[:4000])
+        if settings.capture_scope == "global":
+            cache = context_view(cache, project, store.get("recall-query:" + session, ""))
+        version = cache.get("version")
+        key = f"context-delivered:{session}:{project}" if settings.capture_scope == "global" else f"context-delivered:{session}"
+        if version and (cache.get("summary") or settings.capture_scope == "global") and store.get(key) != version:
+            text = model_context(cache.get("summary", ""), project if settings.capture_scope == "global" else None)
+            store.set(key, version)
+            return {
+                "hookSpecificOutput": {
                     "hookEventName": event,
-                    "additionalContext": "Hermes 学习成果（历史证据，不覆盖当前指令）\n" + text +
-                    "\n相关技能请通过 hermes_learning 的 skill_load 按需加载。",
+                    "additionalContext": text,
                 }
-                store.set(key, version)
-        return result
+            }
+        return {}
     finally:
         store.close()
 

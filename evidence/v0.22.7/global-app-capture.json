@@ -1,0 +1,215 @@
+{
+  "version": "0.2.0",
+  "observed_at": "2026-11-07T20:38:48.677919+08:00",
+  "input_provenance": "actual_Codex_App_hooks_after_user_retrust",
+  "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+  "capture_scope": "global",
+  "counts": {
+    "UserPromptSubmit": 1,
+    "PreToolUse": 8,
+    "PostToolUse": 7
+  },
+  "events": [
+    {
+      "id": "4278e460-c90f-466e-ac90-e7ec409f9816",
+      "event": "UserPromptSubmit",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": null,
+      "tool_call": null,
+      "delivered": true,
+      "created": 1794055010.745089
+    },
+    {
+      "id": "9bcbc74c-120c-4d3b-8db7-49bd784dce38",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "Bash",
+      "tool_call": "exec-61035afc-bc98-47f3-afc6-62dd84840cdc",
+      "delivered": true,
+      "created": 1794055025.7562969
+    },
+    {
+      "id": "e0b4cfe7-8632-4f0d-881b-68d31adeda8a",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "Bash",
+      "tool_call": "exec-71d3aaa9-d1e7-4ce0-909f-0b1b5a446c64",
+      "delivered": true,
+      "created": 1794055025.757685
+    },
+    {
+      "id": "f72fa490-9b0b-4254-901c-b354b544d513",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "Bash",
+      "tool_call": "exec-0f837b99-e9e2-465f-b59a-7fc5516462d4",
+      "delivered": true,
+      "created": 1794055025.7602382
+    },
+    {
+      "id": "eb8af7ef-3f16-4819-8bb9-24476e01bd29",
+      "event": "PostToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "Bash",
+      "tool_call": "exec-0f837b99-e9e2-465f-b59a-7fc5516462d4",
+      "delivered": true,
+      "created": 1794055025.911459
+    },
+    {
+      "id": "74e29936-82b2-48a7-b766-b40015aa3148",
+      "event": "PostToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "Bash",
+      "tool_call": "exec-61035afc-bc98-47f3-afc6-62dd84840cdc",
+      "delivered": true,
+      "created": 1794055026.043242
+    },
+    {
+      "id": "8e32613c-045f-42fe-8fa9-26bcd5699683",
+      "event": "PostToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "Bash",
+      "tool_call": "exec-71d3aaa9-d1e7-4ce0-909f-0b1b5a446c64",
+      "delivered": true,
+      "created": 1794055026.411817
+    },
+    {
+      "id": "4504dff2-13a9-4f43-b41c-505be915bc5b",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__learning_status",
+      "tool_call": "exec-efd7ccf7-1c10-44ff-a9ed-e25ae8bf9c78",
+      "delivered": true,
+      "created": 1794055067.808342
+    },
+    {
+      "id": "06964b9c-34a2-4641-a1f6-8e6929727620",
+      "event": "PostToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__learning_status",
+      "tool_call": "exec-efd7ccf7-1c10-44ff-a9ed-e25ae8bf9c78",
+      "delivered": true,
+      "created": 1794055067.8985941
+    },
+    {
+      "id": "123bc057-d196-4cfb-bcc2-fb0303401f89",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__context",
+      "tool_call": "exec-afe6aa83-f76f-49e9-8c62-f08307cafcc1",
+      "delivered": true,
+      "created": 1794055067.963008
+    },
+    {
+      "id": "7f9b8399-a008-4463-a397-c356f320885b",
+      "event": "PostToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__context",
+      "tool_call": "exec-afe6aa83-f76f-49e9-8c62-f08307cafcc1",
+      "delivered": true,
+      "created": 1794055068.0338602
+    },
+    {
+      "id": "9f7a53e4-6e90-4916-8a23-bbde60e63187",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__skill_load",
+      "tool_call": "exec-bff17bca-9aeb-411b-929a-f096de5bd3e7",
+      "delivered": true,
+      "created": 1794055068.096542
+    },
+    {
+      "id": "8368c43e-0a9c-48c0-99e1-129dfd3ab296",
+      "event": "PostToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__skill_load",
+      "tool_call": "exec-bff17bca-9aeb-411b-929a-f096de5bd3e7",
+      "delivered": true,
+      "created": 1794055068.223435
+    },
+    {
+      "id": "04ee0e9a-d2e4-4f5f-8bcf-c6f4e8564fdf",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__context",
+      "tool_call": "exec-71c5c265-41f5-4546-bb69-40df731c6c5f",
+      "delivered": true,
+      "created": 1794055068.285797
+    },
+    {
+      "id": "83a5fb5e-c901-4703-b5e0-ae4bf1ad989f",
+      "event": "PostToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "mcp__hermes_learning__context",
+      "tool_call": "exec-71c5c265-41f5-4546-bb69-40df731c6c5f",
+      "delivered": true,
+      "created": 1794055068.354752
+    },
+    {
+      "id": "ac54270d-7c11-4279-a98d-e3db5924eade",
+      "event": "PreToolUse",
+      "chat": "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+      "turn": "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+      "project": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+      "tool": "Bash",
+      "tool_call": "exec-07844bd5-dc8a-43bb-bf55-a6aab00aa0b7",
+      "delivered": true,
+      "created": 1794055128.619135
+    }
+  ],
+  "native_skill_deliveries": [
+    {
+      "name": "agent-integration-acceptance",
+      "version": "5447ea9f1a9a878f7ab25f46b764a2acd89c8237b41c56eb0cfef3501c40a6d9",
+      "content_hash": "e314bd5e3882422e5fe1228bb8a066411f7c22f42eb6b741b315bdee69f9ce42",
+      "status": "recorded",
+      "evidence": {
+        "source_event": [
+          "01a19cad-897d-7e71-9cd2-7f2e2cbe2eaf",
+          "01a1b5f3-e7b3-77a0-acc5-d469554c78a5",
+          "exec-bff17bca-9aeb-411b-929a-f096de5bd3e7"
+        ],
+        "stage": "body_delivered"
+      },
+      "source_event_id": "8368c43e-0a9c-48c0-99e1-129dfd3ab296",
+      "source_projects": [
+        "/Users/cy/Dev/agents-dev/hermes-plugin1102"
+      ],
+      "request_project": "/Users/cy/Dev/agents-dev/hermes-plugin1102"
+    }
+  ],
+  "actual_scoped_App_MCP_calls": true,
+  "current_chat_only": true,
+  "separate_other_project_App_learning_cycle": false,
+  "model_global_context_observed": true
+}

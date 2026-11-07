@@ -1,0 +1,58 @@
+{
+  "source": "read_thread_from_real_Codex_App",
+  "normal_user_composer": true,
+  "projects": {
+    "A": {
+      "thread": {
+        "id": "01a1b619-ecf5-7381-b7c7-5cf28160af7d",
+        "host_id": "local",
+        "title": "执行项目回执验收",
+        "cwd": "/Users/cy/Dev/agents-dev/hermes-plugin1102"
+      },
+      "turn": "01a1b619-ef33-7d81-b055-3c99d692d782",
+      "status": "completed",
+      "command_executions": [
+        {
+          "id": "exec-2dc0d902-fe0b-4b3a-88b6-aad9bed720ba",
+          "cwd": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "exit_code": 0,
+          "status": "completed",
+          "fixture_check": true
+        },
+        {
+          "id": "exec-62ba7706-2ad6-42bb-9144-5e30f2b63931",
+          "cwd": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "exit_code": 0,
+          "status": "completed",
+          "fixture_check": false
+        },
+        {
+          "id": "exec-d9f8f1d5-7e9c-4350-b4a5-b76e6aedc0fd",
+          "cwd": "/Users/cy/Dev/agents-dev/hermes-plugin1102",
+          "exit_code": 0,
+          "status": "completed",
+          "fixture_check": true
+        }
+      ]
+    },
+    "B": {
+      "thread": {
+        "id": "01a1b61a-3de5-7b63-be18-40140dc3da7b",
+        "host_id": "local",
+        "title": "执行项目回执验收",
+        "cwd": "/Users/cy/Dev/dev001"
+      },
+      "turn": "01a1b61a-4039-7643-b01d-1dcf69d156da",
+      "status": "completed",
+      "command_executions": [
+        {
+          "id": "exec-edc99768-f2d5-47cb-8cc0-f8360a1eaebd",
+          "cwd": "/Users/cy/Dev/dev001",
+          "exit_code": 0,
+          "status": "completed",
+          "fixture_check": true
+        }
+      ]
+    }
+  }
+}

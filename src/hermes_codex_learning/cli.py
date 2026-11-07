@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import plistlib
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-from .config import Settings
+from .config import NETWORK_ENV_KEYS, Settings
 from .store import atomic_json
 
 BASE = "b200f5bc60e31588ba2cb60e288029c4a54ba5fa"
@@ -49,10 +51,12 @@ def initialize(args) -> int:
     plugin.parent.mkdir(parents=True, exist_ok=True)
     plugin.symlink_to(root / "hermes-plugin", target_is_directory=True)
     profile = bind_profile_home(home, Path(args.profile_home) if args.profile_home else
-                                account_default_hermes_home() / "profiles" / "codex-learning-pilot")
+                                account_default_hermes_home() / "profiles" / ".codex-learning-pilot")
     path = home / "bridge.json"
     atomic_json(path, {"home": str(home), "project": str(project), "source": str(source),
+                       "capture_scope": args.capture_scope, "excluded_projects": [],
                        "python": str(interpreter), "profile_home": str(profile),
+                       "network_environment": {key: os.environ[key] for key in NETWORK_ENV_KEYS if os.environ.get(key)},
                        "idle_seconds": 120, "idle_interval": 600, "notifications": True})
     print(json.dumps({"settings": str(path), "effort": "max", "authentication": "native_profile_fallback", "service": "not_started"}))
     return 0
@@ -81,17 +85,59 @@ def launchd(args) -> int:
     return 0
 
 
+def install_notifier() -> int:
+    from .notify import APP_EXECUTABLE, APP_ID, APP_NAME, notifier_app
+
+    app = notifier_app()
+    source = Path(__file__).resolve().parents[2] / "macos/HermesLearningNotifier.swift"
+    app.parent.mkdir(parents=True, exist_ok=True)
+    if app.exists():
+        installed = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+        if installed.get("CFBundleIdentifier") != APP_ID:
+            raise FileExistsError(str(app))
+
+    with tempfile.TemporaryDirectory(prefix=".hermes-learning-", dir=app.parent) as staging:
+        candidate = Path(staging) / app.name
+        binary = candidate / "Contents" / "MacOS" / APP_EXECUTABLE
+        binary.parent.mkdir(parents=True)
+        (candidate / "Contents/Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleIdentifier": APP_ID, "CFBundleExecutable": APP_EXECUTABLE,
+            "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "LSMinimumSystemVersion": "12.0",
+            "LSUIElement": True,
+        }))
+        target = f"{platform.machine()}-apple-macosx12.0"
+        subprocess.run(["/usr/bin/xcrun", "swiftc", "-target", target, "-O", str(source), "-o", str(binary)], check=True)
+        subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(candidate)], check=True)
+        backup = Path(staging) / "previous.app"
+        if app.exists():
+            app.rename(backup)
+        try:
+            candidate.rename(app)
+        except OSError:
+            if backup.exists():
+                backup.rename(app)
+            raise
+
+    subprocess.run(["/usr/bin/open", "-gnj", "-a", str(app), "--args", "--authorize"], check=True)
+    print(app)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Codex–Hermes learning bridge")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("hook")
     commands.add_parser("mcp")
+    commands.add_parser("install-notifier", help="Build and register the local macOS learning notification app")
     init = commands.add_parser("init")
     init.add_argument("--home", default=str(Path.home() / ".hermes-codex-learning/pilot"))
     init.add_argument("--source", required=True)
     init.add_argument("--project", required=True)
+    init.add_argument("--capture-scope", choices=["project", "global"], default="project",
+                      help="global accepts all local main chats; project retains the pilot allowlist")
     init.add_argument("--python", required=True)
-    init.add_argument("--profile-home", help="Native root/profiles/name entry for existing Hermes authentication")
+    init.add_argument("--profile-home", help="Root/profiles entry for native auth; defaults to hidden .codex-learning-pilot")
     service = commands.add_parser("launchd")
     service.add_argument("--settings", required=True)
     service.add_argument("--start", action="store_true")
@@ -111,6 +157,8 @@ def main() -> int:
     if args.command == "mcp":
         from .mcp import main as mcp
         return mcp()
+    if args.command == "install-notifier":
+        return install_notifier()
     if args.command == "init":
         return initialize(args)
     if args.command == "launchd":
