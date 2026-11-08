@@ -55,7 +55,12 @@ def check_versions_and_patch():
     acceptance = json.loads((ROOT / "ACCEPTANCE.json").read_text(encoding="utf-8"))
     assert acceptance["upstream"]["base_commit"] == base
     assert acceptance["upstream"]["patch_sha256"] == manifest["patch_sha256"]
-    assert acceptance["implementation_version"] == version
+    # App/provider evidence keeps the version actually exercised; an updater
+    # release must not relabel historical learning acceptance as its own.
+    assert tuple(map(int, acceptance["implementation_version"].split("."))) <= tuple(map(int, version.split(".")))
+    sys.path.insert(0, str(ROOT / "src"))
+    from hermes_codex_learning.updates import catalog
+    catalog(ROOT)
     assert digest(ROOT / "HERMES-CODEX-PROBE.json") == acceptance["historical_probe_sha256"]
     assert isinstance(acceptance["verification"]["actual_app_hook_acceptance"], bool)
     if acceptance["verification"]["actual_app_hook_acceptance"]:
@@ -68,7 +73,8 @@ def check_versions_and_patch():
     if cross_project.get("two_project_automatic_learning"):
         check_cross_project_learning(cross_project)
     if acceptance.get("finalization", {}).get("state") == "passed":
-        check_finalization(acceptance, version, base)
+        check_finalization(acceptance, acceptance["implementation_version"], base,
+                           current_sources=acceptance["implementation_version"] == version)
     assert acceptance["real_provider_probe"]["input_provenance"] == "synthetic_acceptance_fixture_not_app_hooks"
     assert (ROOT / "scripts/bridge").stat().st_mode & 0o111, "hook launcher is not executable"
     for record in json.loads((ROOT / "evidence/INDEX.json").read_text(encoding="utf-8"))["records"]:
@@ -76,14 +82,15 @@ def check_versions_and_patch():
             assert digest(ROOT / record["path"]) == record["sha256"], record["path"]
 
 
-def check_finalization(acceptance, version, base):
+def check_finalization(acceptance, version, base, *, current_sources=True):
     """Bind the release claims to the exercised package, worker and host receipts."""
     final = acceptance["finalization"]
     assert final["candidate_version"] == version
     data = {key: json.loads((ROOT / path).read_text()) for key, path in final["evidence"].items()}
     assert all(record["status"] == "passed" and record["version"] == version for record in data.values())
-    worker = digest(ROOT / "scripts/serve.py")
     curator = data["curator"]
+    worker = digest(ROOT / "scripts/serve.py") if current_sources else curator["worker_entry_sha256"]
+    assert re.fullmatch(r"[a-f0-9]{64}", worker)
     assert curator["worker_entry_sha256"] == worker and curator["trigger"] == "scheduled_worker_poll"
     assert curator["not_due_skipped"] and curator["active_scope_skipped"] and curator["same_interval_not_repeated"]
     assert curator["run_count"] == 1 and curator["native_model_calls"] == 0
@@ -92,11 +99,15 @@ def check_finalization(acceptance, version, base):
     notice = data["notification"]
     assert notice["dispatch_accepted"] and notice["user_confirmed_click"] and notice["model_calls"] == 0
     assert notice["marker"] == notice["cua_marker_observed"] and notice["cua_window_title"] == "Hermes 学习明细"
-    assert notice["notifier_source_sha256"] == digest(ROOT / "macos/HermesLearningNotifier.swift")
+    if current_sources:
+        assert notice["notifier_source_sha256"] == digest(ROOT / "macos/HermesLearningNotifier.swift")
     budget = data["budget"]
     assert len(budget["cases"]) >= 3 and all(0 < row["additional_context_utf8_bytes"] <= 256 for row in budget["cases"])
     assert budget["worker_launch_entry"]["sha256"] == worker
-    assert all(row["sha256"] == digest(ROOT / row["path"]) for row in budget["runtime_files"])
+    if current_sources:
+        assert all(row["sha256"] == digest(ROOT / row["path"]) for row in budget["runtime_files"])
+    else:
+        assert all(re.fullmatch(r"[a-f0-9]{64}", row["sha256"]) for row in budget["runtime_files"])
     recovery = data["recovery"]
     assert recovery["worker_entry_sha256"] == worker and recovery["ipc_healthy"]
     assert 0 < recovery["previous_pending_checkpoint"] == recovery["previous_pending_retained"] == recovery["previous_pending_delivered"]

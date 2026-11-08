@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from threading import Lock
 
+from .review_input import BUDGET_EXHAUSTED, is_pending_tool_reply
 from .store import redact
 
 _ACTIONS = {
@@ -135,6 +136,13 @@ def receipt_text(event, calls, created, *, started_at=None):
         facts = event.get(key, [])
         if facts:
             lines.extend((heading, *[f"• {_label(fact, {})}" if isinstance(fact, dict) else f"• {fact}" for fact in facts], ""))
-    if event.get("error"):
-        lines.extend(("复盘错误", str(event["error"]), ""))
+    error = str(event.get("error") or "")
+    if event.get("failure_reason") == BUDGET_EXHAUSTED:
+        error = "本次后台复盘达到输入预算，执行记录已保留。"
+    elif is_pending_tool_reply(error):
+        error = "后台复盘在收到工具结果后结束，模型未生成最终答复。"
+    elif "No reply:" in error:
+        error = error.partition(" Send `continue`")[0]
+    if error:
+        lines.extend(("复盘错误", error, ""))
     return redact("\n".join(lines)).rstrip() + "\n"

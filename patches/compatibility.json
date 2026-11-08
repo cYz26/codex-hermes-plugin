@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "learning_api": 1,
+  "releases": {
+    "v0.22.7": "manifest.json",
+    "v0.23.0": "v0.23.0/manifest.json"
+  },
+  "native_tests": [
+    "tests/agent/test_learning_service.py",
+    "tests/agent/test_learning_native_loop.py",
+    "tests/hermes_cli/test_plugin_learning_api.py",
+    "tests/hermes_cli/test_learning_profile_auth.py",
+    "tests/hermes_cli/test_auth_profile_fallback.py",
+    "tests/agent/test_background_review.py",
+    "tests/agent/test_background_review_input_budget.py",
+    "tests/agent/test_background_review_toolset_restriction.py",
+    "tests/agent/test_background_review_tool_call_guard.py",
+    "tests/agent/test_background_review_usage.py",
+    "tests/agent/test_background_review_memory_scope.py",
+    "tests/agent/test_curator.py",
+    "tests/agent/test_curator_activity.py",
+    "tests/agent/test_curator_rollback_staging.py",
+    "tests/agent/test_curator_backup.py",
+    "tests/tools/test_memory_tool.py",
+    "tests/tools/test_skill_manager_tool.py",
+    "tests/tools/test_skill_manage_batch.py",
+    "tests/tools/test_skill_lock.py"
+  ]
+}

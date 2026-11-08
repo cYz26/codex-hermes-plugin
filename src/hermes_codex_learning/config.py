@@ -22,12 +22,35 @@ class Settings:
     network_environment: dict[str, str] = field(default_factory=dict)
     capture_scope: str = "project"
     excluded_projects: tuple[str, ...] = ()
+    update_mode: str = "auto"
+    update_interval: float = 86400
+    official_source: Path | None = None
+    fallback_python: Path | None = None
+    upgrade_official: bool = False
 
     def __post_init__(self):
         if self.capture_scope not in {"project", "global"}:
             raise ValueError("capture_scope must be project or global")
         if any(not Path(path).is_absolute() for path in self.excluded_projects):
             raise ValueError("excluded_projects must contain absolute paths")
+        if self.update_mode not in {"off", "check", "auto"}:
+            raise ValueError("updates.mode must be off, check or auto")
+        if not 3600 <= self.update_interval <= 30 * 86400:
+            raise ValueError("updates.interval_seconds must be between one hour and 30 days")
+        if not isinstance(self.upgrade_official, bool) or (self.upgrade_official and self.official_source is None):
+            raise ValueError("updates.upgrade_official requires an official source and a boolean value")
+
+    @property
+    def interpreter(self) -> Path:
+        # Native PM can collect a superseded generation while the supervisor
+        # is down. The already-tested private interpreter serves the same source.
+        if self.fallback_python is not None and (not self.python.is_file() or not os.access(self.python, os.X_OK)):
+            return self.fallback_python
+        return self.python
+
+    @property
+    def borrows_official_python(self) -> bool:
+        return self.fallback_python is not None and self.interpreter == self.python
 
     def native_environment(self) -> dict[str, str]:
         launch_home = self.profile_home or self.home
@@ -83,4 +106,10 @@ class Settings:
             network_environment=data.get("network_environment", {}),
             capture_scope=data.get("capture_scope", "project"),
             excluded_projects=tuple(data.get("excluded_projects", [])),
+            update_mode=data.get("updates", {}).get("mode", "auto"),
+            update_interval=float(data.get("updates", {}).get("interval_seconds", 86400)),
+            official_source=Path(data["updates"]["official_source"]).resolve()
+                if data.get("updates", {}).get("official_source") else None,
+            fallback_python=Path(data["fallback_python"]).absolute() if data.get("fallback_python") else None,
+            upgrade_official=data.get("updates", {}).get("upgrade_official", False),
         )

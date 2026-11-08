@@ -1,8 +1,14 @@
 {
   "name": "hermes-learning",
-  "version": "0.2.2",
+  "version": "0.3.2",
   "description": "Automatic Hermes native learning from Codex tasks, with visible feedback and learned skills.",
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Hermes Learning",
+    "shortDescription": "Bring lessons from past Codex tasks into new ones with Hermes.",
+    "logo": "./assets/hermes-learning-icon.png",
+    "composerIcon": "./assets/hermes-learning-icon.png"
+  }
 }

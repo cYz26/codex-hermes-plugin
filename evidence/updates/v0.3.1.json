@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "version": "0.3.1",
+  "checked_at": "2026-11-08T11:56:08.885809+08:00",
+  "upstream": {
+    "tag": "v0.23.0",
+    "official_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "patched_tree": "4a2d00c2076178c0ea1e222fa1d6a272dcbc0605"
+  },
+  "policy": {
+    "mode": "auto",
+    "upgrade_official": true,
+    "observe_app_upgrades": true,
+    "self_evolution_redesign": "agree_plan_before_learning_workflow_or_plugin_initiated_official_upgrade"
+  },
+  "verification": {
+    "native_summary": [
+      "=== Summary: 19 files, 333 tests passed, 0 failed (100% complete) in 15.0s (2 workers) ==="
+    ],
+    "bridge_tests_passed": 72,
+    "smoke": {
+      "status": "passed",
+      "registered_plugin": true,
+      "startup_paused": true,
+      "resumed": true,
+      "dependency_mode": "official_shared",
+      "clean_shutdown": true,
+      "mcp": [
+        "learning_status",
+        "context",
+        "update_status",
+        "skill_load"
+      ],
+      "real_provider": false,
+      "actual_App": false
+    },
+    "logs_sha256": {
+      "native-contracts.log": "c143a78f6d298dd32964d55f605ca83bcc347346da6daa773ec6cb546c287b7a",
+      "bridge-contracts.log": "2897d5e9e66a0d97041e8e107da8d6080099f7e521219987a435141cf8c1f895",
+      "runtime-smoke.log": "95997fd6b52fb67136e592614644145258ed47e0dfc28b11192317c654daea9a"
+    },
+    "native_target_selection_rehearsal": {
+      "approved_target_accepted": true,
+      "drift_refused": true,
+      "real_official_update": false
+    }
+  },
+  "deployment": {
+    "transaction": {
+      "id": "722754f74068436bbf860d824b6960d7",
+      "action": "apply",
+      "state": "committed",
+      "started_at": 1794109926.232762,
+      "committed_at": 1794109927.991542
+    },
+    "worker_ready": true,
+    "learning_api": 1,
+    "dependency_mode": "official_shared",
+    "same_official_python": true,
+    "official_dependency_lease_open": true,
+    "fallback_present": true,
+    "installed_candidate_fingerprint_matches": true,
+    "official_source_tracked_clean": true,
+    "official_check": "current",
+    "latest_release_check": "current",
+    "codex_hooks": {
+      "ready": false,
+      "count": 7,
+      "statuses": [
+        "modified"
+      ],
+      "trust_changed_by_agent": false
+    }
+  },
+  "boundaries": {
+    "advanced_official_version": false,
+    "real_provider_review_retested": false,
+    "new_codex_app_closed_loop_retested": false
+  }
+}

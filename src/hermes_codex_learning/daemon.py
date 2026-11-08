@@ -5,9 +5,11 @@ import json
 import os
 import signal
 import socketserver
+import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from .config import Settings
 from .delegation import exclude_internal, register_delegation, task_input
@@ -24,6 +26,13 @@ class Bridge:
         self.review_writes = review_writes or ReviewWrites()
         self.store = Store(settings.state)
         self.stop = threading.Event()
+        self.drain = threading.Event()
+        self.ready = threading.Event()
+        self.resume = threading.Event()
+        self.startup_context = None
+        self.startup_status = None
+        if os.environ.get("HERMES_LEARNING_START_PAUSED") != "1":
+            self.resume.set()
         self.store.set("state", "starting")
 
     def emit(self, event: dict) -> None:
@@ -132,6 +141,8 @@ class Bridge:
     def reviews(self) -> None:
         status = self.api.read(kind="status")
         for intent in status["intents"]:
+            if self.drain.is_set():
+                break
             if intent["status"] != "queued":
                 continue
             attempt_id = self.store.get("attempt:" + intent["id"])
@@ -185,7 +196,7 @@ class Bridge:
             latest[data["source"]["chat"]] = row
         return list(latest.values())
 
-    def update_knowledge(self, context: dict, **kwargs) -> dict:
+    def update_knowledge(self, context: dict, *, persist=True, **kwargs) -> dict:
         stored_index = self.store.get("knowledge-index-v1", {})
         index = stored_index
         if not index:
@@ -194,7 +205,7 @@ class Bridge:
             for attempt in self.api.read(kind="status").get("attempts", []):
                 index = reconcile(index, context, project=str(self.settings.project.resolve()), result=attempt)
         updated = reconcile(index, context, bootstrap_project=str(self.settings.project.resolve()), **kwargs)
-        if updated != stored_index:
+        if persist and updated != stored_index:
             self.store.set("knowledge-index-v1", updated)
         return {**context, "bridge_provenance": updated}
 
@@ -216,14 +227,31 @@ class Bridge:
                 self.store.set("notification:" + event["id"], result)
 
     def loop(self) -> None:
-        self.store.set("state", "idle")
+        if self.resume.is_set():
+            self.publish()
+        else:
+            # Validate native reads without publishing candidate-derived provenance
+            # into the live hook outbox before the activation commits.
+            self.startup_context = self.api.read(kind="context")
+            if self.settings.capture_scope == "global":
+                self.startup_context = self.update_knowledge(self.startup_context, persist=False)
+            self.startup_status = self.api.read(kind="status")
+        self.store.set("state", "idle" if self.resume.is_set() else "update-paused")
+        self.ready.set()
         delay = 1
         while not self.stop.is_set():
+            if self.drain.is_set():
+                break
+            if not self.resume.is_set():
+                self.stop.wait(0.2)
+                continue
             try:
                 self.ingest()
                 self.recover_context()
                 self.idle_reviews()
                 self.reviews()
+                if self.drain.is_set():
+                    break
                 closing = self.store.get("closing", {})
                 for event_id, handle in list(closing.items()):
                     if self.api.close(handle=handle, event_id=event_id)["status"] != "deferred":
@@ -231,6 +259,8 @@ class Bridge:
                 self.store.set("closing", closing)
                 if not any(json.loads(row["payload"])["status"] in {"running", "incomplete"} for row in self.latest_turns()):
                     self.api.maintenance()
+                if self.store.get("state") != "idle":
+                    self.store.set("state", "idle")
                 self.publish()
                 self.notifications()
                 self.store.set("last_error", None)
@@ -242,6 +272,12 @@ class Bridge:
             self.stop.wait(delay)
 
     def rpc(self, method: str, params: dict) -> dict:
+        if method == "quiesce_for_update":
+            self.drain.set()
+            return {"accepted": True, "mode": "finish_current_review"}
+        if method == "resume_learning":
+            self.resume.set()
+            return {"accepted": True}
         if method == "wake":
             return {"accepted": True}
         if method == "shutdown":
@@ -251,7 +287,14 @@ class Bridge:
         if method == "learning_status":
             status = self.settings.state / "status.json"
             with StoreConnection(self.settings) as store:
-                return {"snapshot": json.loads(status.read_text()) if status.exists() else None,
+                snapshot = self.startup_status if not self.resume.is_set() else (
+                    json.loads(status.read_text()) if status.exists() else None)
+                return {"snapshot": snapshot,
+                        "pid": os.getpid(), "ready": self.ready.is_set(), "learning_api": self.api.version,
+                        "source": str(self.settings.source),
+                        "python": sys.executable,
+                        "dependency_mode": "official_shared" if self.settings.fallback_python is not None
+                            and Path(sys.executable) == self.settings.python else "private",
                         "state": store.get("state"), "error": store.get("last_error"),
                         "capture_scope": self.settings.capture_scope,
                         "knowledge_policy": "personal_library_scoped_memory_shared_skills",
@@ -263,11 +306,15 @@ class Bridge:
                                                for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'excluded-chat:%'")]}
         if method == "context":
             path = self.settings.state / "context.json"
-            context = json.loads(path.read_text()) if path.exists() else {"available": False}
+            context = self.startup_context if not self.resume.is_set() else (
+                json.loads(path.read_text()) if path.exists() else {"available": False})
+            context = context or {"available": False}
             if self.settings.capture_scope == "global":
                 return context_view(context, self.request_project(params), params.get("query", ""))
             return context
         if method == "skill_load":
+            if not self.resume.is_set():
+                raise RuntimeError("Learning runtime is paused for an update; retry shortly")
             project = self.request_project(params)
             value = self.api.read(kind="skill", name=params["name"], file_path=params.get("file_path"))
             with StoreConnection(self.settings) as store:

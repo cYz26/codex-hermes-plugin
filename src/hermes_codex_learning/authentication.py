@@ -33,7 +33,7 @@ safe = {key: status.get(key) for key in ('logged_in', 'token_expired', 'source',
 safe.update(home=str(get_hermes_home()), auth_root=str(get_default_hermes_root()))
 print(json.dumps(safe))
 """
-    result = subprocess.run([str(settings.python), "-B", "-c", program], cwd=settings.source,
+    result = subprocess.run([str(settings.interpreter), "-B", "-c", program], cwd=settings.source,
                             env={**os.environ, **settings.native_environment()},
                             text=True, capture_output=True, check=True)
     return json.loads(result.stdout)

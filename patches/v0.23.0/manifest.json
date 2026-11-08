@@ -1,0 +1,32 @@
+{
+  "upstream": "https://github.com/NousResearch/hermes-agent.git",
+  "tag": "v0.23.0",
+  "base_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "patch_sha256": "9d4776a3d480ebabf1972252a928d50f12a4325dade42c627a1ce4f7ba610675",
+  "replay_matches_working_source": true,
+  "files": {
+    "agent/background_review.py": "611f892375f747ad159938310051ef59ddbb6c86a786b9da8433ed876eaa3b95",
+    "agent/codex_runtime.py": "3fc26a08e43138012b3750458b6dcf652070bcd1bc95d129790bd4826af8a051",
+    "agent/learning_api.py": "2eb900dcc86dc9f8968b263918ab256726f7af0b82c3f7fa94277107eabf6b3d",
+    "agent/learning_artifacts.py": "0dcb0544489e99979fc053ccbb5872ee98043200b7849bbbbd21944e7327fda9",
+    "agent/learning_policy.py": "261d9e0ea1d5e09dc36687b931f8a8982fd95a911c5d32c11a7d674c8d6e67be",
+    "agent/learning_results.py": "ad4443d06b67ae0b89123c7f60ebdc6d1f4c89e8b50e1c198e4178be9d907d03",
+    "agent/learning_runtime.py": "5c0c0178fa0556cd5253a6cf28d550b75e8c451409a0fdcd9630180c7bc6a5ff",
+    "agent/learning_service.py": "eaea839cb928ec59ec959236a53b8bb6aad24ccf2e85fe87955b4af2c5ef513e",
+    "hermes_cli/plugin_isolation.py": "d58a128c34834185bb9903a85bcd33754867ac63084fe0f37329b8907a57c35b",
+    "hermes_cli/plugins_capability_ctx.py": "aef315e73dd95d8887808e428856a148e91ad38732bf5c96db6a81f774dad86e",
+    "tests/agent/test_learning_native_loop.py": "e65c52eca553dce9a230f36857ba0a672599e5f6caa445a093016bc113749d8a",
+    "tests/agent/test_learning_service.py": "186bff89315de8577e45f506a3a9391cc299b5a0b61776aca9a981e822ccab73",
+    "tests/hermes_cli/test_learning_profile_auth.py": "fc9af1e77755047303d0805f7c6ef751e529740a4226cfbc712618b34995ce6e",
+    "tests/hermes_cli/test_plugin_learning_api.py": "9a04aee873b35384e9bd7ee3e7b6073c14af195767f099db3b936bdd2202aed0"
+  },
+  "previous_custom_inputs": [],
+  "source_committed": false,
+  "patch_file": "../native-learning-api-v1.patch",
+  "mechanism_review": {
+    "classification": "compatible",
+    "reviewed_from": "v0.22.7",
+    "reason": "Native review adds noninteractive secret-prompt suppression; trigger counters, review execution contract, memory/skill writes, Curator and Learning API storage remain compatible. Upstream plugin auto-update is separate and remains opt-in. No self-evolution workflow redesign.",
+    "source_tree": "675b4cea2d2aef80460f07235b0e27e6c6922743"
+  }
+}

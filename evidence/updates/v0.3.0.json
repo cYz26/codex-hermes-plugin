@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "version": "0.3.0",
+  "checked_at": "2026-11-07T23:38:50.959628+08:00",
+  "scope": "automatic_runtime_update_and_compatibility; historical_App_acceptance_not_relabelled",
+  "policy": {
+    "mode": "auto",
+    "interval_seconds": 86400.0,
+    "self_evolution_redesign": "notify_and_agree_plan_before_modification_or_activation"
+  },
+  "upstream": {
+    "tag": "v0.23.0",
+    "commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "official_tree": "675b4cea2d2aef80460f07235b0e27e6c6922743",
+    "patched_tree": "4a2d00c2076178c0ea1e222fa1d6a272dcbc0605",
+    "recipe": "f48c79f83f9afce67bd4eb08bf2e2329bdeb57c73dfd522bbf31dc050f3826a8"
+  },
+  "verification": {
+    "native_files": 19,
+    "native_tests_passed": 333,
+    "bridge_tests_passed": 66,
+    "gates": [
+      "git-init",
+      "fetch",
+      "checkout",
+      "patch-check",
+      "patch",
+      "build",
+      "native-contracts",
+      "bridge-contracts",
+      "runtime-smoke"
+    ],
+    "logs_sha256": {
+      "native-contracts.log": "10ab53cd35ed959fba17df5a55022b30a0c6a71e8abfa351e57e10eb1606d764",
+      "bridge-contracts.log": "c5b682861c02aae8adc669d7f778b6d459afa73bbf4769e5a1e415d9ce25c778",
+      "runtime-smoke.log": "5a76b17e7e35be16cc7a4fb151b9b7b1646fd412e55586039d4218d79165394e"
+    },
+    "isolated_worker": {
+      "status": "passed",
+      "registered_plugin": true,
+      "startup_paused": true,
+      "clean_shutdown": true,
+      "mcp": [
+        "learning_status",
+        "context",
+        "update_status",
+        "skill_load"
+      ],
+      "real_provider": false,
+      "actual_App": false
+    },
+    "skill_validator": "passed",
+    "release_checks": "passed"
+  },
+  "deployment": {
+    "plugin_installed": "0.3.0",
+    "source_installed_candidate_fingerprint_equal": true,
+    "plugin_fingerprint": "b52e90228bd72e8496dd54da1c27e847ffd9d7c1c033921b3a3621cb808740e2",
+    "transaction": {
+      "id": "efad177b651b4c85b912c35cea70b4cd",
+      "action": "apply",
+      "state": "committed",
+      "started_at": 1794065637.366179,
+      "committed_at": 1794065639.008033
+    },
+    "worker_ready": true,
+    "learning_api": 1,
+    "previous_runtime_retained": true,
+    "native_auth_readback": {
+      "logged_in": true,
+      "source": "pool:device_code",
+      "auth_mode": "chatgpt",
+      "profile_root_fallback_preserved": true
+    },
+    "codex_hook_trust": {
+      "ready": false,
+      "hooks": 7,
+      "statuses": [
+        "modified"
+      ],
+      "trust_changed_by_agent": false
+    }
+  },
+  "post_activation_learning": {
+    "attempt_id": "1310638f-0f26-44fd-96c2-363e21f9c554",
+    "trigger": "existing_queue_automatic_native_review",
+    "manual_trigger": false,
+    "real_provider": true,
+    "run_status": "completed",
+    "applied": 2,
+    "applied_tools": [
+      "skill_manage",
+      "skill_manage"
+    ],
+    "staged": 0,
+    "uncertain": 0,
+    "api_calls": 6,
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "actual_fee_usd": null
+  },
+  "boundaries": {
+    "new_actual_App_A_to_B_acceptance": false,
+    "causal_quality_improvement": false,
+    "notification_user_visibility": "not_retested"
+  }
+}

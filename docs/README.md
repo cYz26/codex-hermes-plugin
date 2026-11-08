@@ -1,9 +1,12 @@
 # 文档索引
 
-当前目标为官方 Hermes **v0.22.7**＋Learning API v1 补丁、外围插件 **0.2.1**、模型 **gpt-6.1-sol / Max**。学习服务复用已有 Hermes 登录，学习数据独立。
+当前学习运行时为官方 Hermes **v0.23.0**＋Learning API v1 补丁、外围插件 **0.3.2**、模型 **gpt-6.1-sol / Max**。学习 worker 共用官方安装的 Python 依赖环境，复用已有 Hermes 登录，学习数据独立。旧版 App/provider 验收保留原版本。
 
 | 文档 | 用途 |
 | --- | --- |
+| [安装与更新](./INSTALL.zh-CN.md) | Codex 插件、学习运行时、macOS 服务和回读 |
+| [主动更新与适配](./UPDATES.zh-CN.md) | 自动检查、候选验证、切换与回退；自进化重设计先商定方案 |
+| [插件图标](./design/hermes-learning-icon/README.md) | 学习回路图标、源稿和标识出处 |
 | [全局启用](./GLOBAL-ROLLOUT.zh-CN.md) | 全局采集、项目记忆、共享技能、部署与宿主信任状态 |
 | [整体方案](./ARCHITECTURE.zh-CN.md) | 架构、原生能力边界、认证、数据、触发、反馈、tokens、验收和升级 |
 | [学习 profile 与 Hermes App](./PROFILE-DESKTOP.zh-CN.md) | 后台专用定位、App 切换报错的复现和当前查看方式 |
@@ -15,7 +18,7 @@
 | [实施与验收](../IMPLEMENTATION.md) | 实际部署、测试结果、真实模型证据和剩余 App 验收 |
 | [机器可读结果](../ACCEPTANCE.json) | 可提交的验收摘要；本机详细状态另行保留 |
 | [证据索引](../evidence/README.md) | 原版、补丁版、外围、红绿测试和原生模型证据 |
-| [补丁清单](../patches/manifest.json) | 官方基线、补丁 SHA-256 和 14 个受影响文件的内容摘要 |
+| [兼容清单](../patches/compatibility.json) | 官方基线、补丁和验证要求；包含 [v0.23.0](../patches/v0.23.0/manifest.json) 与 [v0.22.7](../patches/manifest.json) |
 
 ## 历史研究
 

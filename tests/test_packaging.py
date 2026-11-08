@@ -35,7 +35,7 @@ class PackagingTests(unittest.TestCase):
             replies = [json.loads(line) for line in result.stdout.splitlines()]
             self.assertEqual(replies[0]["result"]["serverInfo"]["version"], __version__)
             self.assertEqual({tool["name"] for tool in replies[1]["result"]["tools"]},
-                             {"learning_status", "context", "skill_load"})
+                             {"learning_status", "context", "skill_load", "update_status", "update_check"})
 
 
 if __name__ == "__main__":

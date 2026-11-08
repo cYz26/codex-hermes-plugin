@@ -4,6 +4,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from .review_input import BUDGET_EXHAUSTED
 from .review_receipt import receipt_text
 from .store import atomic_json, digest
 
@@ -17,6 +18,8 @@ def notifier_app() -> Path:
 
 
 def should_notify(event: dict) -> bool:
+    if event["kind"] == "update.notice":
+        return True
     return event["kind"] == "review.finished" and bool(
         event.get("applied") or event.get("staged") or event.get("run_status") != "completed"
     )
@@ -35,7 +38,9 @@ def _message(event: dict) -> str:
         return f"本轮已加载 Hermes 技能：{event.get('name', '')}"
     applied, staged = event.get("applied", []), event.get("staged", [])
     if event.get("run_status") in {"failed", "interrupted", "unknown"}:
-        return "Hermes 本次学习未完成，已保留执行记录" + (f"；已有 {len(applied)} 项变更生效" if applied else "")
+        reason = ("Hermes 复盘输入超出预算" if event.get("failure_reason") == BUDGET_EXHAUSTED
+                  else "Hermes 本次学习未完成")
+        return f"{reason}，已保留执行记录" + (f"，已有 {len(applied)} 项变更生效" if applied else "")
     if applied or staged:
         parts = ([f"Hermes 已学习：{len(applied)} 项变更生效"] if applied else [])
         if staged:

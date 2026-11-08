@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from hermes_codex_learning.notify import macos_notification, message
+from hermes_codex_learning.review_input import BUDGET_EXHAUSTED
 from hermes_codex_learning.review_receipt import ReviewWrites, receipt_text
 
 
@@ -13,6 +14,21 @@ class ReviewReceiptTests(unittest.TestCase):
     def event(self, identity="review-a", **fields):
         event = {"id": identity, "kind": "review.finished", "run_status": "completed", **fields}
         return {**event, "message": message(event)}
+
+    def test_background_failure_receipt_does_not_tell_the_user_to_continue_a_chat(self):
+        upstream_error = (
+            "⚠️ No reply: the turn stopped while a tool result was still pending and the model produced "
+            "no follow-up text. Send `continue` to let it summarize."
+        )
+        ordinary = self.event(run_status="failed", error=upstream_error)
+        exhausted = self.event(run_status="failed", error=upstream_error, failure_reason=BUDGET_EXHAUSTED)
+
+        self.assertIn("收到工具结果后结束", receipt_text(ordinary, {}, 0))
+        self.assertIn("输入超出预算", exhausted["message"])
+        self.assertIn("达到输入预算", receipt_text(exhausted, {}, 0))
+        for event in (ordinary, exhausted):
+            self.assertNotIn("continue", receipt_text(event, {}, 0))
+            self.assertEqual(event["error"], upstream_error)
 
     def test_receipt_joins_applied_calls_and_ordered_batch_operations(self):
         writes = ReviewWrites()

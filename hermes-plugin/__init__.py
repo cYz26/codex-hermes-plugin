@@ -8,12 +8,20 @@ def register(ctx):
     def serve(args):
         from hermes_codex_learning.config import Settings
         from hermes_codex_learning.daemon import run
+        from hermes_codex_learning.review_input import install_review_policy
         from hermes_codex_learning.review_receipt import ReviewWrites
 
         review_writes = ReviewWrites()
         registration = ctx.register_hook("post_tool_call", review_writes.record)
         try:
-            return run(Settings.load(args.settings), ctx.learning(version=1), review_writes)
+            settings = Settings.load(args.settings)
+            api = ctx.learning(version=1)
+            try:
+                install_review_policy(api)
+            except Exception:
+                api.close()
+                raise
+            return run(settings, api, review_writes)
         finally:
             registration.dispose()
 

@@ -7,6 +7,10 @@ from .ipc import request
 from . import __version__
 
 TOOLS = [
+    {"name": "update_status", "description": "Read automatic Hermes update policy, latest check, candidate compatibility gates and activation/rollback outcome. Works when the learning worker is offline.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "update_check", "description": "Check the official Hermes stable release and exact plugin compatibility. Does not install or activate a release.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "learning_status", "description": "Read Hermes learning progress, applied/staged changes and actual model usage. Does not trigger learning.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "context", "description": "Read Hermes personal knowledge: project-scoped memories and relevant shared skills. Pass the current task's absolute cwd and a short task query; omitted cwd returns no project memory. Listing is not skill use.",
@@ -33,7 +37,12 @@ def handle(message: dict, settings: Settings) -> dict | None:
         name = params["name"]
         if name not in {t["name"] for t in TOOLS}:
             raise ValueError("Unknown tool")
-        result = request(settings, name, params.get("arguments", {}))
+        if name in {"update_status", "update_check"}:
+            from .updates import Updater
+            updater = Updater(settings)
+            result = updater.status() if name == "update_status" else updater.check()
+        else:
+            result = request(settings, name, params.get("arguments", {}))
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}], "structuredContent": result}
     raise ValueError("Unsupported MCP method")
 

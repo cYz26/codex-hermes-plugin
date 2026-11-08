@@ -402,6 +402,18 @@
       "sha256": "5ac65de92d06a1959fb7d74cbc3578ded061f4ae116408bf89049712488fa48b",
       "visibility": "repository",
       "scope": "Real 0.2.2 App hook and MCP project recall and native projection"
+    },
+    {
+      "original": "Hermes updater 0.3.0 verification",
+      "path": "evidence/updates/v0.3.0.json",
+      "sha256": "3d59c083ca19e5084e2b1afa3c0568a455725e87d028b9567c751226ad26fbae",
+      "visibility": "repository"
+    },
+    {
+      "original": "Hermes shared-runtime 0.3.1 verification",
+      "path": "evidence/updates/v0.3.1.json",
+      "sha256": "dbeca8cbb38ba59360cb56627092e18670b534cbf384dff05c08e20934795d65",
+      "visibility": "repository"
     }
   ],
   "private_records": "Retained locally under evidence/private and intentionally excluded from Git. Public summaries omit live delivery receipts."
