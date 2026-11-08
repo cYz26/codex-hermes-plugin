@@ -48,6 +48,11 @@ python3 -B scripts/bridge launchd --settings /absolute/learning/pilot/bridge.jso
 ```sh
 python3 -B scripts/bridge launchd --settings /absolute/learning/pilot/bridge.json --replace
 launchctl bootout "gui/$(id -u)/com.cy.hermes-codex-learning.pilot"
+```
+
+等待 `launchctl print "gui/$(id -u)/com.cy.hermes-codex-learning.pilot"` 报找不到旧服务，再加载新 plist。`bootout` 返回后，macOS 可能仍在注销服务；此时立即 `bootstrap` 会失败。
+
+```sh
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.cy.hermes-codex-learning.pilot.plist
 ```
 
