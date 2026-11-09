@@ -1,0 +1,1234 @@
+diff --git a/agent/background_review.py b/agent/background_review.py
+index 9215d65d44e9c84f91c0a12808847e7baa9b6496..c6f7cd20fd8ccf3766cd841241c54a10a17128e5 100644
+--- a/agent/background_review.py
++++ b/agent/background_review.py
+@@ -1161,6 +1161,7 @@ class _ReviewForkState:
+     review_agent: Any = None
+     review_messages: list[dict] = field(default_factory=list)
+     review_usage: dict[str, Any] = field(default_factory=dict)
++    result: Optional[dict[str, Any]] = None
+ 
+ 
+ def _release_fork_clients(review_agent: Any) -> None:
+@@ -1223,7 +1224,7 @@ def _run_review_fork(
+     try:
+         if review_run is None or review_run.begin_request(st.review_agent):
+             # Routed -> digest (cache cold anyway); same model -> full snapshot (warm cache reads).
+-            st.review_agent.run_conversation(
++            st.result = st.review_agent.run_conversation(
+                 user_message=(
+                     prompt + "\n\nYou can only call " + memory_phrase_prompt +
+                     "management tools. Other tools will be denied "
+@@ -1238,6 +1239,8 @@ def _run_review_fork(
+         # still attributed. The recorder never raises.
+         if st.review_agent is not None:
+             st.review_usage.update(_snapshot_review_usage(st.review_agent))
++            # Preserve partial mutations even when run_conversation raises after a write.
++            st.review_messages = list(getattr(st.review_agent, "_session_messages", []))
+             _record_review_usage_to_parent(agent, st.review_usage)
+         # Publish completion as soon as the provider-capable phase has returned or startup
+         # cancellation has fenced it out (unregister + finish are identity-scoped and idempotent).
+diff --git a/agent/codex_runtime.py b/agent/codex_runtime.py
+index cfc3b9c64d37fd6794d9313bbb3acc0495394e41..f47e2f1e6dbd28465c75ec0f03a69ea731aa418f 100644
+--- a/agent/codex_runtime.py
++++ b/agent/codex_runtime.py
+@@ -706,10 +706,8 @@ def _finish_codex_turn(agent, turn, messages: list[dict[str, Any]], *, original_
+     _record_codex_app_server_compaction(agent, turn)
+     usage_result = _record_codex_app_server_usage(agent, turn, messages=messages)
+     # Skill nudge check AFTER iters were incremented (same as chat_completions).
+-    should_review_skills = (0 < agent._skill_nudge_interval <= agent._iters_since_skill
+-                            and "skill_manage" in agent.valid_tool_names)
+-    if should_review_skills:
+-        agent._iters_since_skill = 0
++    from agent.learning_policy import tick_skill_review
++    should_review_skills = tick_skill_review(agent, 0)
+     # External memory sync skipped on interrupt/error (no partial transcripts).
+     if not turn.interrupted and turn.error is None:
+         _call_guarded(getattr(agent, "_sync_external_memory_for_turn", None), "external memory sync raised", kwargs=dict(
+diff --git a/agent/learning_api.py b/agent/learning_api.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..27bc02e4bf63a155027f573280986f47971e77be
+--- /dev/null
++++ b/agent/learning_api.py
+@@ -0,0 +1,37 @@
++"""Supported plugin-facing Learning API v1; all method results are serializable values."""
++from __future__ import annotations
++
++from pathlib import Path
++
++
++class LearningFacade:
++    __slots__ = ("_service",)
++    version = 1
++
++    def __init__(self, home: Path, plugin_id: str):
++        from agent.learning_service import LearningService
++        self._service = LearningService(home, plugin_id)
++
++    def open(self, source: dict) -> dict:
++        return self._service.open(source)
++
++    def observe(self, handle: str, observation: dict, *, event_id: str) -> dict:
++        return self._service.observe(handle, observation, event_id=event_id)
++
++    def run_review(self, handle: str, intent_id: str, *, attempt_id: str) -> dict:
++        return self._service.run_review(handle, intent_id, attempt_id=attempt_id)
++
++    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None) -> dict:
++        return self._service.read(kind=kind, name=name, file_path=file_path)
++
++    def record_usage(self, token: str, evidence: dict) -> dict:
++        return self._service.record_usage(token, evidence)
++
++    def maintenance(self, *, handle: str | None = None, idle_flush: bool = False) -> dict:
++        return self._service.maintenance(handle=handle, idle_flush=idle_flush)
++
++    def cancel(self) -> dict:
++        return self._service.cancel()
++
++    def close(self, *, handle: str | None = None, event_id: str | None = None) -> dict:
++        return self._service.close(handle=handle, event_id=event_id)
+diff --git a/agent/learning_artifacts.py b/agent/learning_artifacts.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..5dc32296f2fc9fadf7b03c4d3753cb13b57d8f35
+--- /dev/null
++++ b/agent/learning_artifacts.py
+@@ -0,0 +1,76 @@
++"""Read native learning artifacts without recording catalog scans as skill use."""
++from __future__ import annotations
++
++import hashlib
++import json
++import shutil
++from pathlib import Path
++
++
++def fingerprint(value) -> str:
++    return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
++
++
++def context(home: Path) -> dict:
++    from tools.skills_tool import _skill_catalog
++
++    memories = {}
++    for name in ("MEMORY.md", "USER.md"):
++        path = home / "memories" / name
++        memories[name] = path.read_text(encoding="utf-8-sig") if path.exists() else ""
++    skills = []
++    for entry in _skill_catalog():
++        if not entry["load_name"]:
++            continue
++        path = entry["path"]
++        signature = [(str(p.relative_to(path.parent)), p.stat().st_size, p.stat().st_mtime_ns)
++                     for p in sorted(path.parent.rglob("*")) if p.is_file()]
++        skills.append({"name": entry["load_name"], "description": entry["description"],
++                       "version": fingerprint(signature)})
++    result = {"memories": memories, "skills": skills}
++    version = fingerprint(result)
++    summary = "\n".join(text for text in memories.values() if text)[:340]
++    if skills:
++        summary += "\n技能：" + "、".join(s["name"] for s in skills[:5])
++    return {**result, "version": version, "summary": summary}
++
++
++def skill(home: Path, name: str, file_path: str | None = None) -> dict:
++    from tools.skills_tool import skill_view
++
++    result = json.loads(skill_view(name, preprocess=False))
++    if not result.get("success"):
++        raise ValueError(result.get("error") or result.get("message") or "Skill is not loadable")
++    directory = Path(result["skill_dir"]).resolve()
++    files = {}
++    for path in sorted(directory.rglob("*")):
++        if not path.resolve().is_relative_to(directory):
++            raise ValueError("Skill resource escapes its package")
++        if path.is_file():
++            files[str(path.relative_to(directory))] = hashlib.sha256(path.read_bytes()).hexdigest()
++    version = fingerprint(files)
++    artifact = home / "learning" / "artifacts" / version
++    if not artifact.exists():
++        staging = artifact.with_suffix(".staging")
++        staging.parent.mkdir(parents=True, exist_ok=True)
++        shutil.copytree(directory, staging, dirs_exist_ok=True)
++        copied = {str(p.relative_to(staging)): hashlib.sha256(p.read_bytes()).hexdigest()
++                  for p in staging.rglob("*") if p.is_file()}
++        if copied != files:
++            raise ValueError("Skill changed during publication; retry after its native write completes")
++        staging.rename(artifact)
++    relative = Path(file_path or "SKILL.md")
++    target = (artifact / relative).resolve()
++    if not target.is_relative_to(artifact.resolve()) or str(relative) not in files:
++        raise ValueError("Unknown skill resource")
++    raw = target.read_bytes()
++    if hashlib.sha256(raw).hexdigest() != files[str(relative)]:
++        raise ValueError("Published skill resource was modified after publication")
++    try:
++        content = raw.decode("utf-8")
++    except UnicodeDecodeError:
++        content = None
++    return {"name": result["name"], "version": version, "content": content,
++            "file_path": str(relative), "resource_dir": str(artifact), "files": files,
++            "content_hash": files[str(relative)],
++            **{k: result[k] for k in ("readiness_status", "compatibility", "deps_note") if k in result}}
+diff --git a/agent/learning_policy.py b/agent/learning_policy.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..18052db397d59015ba1ac09368968cabf51af4a2
+--- /dev/null
++++ b/agent/learning_policy.py
+@@ -0,0 +1,10 @@
++"""Tool-item nudge policy shared by native Codex execution and observed execution."""
++
++
++def tick_skill_review(agent, completed_items: int) -> bool:
++    agent._iters_since_skill = getattr(agent, "_iters_since_skill", 0) + completed_items
++    due = (0 < agent._skill_nudge_interval <= agent._iters_since_skill
++           and "skill_manage" in agent.valid_tool_names)
++    if due:
++        agent._iters_since_skill = 0
++    return due
+diff --git a/agent/learning_results.py b/agent/learning_results.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..f9f2fe2346e839aad1bdb46a2fc5d3fd10e9dbf8
+--- /dev/null
++++ b/agent/learning_results.py
+@@ -0,0 +1,67 @@
++"""Machine-readable facts from native review tool results, independent of UI summaries."""
++from __future__ import annotations
++
++import json
++
++
++def changed_skill_name(fact: dict) -> str | None:
++    """Read both canonical facts and v1 receipts written before batch names were lifted."""
++    return fact.get("name") or fact.get("operation", {}).get("name")
++
++
++def _skill_batch_fact(fact: dict, operation: dict) -> dict:
++    return {**fact, "operation": operation,
++            "name": operation.get("name") or fact.get("name"),
++            "action": operation.get("action") or fact.get("action")}
++
++
++def review_outcome(state, error: str | None = None, *, prior_snapshot: list | None = None) -> dict:
++    prior_ids = {call["id"] for msg in prior_snapshot or [] for call in msg.get("tool_calls", []) or [] if call.get("id")}
++    calls = {}
++    for msg in state.review_messages:
++        for call in msg.get("tool_calls", []) or []:
++            fn = call.get("function", {})
++            if fn.get("name") in {"memory", "skill_manage"} and call.get("id") not in prior_ids:
++                try:
++                    calls[call["id"]] = (fn["name"], json.loads(fn.get("arguments", "{}")))
++                except (ValueError, KeyError):
++                    continue
++    outcome = {"applied": [], "staged": [], "refused": [], "uncertain": [],
++               "usage": state.review_usage or None, "error": error}
++    for msg in state.review_messages:
++        if msg.get("role") != "tool" or msg.get("tool_call_id") not in calls:
++            continue
++        tool, args = calls[msg["tool_call_id"]]
++        try:
++            data = json.loads(msg.get("content", "{}"))
++        except (ValueError, TypeError):
++            outcome["uncertain"].append({"tool": tool, "call_id": msg["tool_call_id"]})
++            continue
++        if not isinstance(data, dict):
++            outcome["uncertain"].append({"tool": tool, "call_id": msg["tool_call_id"]})
++            continue
++        fact = {"tool": tool, "action": args.get("action"), "name": args.get("name"),
++                "target": args.get("target"), "call_id": msg["tool_call_id"], "result": data}
++        if data.get("staged"):
++            outcome["staged"].append(fact)
++        elif data.get("success") is not True:
++            outcome["refused"].append(fact)
++        elif tool == "skill_manage" and "results" in data:
++            if data.get("operations_applied"):
++                outcome["applied"].extend(_skill_batch_fact(fact, item) for item in data["results"]
++                                          if isinstance(item, dict) and item.get("success") is True)
++        else:
++            outcome["applied"].append(fact)
++    result = state.result or {}
++    if error or result.get("failed") or result.get("error"):
++        outcome["run_status"] = "failed"
++        outcome["error"] = error or result.get("error")
++    elif result.get("interrupted"):
++        outcome["run_status"] = "interrupted"
++    elif result.get("completed") is True:
++        outcome["run_status"] = "completed"
++    else:
++        outcome["run_status"] = "unknown"
++    outcome["no_change"] = (outcome["run_status"] == "completed" and
++                            not any(outcome[k] for k in ("applied", "staged", "uncertain")))
++    return outcome
+diff --git a/agent/learning_runtime.py b/agent/learning_runtime.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..3639cafb5a94cb834911ddfa2b9d25635cd60cf7
+--- /dev/null
++++ b/agent/learning_runtime.py
+@@ -0,0 +1,144 @@
++"""Internal adapter to the native learning engine. No executor-specific transport here."""
++from __future__ import annotations
++
++import logging
++
++logger = logging.getLogger(__name__)
++
++
++class NativeLearningRuntime:
++    def __init__(self):
++        self.agents = {}
++        self.db = None
++        self.recalled = {}
++
++    def agent(self, handle: str, source: dict):
++        if handle in self.agents:
++            return self.agents[handle]
++        from hermes_cli.config import load_config_readonly
++        from hermes_cli.runtime_provider import resolve_runtime_provider
++        from hermes_state import SessionDB
++        from run_agent import AIAgent
++        from hermes_constants import parse_reasoning_effort
++
++        cfg = load_config_readonly() or {}
++        model = cfg.get("model", {})
++        rt = resolve_runtime_provider(requested=model.get("provider"), target_model=model.get("default"),
++                                      explicit_base_url=model.get("base_url") or None)
++        self.db = self.db or SessionDB()
++        self.db.ensure_session(handle, source="external-observation", model=model.get("default"))
++        agent = AIAgent(
++            model=model.get("default", ""), provider=rt.get("provider"), api_mode=rt.get("api_mode"),
++            api_key=rt.get("api_key"), base_url=rt.get("base_url"), credential_pool=rt.get("credential_pool"),
++            request_overrides=rt.get("request_overrides"), session_id=handle, session_db=self.db,
++            reasoning_config=parse_reasoning_effort(cfg.get("agent", {}).get("reasoning_effort")),
++            cwd=source["project"], platform="external-observation", quiet_mode=True, skip_context_files=True,
++            ephemeral_system_prompt=("This scope observes tasks already executed by " + source.get("executor", "an external executor") +
++                                     ". Historical tool calls are external execution evidence. Learned procedures target that executor's observed tools and environment."),
++        )
++        self.agents[handle] = agent
++        return agent
++
++    def tick(self, handle: str, source: dict, memory_count: int, skill_count: int, *, new_turn: bool, tools: int) -> dict:
++        from agent.turn_context import _tick_memory_nudge
++        from agent.learning_policy import tick_skill_review
++
++        agent = self.agent(handle, source)
++        agent._turns_since_memory, agent._iters_since_skill = memory_count, skill_count
++        memory = _tick_memory_nudge(agent) if new_turn else False
++        skills = tick_skill_review(agent, tools)
++        return {"memory": memory, "skills": skills, "memory_count": agent._turns_since_memory,
++                "skill_count": agent._iters_since_skill}
++
++    def project(self, handle: str, source: dict, messages: list[dict], *, user: str, assistant: str, sync: bool) -> str:
++        agent = self.agent(handle, source)
++        # Stable message_uids make recovery of a committed observation's projection idempotent.
++        self.db.append_messages_batch(handle, messages)
++        if sync:
++            if agent._memory_manager and not getattr(agent, "_learning_provider_ready", False):
++                from agent.agent_init import _memory_provider_init_kwargs
++                agent._memory_manager.initialize_all(**_memory_provider_init_kwargs(agent, "external-observation"))
++                agent._learning_provider_ready = True
++            if agent._memory_manager:
++                self.recalled[handle] = agent._memory_manager.prefetch_all(user, session_id=handle)
++            agent._sync_external_memory_for_turn(original_user_message=user, final_response=assistant,
++                                                 interrupted=False, messages=messages)
++        if agent._cached_system_prompt is None:
++            stored = self.db.get_session(handle)
++            agent._cached_system_prompt = (stored or {}).get("system_prompt") or agent._build_system_prompt()
++            self.db.update_system_prompt(handle, agent._cached_system_prompt)
++        return "enqueued" if agent._memory_manager and agent._memory_manager._has_external else "not_configured"
++
++    def review(self, handle: str, source: dict, messages: list[dict], intent: dict) -> dict:
++        from agent import background_review as review
++        from agent.learning_results import review_outcome
++        from agent.thread_scoped_output import thread_scoped_silence
++        from tools.skills_tool import bind_turn_secret_capture
++
++        agent = self.agent(handle, source)
++        enabled, task = review.load_background_review_settings()
++        if not enabled:
++            return {"run_status": "deferred", "reason": "native_review_disabled"}
++        if not review._parent_can_emit_tool_calls(agent) and not review._resolve_review_runtime(agent, task).get("routed"):
++            return {"run_status": "deferred", "reason": "native_tools_unavailable"}
++        from run_agent import _review_should_defer
++        if _review_should_defer(agent, task):
++            from agent.review_idle_queue import _managed_server_idle
++            if not _managed_server_idle():
++                return {"run_status": "deferred", "reason": "native_local_model_busy"}
++        st, error = review._ReviewForkState(), None
++        prompt = getattr(agent, review._PROMPT_NAME_BY_SCOPE[(intent["memory"], intent["skills"])])
++        run = review.prepare_background_review_run(agent)
++        review._set_thread_approval_callback(review._bg_review_auto_deny)
++        try:
++            with thread_scoped_silence(), bind_turn_secret_capture(review._bg_review_skip_secret):
++                review._run_review_fork(agent, messages, prompt, task, run, st, intent["memory"], False)
++        except Exception as exc:
++            logger.exception("Native learning review failed")
++            error = f"{type(exc).__name__}: {exc}"
++        finally:
++            review.finish_background_review_run(agent, run)
++            if st.review_agent is not None:
++                review._release_fork_clients(st.review_agent)
++            review._set_thread_approval_callback(None)
++        return review_outcome(st, error, prior_snapshot=messages)
++
++    def maintenance(self, idle_seconds: float) -> dict:
++        from agent.curator import maybe_run_curator
++        result = maybe_run_curator(idle_for_seconds=idle_seconds)
++        return {"curator": result, "idle_seconds": idle_seconds}
++
++    def usage(self, handles: list[str]):
++        if handles and self.db is None:
++            from hermes_state import SessionDB
++            self.db = SessionDB()
++        return {handle: self.db.auxiliary_usage_by_task(handle) for handle in handles} if self.db else None
++
++    def cancel(self):
++        from agent.background_review import cancel_background_review_for_live_turn
++        for agent in self.agents.values():
++            cancel_background_review_for_live_turn(agent, message="learning owner stopping")
++
++    def close(self):
++        self.cancel()
++        drains = []
++        for agent in self.agents.values():
++            agent.shutdown_memory_provider(self.db.get_messages_as_conversation(agent.session_id))
++            if agent._memory_manager:
++                drains.append(agent._memory_manager.shutdown_drain_state())
++            agent.close()
++        if self.db:
++            self.db.close()
++        self.agents.clear()
++        return {"provider_drains": drains}
++
++    def close_scope(self, handle: str) -> dict:
++        agent = self.agents.pop(handle, None)
++        if agent is None:
++            return {"provider_drain": None}
++        messages = self.db.get_messages_as_conversation(handle)
++        agent.shutdown_memory_provider(messages)
++        drain = agent._memory_manager.shutdown_drain_state() if agent._memory_manager else None
++        agent.close()
++        self.recalled.pop(handle, None)
++        return {"provider_drain": drain}
+diff --git a/agent/learning_service.py b/agent/learning_service.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01cd3921ca1
+--- /dev/null
++++ b/agent/learning_service.py
+@@ -0,0 +1,339 @@
++"""Learning API v1: profile-bound values, native execution, durable admission receipts.
++
++The learning journal owns admission/counters atomically. Native transcript projection is
++recoverable via deterministic message UIDs. Remote provider writes are explicitly not atomic
++with this journal: an interrupted projection is reported as uncertain, never blindly replayed.
++"""
++from __future__ import annotations
++
++import functools
++import json
++import logging
++import sqlite3
++import threading
++import time
++import uuid
++from pathlib import Path
++
++from agent.learning_artifacts import fingerprint
++from agent.learning_results import changed_skill_name
++
++logger = logging.getLogger(__name__)
++
++
++def _bound(method):
++    @functools.wraps(method)
++    def call(self, *args, **kwargs):
++        from hermes_cli.plugins_loader import _plugin_home_scope
++        with _plugin_home_scope(self.home):
++            return method(self, *args, **kwargs)
++    return call
++
++
++class LearningService:
++    version = 1
++
++    def __init__(self, home: Path, plugin_id: str):
++        from agent.learning_runtime import NativeLearningRuntime
++
++        self.home, self.plugin_id = Path(home).resolve(), plugin_id
++        root = self.home / "learning"
++        root.mkdir(exist_ok=True, mode=0o700)
++        # v1 has a single POSIX owner; plugin-host and multi-writer homes are unsupported.
++        import fcntl
++        self.owner = (root / "owner.lock").open("a+")
++        fcntl.flock(self.owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        self.lock = threading.RLock()
++        self.db = sqlite3.connect(root / "journal.sqlite", check_same_thread=False)
++        self.db.row_factory = sqlite3.Row
++        if self.db.execute("PRAGMA user_version").fetchone()[0] not in (0, 1):
++            self.db.close()
++            self.owner.close()
++            raise ValueError("Unsupported learning journal schema")
++        self.db.execute("PRAGMA journal_mode=WAL")
++        self.db.execute("PRAGMA synchronous=FULL")
++        self.db.executescript("""
++          CREATE TABLE IF NOT EXISTS scopes (id TEXT PRIMARY KEY, source TEXT NOT NULL,
++            revision INTEGER DEFAULT 0, reviewed INTEGER DEFAULT 0, memory_count INTEGER DEFAULT 0,
++            skill_count INTEGER DEFAULT 0, activity REAL NOT NULL);
++          CREATE TABLE IF NOT EXISTS observations (id TEXT PRIMARY KEY, handle TEXT NOT NULL,
++            turn TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL, messages TEXT NOT NULL,
++            projection TEXT NOT NULL DEFAULT 'pending', provider TEXT);
++          CREATE TABLE IF NOT EXISTS calls (handle TEXT, turn TEXT, call_id TEXT,
++            PRIMARY KEY(handle,turn,call_id));
++          CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
++          CREATE TABLE IF NOT EXISTS intents (id TEXT PRIMARY KEY, handle TEXT NOT NULL,
++            revision INTEGER NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL);
++          CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, intent TEXT NOT NULL UNIQUE,
++            status TEXT NOT NULL, payload TEXT NOT NULL);
++          CREATE TABLE IF NOT EXISTS deliveries (token TEXT PRIMARY KEY, name TEXT NOT NULL,
++            version TEXT NOT NULL, status TEXT NOT NULL, evidence TEXT);
++          CREATE TABLE IF NOT EXISTS closures (id TEXT PRIMARY KEY, handle TEXT NOT NULL,
++            status TEXT NOT NULL, payload TEXT NOT NULL);
++        """)
++        with self.db:
++            self.db.execute("PRAGMA user_version=1")
++            self.db.execute("UPDATE attempts SET status='unknown' WHERE status='running'")
++            self.db.execute("UPDATE intents SET status='unknown' WHERE status='running'")
++            self.db.execute("UPDATE observations SET projection='uncertain' WHERE projection='projecting'")
++            self.db.execute("UPDATE closures SET status='unknown' WHERE status='closing'")
++        self.runtime = NativeLearningRuntime()
++        self.closed = False
++
++    def _scope(self, handle: str):
++        row = self.db.execute("SELECT * FROM scopes WHERE id=?", (handle,)).fetchone()
++        if row is None:
++            raise ValueError("Unknown learning handle")
++        return row
++
++    @_bound
++    def open(self, source: dict) -> dict:
++        identity_keys = {"host", "project", "chat"}
++        if not identity_keys <= set(source) or set(source) - identity_keys - {"executor"}:
++            raise ValueError("Unknown observation source fields")
++        if not all(isinstance(v, str) and v for v in source.values()):
++            raise ValueError("source requires host, absolute project and actual chat identity")
++        if len(source.get("executor", "")) > 80:
++            raise ValueError("executor label is too long")
++        if not Path(source["project"]).is_absolute():
++            raise ValueError("project must be absolute")
++        handle = "observed-" + fingerprint({k: source[k] for k in identity_keys})[:32]
++        with self.lock, self.db:
++            self.db.execute("INSERT OR IGNORE INTO scopes(id,source,activity) VALUES (?,?,?)",
++                            (handle, json.dumps(source), time.time()))
++        return {"handle": handle, "version": 1}
++
++    def _messages(self, body: dict, identity: str, new_turn: bool, known_calls: set) -> list[dict]:
++        messages = [{"role": "user", "content": body["user"] if new_turn else
++                     "[Supplemental external execution evidence for the prior turn; not a new user request.]"}]
++        for tool in body.get("tools", []):
++            if tool["call_id"] in known_calls or tool["status"] != "completed":
++                continue
++            call_id = "external-" + fingerprint([body["source"], tool["call_id"]])[:32]
++            messages.extend([
++                {"role": "assistant", "content": None, "tool_calls": [{"id": call_id, "type": "function",
++                  "function": {"name": tool["name"], "arguments": json.dumps(tool.get("arguments", {}))}}]},
++                {"role": "tool", "tool_call_id": call_id, "tool_name": tool["name"],
++                 "content": tool["result"] if isinstance(tool["result"], str) else json.dumps(tool["result"], ensure_ascii=False)},
++            ])
++        if body.get("assistant"):
++            messages.append({"role": "assistant", "content": body["assistant"]})
++        for index, msg in enumerate(messages):
++            msg.update(message_uid=fingerprint([identity, index]), observed=True)
++        return messages
++
++    @_bound
++    def observe(self, handle: str, observation: dict, *, event_id: str) -> dict:
++        with self.lock, self.db:
++            previous = self.db.execute("SELECT payload FROM receipts WHERE id=?", (event_id,)).fetchone()
++            body_hash = fingerprint(observation)
++            if previous:
++                receipt = json.loads(previous[0])
++                if receipt["content_hash"] != body_hash or receipt["handle"] != handle:
++                    raise ValueError("Observation identity conflict")
++                return receipt
++            scope = self._scope(handle)
++            body = observation
++            expected = json.loads(scope["source"])
++            if any(body["source"][k] != expected[k] for k in ("host", "project", "chat")):
++                raise ValueError("Observation scope mismatch")
++            if body.get("status") not in {"completed", "interrupted"} or not isinstance(body.get("user"), str):
++                raise ValueError("Only terminal observed turns are accepted")
++            turn = body["source"]["turn"]
++            same = self.db.execute("SELECT id FROM observations WHERE handle=? AND turn=? AND body=?",
++                                   (handle, turn, json.dumps(body, sort_keys=True))).fetchone()
++            if same:
++                receipt = json.loads(self.db.execute("SELECT payload FROM receipts WHERE id=?", (same[0],)).fetchone()[0])
++                receipt = {**receipt, "id": event_id, "duplicate_of": same[0]}
++                self.db.execute("INSERT INTO receipts VALUES (?,?)", (event_id, json.dumps(receipt)))
++                return receipt
++            new_turn = not self.db.execute("SELECT 1 FROM observations WHERE handle=? AND turn=?", (handle, turn)).fetchone()
++            known = {r[0] for r in self.db.execute("SELECT call_id FROM calls WHERE handle=? AND turn=?", (handle, turn))}
++            messages = self._messages(body, event_id, new_turn, known)
++            calls = {t["call_id"] for t in body.get("tools", []) if t["status"] == "completed"} - known
++            ticks = self.runtime.tick(handle, json.loads(scope["source"]), scope["memory_count"], scope["skill_count"],
++                                      new_turn=new_turn, tools=len(calls))
++            revision = scope["revision"] + 1
++            self.db.execute("INSERT INTO observations(id,handle,turn,revision,body,messages) VALUES (?,?,?,?,?,?)",
++                            (event_id, handle, turn, revision, json.dumps(body, sort_keys=True), json.dumps(messages)))
++            self.db.executemany("INSERT INTO calls VALUES (?,?,?)", [(handle, turn, call) for call in calls])
++            self.db.execute("UPDATE scopes SET revision=?,memory_count=?,skill_count=?,activity=? WHERE id=?",
++                            (revision, ticks["memory_count"], ticks["skill_count"], time.time(), handle))
++            intent = None
++            if body["status"] == "completed" and body.get("assistant") and (ticks["memory"] or ticks["skills"]):
++                intent = self._intent(handle, revision, ticks["memory"], ticks["skills"], "native_threshold")
++            receipt = {"id": event_id, "handle": handle, "revision": revision, "content_hash": body_hash,
++                       "new_user_turn": new_turn, "completed_tool_delta": len(calls), "intent": intent,
++                       "coverage": body.get("coverage", []),
++                       "count_confidence": "observed_only" if body.get("coverage") else "source_ids"}
++            self.db.execute("INSERT INTO receipts VALUES (?,?)", (event_id, json.dumps(receipt)))
++        self._project(event_id)
++        return receipt
++
++    def _intent(self, handle, revision, memory, skills, reason):
++        identity = fingerprint([handle, revision, reason])
++        value = {"id": identity, "handle": handle, "revision": revision, "memory": memory, "skills": skills, "reason": reason}
++        self.db.execute("INSERT OR IGNORE INTO intents VALUES (?,?,?,'queued',?)",
++                        (identity, handle, revision, json.dumps(value)))
++        return identity
++
++    def _project(self, identity):
++        with self.lock, self.db:
++            row = self.db.execute("SELECT * FROM observations WHERE id=?", (identity,)).fetchone()
++            if row["projection"] != "pending":
++                return
++            self.db.execute("UPDATE observations SET projection='projecting' WHERE id=?", (identity,))
++        body = json.loads(row["body"])
++        provider = self.runtime.project(row["handle"], json.loads(self._scope(row["handle"])["source"]), json.loads(row["messages"]),
++                                        user=body["user"], assistant=body.get("assistant", ""), sync=body["status"] == "completed")
++        with self.lock, self.db:
++            self.db.execute("UPDATE observations SET projection='projected',provider=? WHERE id=?", (provider, identity))
++
++    @_bound
++    def run_review(self, handle: str, intent_id: str, *, attempt_id: str) -> dict:
++        with self.lock, self.db:
++            previous = self.db.execute("SELECT * FROM attempts WHERE intent=? OR id=?", (intent_id, attempt_id)).fetchone()
++            if previous:
++                if previous["intent"] != intent_id:
++                    raise ValueError("Attempt identity conflict")
++                return {**json.loads(previous["payload"]), "run_status": previous["status"]}
++            row = self.db.execute("SELECT * FROM intents WHERE id=? AND handle=?", (intent_id, handle)).fetchone()
++            if row is None or row["status"] != "queued":
++                raise ValueError("Review intent is not queued for this scope")
++            if self.db.execute("SELECT 1 FROM attempts WHERE status='running'").fetchone():
++                return {"run_status": "deferred", "reason": "another_review_running"}
++            if self.db.execute("SELECT 1 FROM observations WHERE handle=? AND revision<=? AND projection!='projected'",
++                               (handle, row["revision"])).fetchone():
++                return {"run_status": "deferred", "reason": "projection_incomplete"}
++            intent = json.loads(row["payload"])
++            scope = self._scope(handle)
++            if row["revision"] <= scope["reviewed"]:
++                self.db.execute("UPDATE intents SET status='superseded' WHERE id=?", (intent_id,))
++                return {"run_status": "superseded"}
++            self.db.execute("INSERT INTO attempts VALUES (?,?,'running',?)", (attempt_id, intent_id, json.dumps({"id": attempt_id})))
++            self.db.execute("UPDATE intents SET status='running' WHERE id=?", (intent_id,))
++            messages = [m for r in self.db.execute("SELECT messages FROM observations WHERE handle=? AND revision<=? ORDER BY revision",
++                                                   (handle, row["revision"])) for m in json.loads(r[0])]
++        try:
++            outcome = self.runtime.review(handle, json.loads(scope["source"]), messages, intent)
++        except Exception as exc:
++            logger.exception("Learning review attempt failed")
++            outcome = {"run_status": "unknown", "error": f"{type(exc).__name__}: {exc}", "uncertain": ["executor raised"]}
++        with self.lock, self.db:
++            state = outcome["run_status"]
++            if state == "deferred":
++                self.db.execute("DELETE FROM attempts WHERE id=?", (attempt_id,))
++                self.db.execute("UPDATE intents SET status='queued' WHERE id=?", (intent_id,))
++            else:
++                self.db.execute("UPDATE attempts SET status=?,payload=? WHERE id=?", (state, json.dumps(outcome), attempt_id))
++                self.db.execute("UPDATE intents SET status=? WHERE id=?", (state, intent_id))
++                if state == "completed":
++                    self.db.execute("UPDATE scopes SET reviewed=MAX(reviewed,?) WHERE id=?", (row["revision"], handle))
++        return {**outcome, "id": attempt_id, "intent_id": intent_id}
++
++    @_bound
++    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None) -> dict:
++        if kind == "context":
++            from agent.learning_artifacts import context
++            value = context(self.home)
++            recalled = "\n".join(getattr(self.runtime, "recalled", {}).values())
++            value["provider_recall"] = recalled
++            recent = []
++            with self.lock:
++                for row in self.db.execute("SELECT payload FROM attempts WHERE status='completed' ORDER BY rowid DESC LIMIT 3"):
++                    for fact in json.loads(row[0]).get("applied", []):
++                        name = changed_skill_name(fact)
++                        if name and name not in recent:
++                            recent.append(name)
++            if recent:
++                memory = "\n".join(value["memories"].values())[:340]
++                value["summary"] = memory + "\n新更新技能：" + "、".join(recent[:5])
++            if recalled:
++                value["summary"] += "\n" + recalled[:180]
++            value["version"] = fingerprint([value["version"], recalled])
++            return value
++        if kind == "skill":
++            from agent.learning_artifacts import skill
++            value = skill(self.home, name, file_path)
++            token = uuid.uuid4().hex
++            with self.lock, self.db:
++                self.db.execute("INSERT INTO deliveries VALUES (?,?,?,'issued',NULL)", (token, value["name"], value["version"]))
++            return {**value, "delivery_token": token}
++        if kind == "status":
++            with self.lock:
++                intents = [{**json.loads(r["payload"]), "status": r["status"]} for r in self.db.execute("SELECT * FROM intents")]
++                attempts = [{**json.loads(r["payload"]), "id": r["id"], "run_status": r["status"]} for r in self.db.execute("SELECT * FROM attempts")]
++                gaps = [dict(r) for r in self.db.execute("SELECT id,projection,provider FROM observations WHERE projection!='projected'")]
++                handles = [r[0] for r in self.db.execute("SELECT id FROM scopes")]
++                closures = [{"id": r["id"], "handle": r["handle"], "status": r["status"], **json.loads(r["payload"])}
++                            for r in self.db.execute("SELECT * FROM closures")]
++            return {"version": 1, "intents": intents, "attempts": attempts, "projection_gaps": gaps, "closures": closures,
++                    "usage": {"source_execution": None, "native_auxiliary_by_session": self.runtime.usage(handles),
++                              "external_provider_usage": None, "attempt_usage_overlaps_native_ledger": True}}
++        raise ValueError("Unknown read request")
++
++    @_bound
++    def record_usage(self, token: str, evidence: dict) -> dict:
++        from tools.skill_usage import bump_use, bump_view
++        with self.lock, self.db:
++            row = self.db.execute("SELECT * FROM deliveries WHERE token=?", (token,)).fetchone()
++            if row is None:
++                raise ValueError("Unknown skill delivery")
++            if row["status"] != "issued":
++                return {"recorded": False, "status": row["status"]}
++            if evidence.get("stage") != "body_delivered" or not evidence.get("source_event"):
++                raise ValueError("Usage requires a confirmed body delivery source")
++            self.db.execute("UPDATE deliveries SET status='applying',evidence=? WHERE token=?", (json.dumps(evidence), token))
++        bump_view(row["name"])
++        bump_use(row["name"], task_id=str(evidence["source_event"]))
++        with self.lock, self.db:
++            self.db.execute("UPDATE deliveries SET status='recorded' WHERE token=?", (token,))
++        return {"recorded": True, "native_telemetry": "best_effort"}
++
++    @_bound
++    def maintenance(self, *, handle: str | None = None, idle_flush: bool = False) -> dict:
++        with self.lock, self.db:
++            for row in self.db.execute("SELECT id FROM observations WHERE projection='pending'").fetchall():
++                self._project(row[0])
++            intent = None
++            if idle_flush:
++                scope = self._scope(handle)
++                pending = self.db.execute("SELECT 1 FROM intents WHERE handle=? AND status IN ('queued','running','unknown')", (handle,)).fetchone()
++                attempted = self.db.execute("SELECT 1 FROM intents WHERE handle=? AND revision>=? AND status IN ('completed','failed','interrupted')",
++                                            (handle, scope["revision"])).fetchone()
++                if scope["revision"] > scope["reviewed"] and not pending and not attempted:
++                    intent = self._intent(handle, scope["revision"], True, True, "idle_flush")
++            last = self.db.execute("SELECT MAX(activity) FROM scopes").fetchone()[0]
++        return {"intent": intent, **self.runtime.maintenance(max(0, time.time() - (last or time.time())))}
++
++    @_bound
++    def cancel(self) -> dict:
++        self.runtime.cancel()
++        return {"requested": True, "rollback": False}
++
++    @_bound
++    def close(self, *, handle: str | None = None, event_id: str | None = None) -> dict:
++        if handle is not None:
++            return self._close_scope(handle, event_id)
++        if self.closed:
++            return {"closed": True}
++        result = self.runtime.close()
++        self.db.close()
++        self.owner.close()
++        self.closed = True
++        return result
++
++    def _close_scope(self, handle, event_id):
++        if not event_id:
++            raise ValueError("A real session-end event id is required")
++        with self.lock, self.db:
++            previous = self.db.execute("SELECT status,payload FROM closures WHERE id=?", (event_id,)).fetchone()
++            if previous:
++                return {"status": previous["status"], **json.loads(previous["payload"])}
++            if self.db.execute("SELECT 1 FROM intents WHERE handle=? AND status IN ('queued','running')", (handle,)).fetchone():
++                return {"status": "deferred"}
++            self.db.execute("INSERT INTO closures VALUES (?,?,'closing','{}')", (event_id, handle))
++        result = self.runtime.close_scope(handle)
++        with self.lock, self.db:
++            self.db.execute("UPDATE closures SET status='closed',payload=? WHERE id=?", (json.dumps(result), event_id))
++        return {"status": "closed", **result}
+diff --git a/hermes_cli/plugin_isolation.py b/hermes_cli/plugin_isolation.py
+index b6014d539468d27a731c69364d1e90bc87e20c69..0e71f45183ad7e02b55084103e22e53895beb7d1 100644
+--- a/hermes_cli/plugin_isolation.py
++++ b/hermes_cli/plugin_isolation.py
+@@ -33,6 +33,7 @@ _ISOLATION_MODES = frozenset({ISOLATION_IN_PROCESS, ISOLATION_HOST})
+ # raw platform SDK clients, argparse parsers, adapter classes bound to the gateway's event loop, the
+ # launch-scope dashboard auth registry. A plugin calling one of these runs only in-process.
+ HOST_UNSUPPORTED_CTX_METHODS: dict[str, str] = {
++    "learning": "learning API v1 requires the single in-process profile owner",
+     "register_login_backend": "browser-vault fills hold a server-local context manager",
+     "register_browser_page_backend": "browser-vault fill scripts carry credentials that stay in the Hermes process",
+     "register_platform": "platform adapters run on the gateway's event loop with native SDK clients",
+diff --git a/hermes_cli/plugins_capability_ctx.py b/hermes_cli/plugins_capability_ctx.py
+index 8aa55ff30f6412b4d31565748b7d360c05e158fd..5bf7889ce5d2df027e0256d05588f03136f4059b 100644
+--- a/hermes_cli/plugins_capability_ctx.py
++++ b/hermes_cli/plugins_capability_ctx.py
+@@ -16,6 +16,22 @@ class PluginCapabilityCtxMixin:
+     """Mixed into :class:`hermes_cli.plugins.PluginContext` (``manifest``, ``_manager``, ``plugin_id``)."""
+ 
+     # -- capability probing (#64228) -----------------------------------------
++    def learning(self, *, version: int = 1):
++        """Versioned external-observation learning service; opt-in, in-process only.
++
++        The service is permanently bound to this plugin manager's profile. It exposes
++        values and receipts, never an Agent or provider. No business turn is executed.
++        """
++        if version != 1:
++            raise ValueError("Unsupported learning API version")
++        with _plugin_home_scope(self._manager.home_path):
++            if self.get_config("learning.enabled", False) is not True:
++                raise PermissionError("Enable this plugin's settings.learning.enabled first")
++        if not hasattr(self, "_learning_service"):
++            from agent.learning_api import LearningFacade
++            self._learning_service = LearningFacade(self._manager.home_path, self.plugin_id)
++        return self._learning_service
++
+     def has_capability(self, capability: str) -> bool:
+         """True when *capability* is live for this plugin (probe, then degrade gracefully). Bundled
+         plugins are trusted for ``tools.override``; otherwise granted_capabilities or the legacy
+diff --git a/tests/agent/test_learning_native_loop.py b/tests/agent/test_learning_native_loop.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ef7a6bc18b9656c37f35d86be33cb5255039a028
+--- /dev/null
++++ b/tests/agent/test_learning_native_loop.py
+@@ -0,0 +1,127 @@
++"""Real native review loop against a loopback scripted provider; no business-model replay."""
++import json
++import threading
++from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++
++import pytest
++
++pytestmark = pytest.mark.platforms("posix")
++
++
++@pytest.mark.parametrize("memory_action", ["add", "patch"])
++def test_native_review_and_skill_delivery_have_real_effects(tmp_path, monkeypatch, memory_action):
++    calls = []
++
++    class Handler(BaseHTTPRequestHandler):
++        def log_message(self, *_):
++            return None
++
++        def do_POST(self):
++            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
++            if "messages" not in request:
++                self.send_response(404)
++                self.end_headers()
++                self.wfile.write(b'{}')
++                return
++            calls.append(request)
++            if len(calls) == 1:
++                tool_calls = [
++                    {"index": 0, "id": "call_memory", "type": "function", "function": {"name": "memory", "arguments": json.dumps({
++                        "action": memory_action, "target": "memory", "old_text": "Legacy validation uses mutable inputs.",
++                        "content": "Pilot validation uses the frozen input receipt before running checks."})}},
++                    {"index": 1, "id": "call_skill", "type": "function", "function": {"name": "skill_manage", "arguments": json.dumps({
++                        "action": "create", "name": "pilot-validation", "content": "---\nname: pilot-validation\ndescription: Validate this pilot using its frozen input receipt.\n---\nRead the receipt before checking the output.\n"})}},
++                ]
++                delta, reason = {"role": "assistant", "tool_calls": tool_calls}, "tool_calls"
++            else:
++                delta, reason = {"role": "assistant", "content": "Saved the verified validation procedure."}, "stop"
++            usage = {"prompt_tokens": 200, "completion_tokens": 30, "total_tokens": 230}
++            self.send_response(200)
++            if request.get("stream"):
++                self.send_header("Content-Type", "text/event-stream")
++                self.end_headers()
++                chunks = [{"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
++                          {"choices": [{"index": 0, "delta": {}, "finish_reason": reason}], "usage": usage}]
++                for chunk in chunks:
++                    self.wfile.write(("data: " + json.dumps({"id": "chatcmpl-pilot", "object": "chat.completion.chunk", "model": "gpt-4.1", **chunk}) + "\n\n").encode())
++                self.wfile.write(b"data: [DONE]\n\n")
++            else:
++                self.send_header("Content-Type", "application/json")
++                self.end_headers()
++                self.wfile.write(json.dumps({"id": "chatcmpl-pilot", "model": "gpt-4.1", "choices": [{"index": 0, "message": delta, "finish_reason": reason}], "usage": usage}).encode())
++
++    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
++    thread = threading.Thread(target=server.serve_forever, daemon=True)
++    thread.start()
++    home = tmp_path / "home"
++    home.mkdir()
++    if memory_action == "patch":
++        (home / "memories").mkdir()
++        (home / "memories/MEMORY.md").write_text("Legacy validation uses mutable inputs.\n")
++    project = tmp_path / "project"
++    project.mkdir()
++    monkeypatch.setenv("HERMES_HOME", str(home))
++    monkeypatch.setenv("OPENAI_API_KEY", "local-scripted-provider")
++    from hermes_cli.config import DEFAULT_CONFIG, atomic_config_write
++    atomic_config_write(home / "config.yaml", {
++        "_config_version": DEFAULT_CONFIG["_config_version"],
++        "model": {"provider": "custom", "default": "gpt-4.1", "base_url": f"http://127.0.0.1:{server.server_port}/v1"},
++        "agent": {"reasoning_effort": "max"},
++        "memory": {"memory_enabled": True, "user_profile_enabled": True},
++    })
++    from agent.learning_service import LearningService
++    from tools.skill_usage import get_record
++    api = LearningService(home, "native-loop-fixture")
++    try:
++        source = {"host": "test", "project": str(project), "chat": "chat-a"}
++        handle = api.open(source)["handle"]
++        api.observe(handle, {"source": {**source, "turn": "turn-1"}, "user": "Validate the frozen input first.",
++                             "assistant": "Validated the receipt and ran the checks successfully.", "status": "completed", "tools": []}, event_id="event-1")
++        assert calls == []
++        intent = api.maintenance(handle=handle, idle_flush=True)["intent"]
++        result = api.run_review(handle, intent, attempt_id="review-1")
++        assert result["run_status"] == "completed", result
++        assert len(result["applied"]) == (2 if memory_action == "add" else 1), result
++        if memory_action == "add":
++            assert "frozen input receipt" in api.read(kind="context")["memories"]["MEMORY.md"]
++        else:
++            assert len(result["staged"]) == 1, result
++            assert "Legacy validation" in api.read(kind="context")["memories"]["MEMORY.md"]
++        loaded = api.read(kind="skill", name="pilot-validation")
++        assert "Read the receipt" in loaded["content"]
++        before = get_record("pilot-validation").get("use_count", 0)
++        evidence = {"stage": "body_delivered", "source_event": ["chat-b", "turn-1", "load-1"]}
++        assert api.record_usage(loaded["delivery_token"], evidence)["recorded"]
++        assert not api.record_usage(loaded["delivery_token"], evidence)["recorded"]
++        assert get_record("pilot-validation")["use_count"] == before + 1
++        assert len(calls) == 2
++        assert result["usage"]["api_calls"] == 2
++        accounting = api.read(kind="status")["usage"]
++        assert accounting["source_execution"] is None
++        assert accounting["native_auxiliary_by_session"][handle]["background_review"]["input_tokens"] == result["usage"]["input_tokens"]
++        assert api.close(handle=handle, event_id="real-session-end")["status"] == "closed"
++        assert api.close(handle=handle, event_id="real-session-end")["status"] == "closed"
++    finally:
++        api.close()
++        server.shutdown()
++        server.server_close()
++
++
++def test_native_usage_is_read_after_observer_owner_restart(tmp_path, monkeypatch):
++    from agent.learning_runtime import NativeLearningRuntime
++    from hermes_state import SessionDB
++
++    home = tmp_path / "usage-profile"
++    home.mkdir()
++    monkeypatch.setenv("HERMES_HOME", str(home))
++    db = SessionDB()
++    db.record_auxiliary_usage("observed-fixture", "background_review", api_call_count=6, input_tokens=123)
++    db.close()
++    runtime = NativeLearningRuntime()
++    try:
++        usage = runtime.usage(["observed-fixture"])
++        assert usage["observed-fixture"]["background_review"]["api_calls"] == 6
++        assert usage["observed-fixture"]["background_review"]["input_tokens"] == 123
++        assert not runtime.agents
++    finally:
++        runtime.close()
+diff --git a/tests/agent/test_learning_service.py b/tests/agent/test_learning_service.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..7152cbc3962bd8c61e08b5ce1cb7693293d9386a
+--- /dev/null
++++ b/tests/agent/test_learning_service.py
+@@ -0,0 +1,175 @@
++"""External observation admission, recovery and actual native result semantics."""
++import json
++from types import SimpleNamespace
++
++import pytest
++
++from agent.learning_results import review_outcome
++from agent.learning_policy import tick_skill_review
++from agent.turn_context import _tick_memory_nudge
++
++pytestmark = pytest.mark.platforms("posix")
++
++
++class Runtime:
++    def __init__(self):
++        self.projects = []
++        self.reviews = 0
++
++    def tick(self, handle, source, memory_count, skill_count, *, new_turn, tools):
++        agent = SimpleNamespace(_memory_nudge_interval=2, _turns_since_memory=memory_count,
++                                _memory_store=True, valid_tool_names={"memory", "skill_manage"},
++                                _skill_nudge_interval=2, _iters_since_skill=skill_count)
++        memory = _tick_memory_nudge(agent) if new_turn else False
++        skills = tick_skill_review(agent, tools)
++        return dict(memory=memory, skills=skills, memory_count=agent._turns_since_memory, skill_count=agent._iters_since_skill)
++
++    def project(self, handle, source, messages, **kwargs):
++        self.projects.extend(messages)
++        return "not_configured"
++
++    def review(self, *args):
++        self.reviews += 1
++        return {"run_status": "completed", "applied": [], "staged": [], "uncertain": [], "usage": None}
++
++    def maintenance(self, idle_seconds):
++        return {"curator": None}
++
++    def cancel(self):
++        return None
++
++    def usage(self, handles):
++        return None
++
++    def close(self):
++        return {}
++
++
++@pytest.fixture
++def service(tmp_path, monkeypatch):
++    from agent import learning_runtime
++    from agent.learning_service import LearningService
++    monkeypatch.setattr(learning_runtime, "NativeLearningRuntime", Runtime)
++    api = LearningService(tmp_path, "fixture")
++    yield api
++    api.close()
++
++
++def source():
++    return {"host": "fixture", "project": "/tmp/project", "chat": "actual-chat"}
++
++
++def body(turn="turn-1", calls=()):
++    return {"source": {**source(), "turn": turn}, "user": "Use the verified input", "assistant": "Verified output",
++            "status": "completed", "tools": [{"call_id": c, "name": "terminal", "arguments": {"command": "check"},
++                                               "result": "passed", "status": "completed"} for c in calls]}
++
++
++def test_admission_and_native_ticks_are_idempotent(service):
++    handle = service.open(source())["handle"]
++    first = service.observe(handle, body(calls=("one",)), event_id="capture-1")
++    assert first["new_user_turn"] and first["completed_tool_delta"] == 1
++    assert service.observe(handle, body(calls=("one",)), event_id="capture-1") == first
++    duplicate = service.observe(handle, body(calls=("one",)), event_id="new-capture-same-source")
++    assert duplicate["duplicate_of"] == "capture-1"
++    second = service.observe(handle, body("turn-2", ("two",)), event_id="capture-2")
++    assert second["intent"]
++    intent = service.read(kind="status")["intents"][0]
++    assert intent["memory"] and intent["skills"]
++    result = service.run_review(handle, intent["id"], attempt_id="attempt-1")
++    assert result["run_status"] == "completed"
++    service.run_review(handle, intent["id"], attempt_id="attempt-1")
++    assert service.runtime.reviews == 1
++
++
++def test_same_identity_different_payload_and_wrong_scope_are_rejected(service):
++    handle = service.open(source())["handle"]
++    service.observe(handle, body(), event_id="capture")
++    with pytest.raises(ValueError, match="conflict"):
++        service.observe(handle, {**body(), "assistant": "different"}, event_id="capture")
++    other = body()
++    other["source"]["chat"] = "different-chat"
++    with pytest.raises(ValueError, match="scope mismatch"):
++        service.observe(handle, other, event_id="different")
++
++
++def test_idle_supplement_has_explicit_reason_and_does_not_repeat_reviewed_input(service):
++    handle = service.open(source())["handle"]
++    service.observe(handle, body(), event_id="capture")
++    intent_id = service.maintenance(handle=handle, idle_flush=True)["intent"]
++    intent = service.read(kind="status")["intents"][0]
++    assert intent["reason"] == "idle_flush"
++    service.run_review(handle, intent_id, attempt_id="attempt")
++    assert service.maintenance(handle=handle, idle_flush=True)["intent"] is None
++
++
++def test_partial_mutation_is_preserved_when_review_failed():
++    state = SimpleNamespace(result=None, review_usage={"input_tokens": 20}, review_messages=[
++        {"role": "assistant", "tool_calls": [{"id": "m", "function": {"name": "memory", "arguments": '{"action":"add"}'}}]},
++        {"role": "tool", "tool_call_id": "m", "content": json.dumps({"success": True, "message": "Entry added"})},
++    ])
++    outcome = review_outcome(state, "provider disconnected")
++    assert outcome["run_status"] == "failed" and len(outcome["applied"]) == 1
++    assert not outcome["no_change"]
++
++
++def test_staged_changes_are_not_applied_and_no_result_is_not_no_change():
++    state = SimpleNamespace(result=None, review_usage={}, review_messages=[
++        {"role": "assistant", "tool_calls": [{"id": "m", "function": {"name": "memory", "arguments": '{"action":"patch"}'}}]},
++        {"role": "tool", "tool_call_id": "m", "content": json.dumps({"success": True, "staged": True})},
++    ])
++    outcome = review_outcome(state)
++    assert len(outcome["staged"]) == 1 and not outcome["applied"]
++    assert outcome["run_status"] == "unknown" and not outcome["no_change"]
++
++
++def test_restart_marks_started_attempt_unknown_instead_of_rerunning(service):
++    from agent.learning_service import LearningService
++    handle = service.open(source())["handle"]
++    service.observe(handle, body(), event_id="event")
++    intent = service.maintenance(handle=handle, idle_flush=True)["intent"]
++    with service.db:
++        service.db.execute("UPDATE intents SET status='running' WHERE id=?", (intent,))
++        service.db.execute("INSERT INTO attempts VALUES (?,?,'running',?)", ("started", intent, '{"id":"started"}'))
++    home = service.home
++    service.close()
++    recovered = LearningService(home, "fixture")
++    try:
++        result = recovered.run_review(handle, intent, attempt_id="started")
++        assert result["run_status"] == "unknown"
++        assert recovered.runtime.reviews == 0
++    finally:
++        recovered.close()
++
++
++def test_prior_observed_tool_writes_are_not_reported_as_new_learning():
++    prior = [
++        {"role": "assistant", "tool_calls": [{"id": "old", "function": {"name": "memory", "arguments": '{"action":"add"}'}}]},
++        {"role": "tool", "tool_call_id": "old", "content": '{"success":true}'},
++    ]
++    state = SimpleNamespace(result={"completed": True}, review_usage={}, review_messages=prior)
++    result = review_outcome(state, prior_snapshot=prior)
++    assert result["no_change"] and not result["applied"]
++
++
++def test_native_batch_skill_identity_is_preserved():
++    operations = [{"name": "build-verify", "action": "create", "success": True},
++                  {"name": "build-verify", "action": "patch", "success": True}]
++    state = SimpleNamespace(result={"completed": True}, review_usage={}, review_messages=[
++        {"role": "assistant", "tool_calls": [{"id": "batch", "function": {
++            "name": "skill_manage", "arguments": json.dumps({"operations": operations})}}]},
++        {"role": "tool", "tool_call_id": "batch", "content": json.dumps({
++            "success": True, "operations_applied": 2, "results": operations})},
++    ])
++    result = review_outcome(state)
++    assert [fact["name"] for fact in result["applied"]] == ["build-verify", "build-verify"]
++    assert [fact["action"] for fact in result["applied"]] == ["create", "patch"]
++
++
++def test_prior_v1_batch_receipts_still_recall_updated_skill(service):
++    outcome = {"applied": [{"tool": "skill_manage", "name": None,
++                           "operation": {"name": "build-verify", "action": "create", "success": True}}]}
++    with service.db:
++        service.db.execute("INSERT INTO attempts VALUES (?,?,'completed',?)",
++                           ("legacy-batch", "intent", json.dumps(outcome)))
++    assert "新更新技能：build-verify" in service.read(kind="context")["summary"]
+diff --git a/tests/hermes_cli/test_learning_profile_auth.py b/tests/hermes_cli/test_learning_profile_auth.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..93ef7e07058512db544e043ba11aa2d51f71775f
+--- /dev/null
++++ b/tests/hermes_cli/test_learning_profile_auth.py
+@@ -0,0 +1,78 @@
++"""Native root authentication is shared; external observation data stays in its profile."""
++import json
++from pathlib import Path
++
++import pytest
++
++pytestmark = pytest.mark.platforms("posix")
++
++
++@pytest.fixture
++def observed_profile(tmp_path, monkeypatch):
++    from hermes_cli.config import DEFAULT_CONFIG, atomic_config_write
++
++    account = tmp_path / "account"
++    root, home = account / ".hermes", tmp_path / "private-learning" / "observer"
++    root.mkdir(parents=True)
++    home.mkdir(parents=True)
++    alias = root / "profiles" / "observer"
++    alias.parent.mkdir()
++    alias.symlink_to(home, target_is_directory=True)
++    monkeypatch.setattr(Path, "home", lambda: account)
++    monkeypatch.setenv("HERMES_HOME", str(alias))
++    atomic_config_write(home / "config.yaml", {
++        "_config_version": DEFAULT_CONFIG["_config_version"],
++        "gateway": {"standalone": True},
++        "plugins": {"entries": {"fixture": {"settings": {"learning": {"enabled": True}}}}},
++    })
++    store = {"version": 1, "active_provider": "another-provider", "providers": {
++        "openai-codex": {"tokens": {"access_token": "fixture-old-at", "refresh_token": "fixture-old-rt"}}},
++        "credential_pool": {"openai-codex": [{"id": "root-row", "source": "device_code",
++            "auth_type": "oauth", "priority": 0, "access_token": "fixture-old-at", "refresh_token": "fixture-old-rt"}]}}
++    (root / "auth.json").write_text(json.dumps(store), encoding="utf-8")
++    return root, home, alias
++
++
++def test_profile_alias_reuses_and_rotates_one_native_auth_store(observed_profile):
++    from hermes_cli.auth import _save_codex_tokens, get_provider_auth_state, read_credential_pool
++    from hermes_cli.plugins_loader import _plugin_home_scope
++
++    root, home, _alias = observed_profile
++    with _plugin_home_scope(home):
++        assert get_provider_auth_state("openai-codex")["tokens"]["access_token"] == "fixture-old-at"
++        assert read_credential_pool("openai-codex")[0]["access_token"] == "fixture-old-at"
++        _save_codex_tokens({"access_token": "fixture-new-at", "refresh_token": "fixture-new-rt"},
++                           write_through=True)
++        assert get_provider_auth_state("openai-codex")["tokens"]["access_token"] == "fixture-new-at"
++    stored = json.loads((root / "auth.json").read_text(encoding="utf-8"))
++    assert stored["active_provider"] == "another-provider"
++    assert stored["providers"]["openai-codex"]["tokens"]["refresh_token"] == "fixture-new-rt"
++    assert stored["credential_pool"]["openai-codex"][0]["refresh_token"] == "fixture-new-rt"
++    assert not (home / "auth.json").exists()
++
++
++def test_shared_auth_does_not_share_artifacts_or_host_gateway(observed_profile):
++    from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
++    from hermes_cli.profiles import profiles_to_serve
++
++    root, home, alias = observed_profile
++    for folder, text, name in ((root, "APP-PRIVATE-MEMORY", "app-only"), (home, "OBSERVER-MEMORY", "observer-only")):
++        (folder / "memories").mkdir()
++        (folder / "memories/MEMORY.md").write_text(text, encoding="utf-8")
++        skill = folder / "skills" / name
++        skill.mkdir(parents=True)
++        (skill / "SKILL.md").write_text(f"---\nname: {name}\ndescription: Fixture procedure.\n---\n{text}\n", encoding="utf-8")
++    ctx = PluginContext(PluginManifest(name="fixture", source="user"), PluginManager(scope_key=str(home)))
++    api = ctx.learning(version=1)
++    try:
++        api.open({"host": "fixture", "project": str(home), "chat": "chat"})
++        context = api.read(kind="context")
++        assert context["memories"]["MEMORY.md"] == "OBSERVER-MEMORY"
++        assert "observer-only" in {entry["name"] for entry in context["skills"]}
++        assert "app-only" not in {entry["name"] for entry in context["skills"]}
++        assert (home / "learning/journal.sqlite").exists()
++        assert not (root / "learning").exists()
++        assert (root / "memories/MEMORY.md").read_text(encoding="utf-8") == "APP-PRIVATE-MEMORY"
++        assert all(path != alias for _name, path in profiles_to_serve(multiplex=True))
++    finally:
++        api.close()
+diff --git a/tests/hermes_cli/test_plugin_learning_api.py b/tests/hermes_cli/test_plugin_learning_api.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..bd2859dc005f74fc57c1d73c2d11fd1a9c7e1089
+--- /dev/null
++++ b/tests/hermes_cli/test_plugin_learning_api.py
+@@ -0,0 +1,35 @@
++"""The public plugin facade binds its manager's profile and requires explicit opt-in."""
++import pytest
++
++pytestmark = pytest.mark.platforms("posix")
++
++
++def test_learning_facade_is_opt_in_versioned_and_profile_bound(tmp_path, monkeypatch):
++    from hermes_cli.config import DEFAULT_CONFIG, atomic_config_write
++    from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
++
++    owner, ambient = tmp_path / "owner", tmp_path / "ambient"
++    owner.mkdir()
++    ambient.mkdir()
++    path = owner / "config.yaml"
++    cfg = {"_config_version": DEFAULT_CONFIG["_config_version"], "plugins": {"entries": {
++        "fixture": {"settings": {"learning": {"enabled": False}}}}}}
++    atomic_config_write(path, cfg)
++    ctx = PluginContext(PluginManifest(name="fixture", source="user"), PluginManager(scope_key=str(owner)))
++    monkeypatch.setenv("HERMES_HOME", str(ambient))
++    with pytest.raises(ValueError, match="version"):
++        ctx.learning(version=2)
++    with pytest.raises(PermissionError):
++        ctx.learning(version=1)
++    cfg["plugins"]["entries"]["fixture"]["settings"]["learning"]["enabled"] = True
++    atomic_config_write(path, cfg)
++    api = ctx.learning(version=1)
++    try:
++        assert ctx.learning(version=1) is api
++        assert not any(hasattr(api, name) for name in ("db", "runtime", "agents", "owner"))
++        result = api.open({"host": "fixture", "project": str(tmp_path), "chat": "actual-chat"})
++        assert result["version"] == 1
++        assert (owner / "learning/journal.sqlite").exists()
++        assert not (ambient / "learning").exists()
++    finally:
++        api.close()

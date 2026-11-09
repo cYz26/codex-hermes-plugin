@@ -15,6 +15,7 @@ import signal
 import subprocess
 import time
 import urllib.request
+import urllib.error
 import uuid
 from pathlib import Path
 
@@ -116,11 +117,15 @@ def catalog(root: Path = ROOT) -> dict:
             if Path(name).is_absolute() or ".." in Path(name).parts or not re.fullmatch(r"[a-f0-9]{64}", checksum):
                 raise UpdateError("Invalid patched file identity")
         result[tag] = {**manifest, "patch_path": str(patch), "native_tests": index["native_tests"],
-                       "recipe": digest([manifest, index["native_tests"], index["learning_api"]])}
+                       "manifest_path": str(path), "recipe": digest([manifest, index["native_tests"], index["learning_api"]])}
     return result
 
 
 def verify_source(source: Path, recipe: dict) -> None:
+    if not (source / ".git").exists():
+        from .source import verify_source as verify_archive
+        verify_archive(source, Path(recipe["manifest_path"]))
+        return
     if git(source, "rev-parse", "HEAD") != recipe["base_commit"]:
         raise UpdateError("Hermes source is not the pinned official commit")
     for relative, checksum in recipe["files"].items():
@@ -156,7 +161,22 @@ def github_json(settings: Settings, url: str) -> dict:
 
 
 def fetch_release(settings: Settings) -> dict:
-    data = github_json(settings, RELEASE_API)
+    try:
+        data = github_json(settings, RELEASE_API)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {403, 429}:
+            raise
+        request = urllib.request.Request("https://github.com/NousResearch/hermes-agent/releases/latest",
+                                         headers={"User-Agent": "hermes-codex-learning"})
+        with urllib.request.urlopen(request, timeout=20) as response:
+            target = response.geturl()
+        prefix = "https://github.com/NousResearch/hermes-agent/releases/tag/"
+        if not target.startswith(prefix):
+            raise UpdateError("Official latest-release redirect did not select a stable tag") from exc
+        tag = target[len(prefix):]
+        version(tag)
+        return {"tag": tag, "published_at": None, "release_id": None, "url": target,
+                "source": "official_latest_stable_redirect", "api_rate_limited": True}
     tag = data["tag_name"]
     version(tag)
     if data.get("draft") is not False or data.get("prerelease") is not False:
@@ -168,7 +188,20 @@ def fetch_release(settings: Settings) -> dict:
 def official_commit(settings: Settings, tag: str) -> str:
     version(tag)
     base = "https://api.github.com/repos/NousResearch/hermes-agent/git/"
-    obj = github_json(settings, base + "ref/tags/" + tag)["object"]
+    try:
+        obj = github_json(settings, base + "ref/tags/" + tag)["object"]
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {403, 429}:
+            raise
+        result = subprocess.run(["git", "-c", "credential.helper=", "ls-remote", UPSTREAM,
+                                 "refs/tags/" + tag, "refs/tags/" + tag + "^{}"],
+                                env={**os.environ, **settings.network_environment, "GIT_TERMINAL_PROMPT": "0"},
+                                capture_output=True, text=True, timeout=60, check=True)
+        refs = {line.split()[1]: line.split()[0] for line in result.stdout.splitlines() if len(line.split()) == 2}
+        commit = refs.get("refs/tags/" + tag + "^{}") or refs.get("refs/tags/" + tag)
+        if not commit or not re.fullmatch(r"[a-f0-9]{40}", commit):
+            raise UpdateError("Official Git ref did not resolve") from exc
+        return commit
     for _ in range(4):
         if obj.get("type") == "commit" and re.fullmatch(r"[a-f0-9]{40}", obj.get("sha", "")):
             return obj["sha"]
@@ -185,15 +218,11 @@ def assess_changes(comparison: dict, *, current: str, target: str) -> dict:
                 for item in files if any(item.get("filename", "").startswith(prefix)
                                         or item.get("previous_filename", "").startswith(prefix)
                                         for prefix in MECHANISM_PATHS)]
-    structural = any(item["status"] in {"renamed", "removed"} for item in critical)
-    churn = sum((item["additions"] or 0) + (item["deletions"] or 0) for item in critical)
     incomplete = "files" not in comparison or len(files) >= 300
-    major = structural or churn >= 120 or len(critical) >= 4
-    return {"state": "plan_required" if major else "mechanism_review_required" if critical or incomplete
+    return {"state": "mechanism_review_required" if critical or incomplete
             else "adaptation_required", "from": current, "to": target,
             "changed_mechanisms": critical, "comparison_may_be_truncated": incomplete,
-            "reason": "Potential self-evolution redesign; agree on a migration plan before adapting or upgrading"
-            if major else "Unreviewed release; compatibility and mechanism changes need assessment",
+            "reason": "Unreviewed release; complete source research must establish whether a redesign is necessary",
             "next": ["Review trigger/review/write/Curator/API/data changes", "Present impact and proposed upgrade plan",
                      "For a redesign, obtain the user's agreement before modifying the workflow"],
             "comparison_url": f"https://github.com/NousResearch/hermes-agent/compare/{current}...{target}"}
@@ -220,6 +249,10 @@ class Updater:
         self.status_path = self.directory / "status.json"
         self.lock = self.directory / "update.lock"
 
+    def recipes(self) -> dict:
+        from .adaptation import installed_recipes
+        return {**catalog(self.root), **installed_recipes(self)}
+
     def status(self) -> dict:
         transaction = read_json(self.directory / "transaction.json", {})
         return {"policy": self.settings.update_mode, "interval_seconds": self.settings.update_interval,
@@ -234,14 +267,40 @@ class Updater:
                 "transaction": {key: transaction[key] for key in ("id", "action", "state", "started_at",
                                 "committed_at", "restored_at", "recovered_at", "error") if key in transaction},
                 "activation_error": read_json(self.directory / "activation-error.json"),
-                "request": read_json(self.directory / "request.json")}
+                "worker_error": read_json(self.directory / "worker-error.json"),
+                "site_runtime": read_json(self.directory / "site-runtime.json"),
+                "request": read_json(self.directory / "request.json"),
+                "auto_adapt": self.settings.auto_adapt,
+                "adaptation": read_json(self.directory / "adaptation/status.json")}
 
     def current(self) -> str:
-        commit = git(self.settings.source, "rev-parse", "HEAD")
-        for tag, recipe in catalog(self.root).items():
+        return self.runtime_info(self.settings.source)["tag"]
+
+    def runtime_info(self, source: Path) -> dict:
+        """An active same-tag patch keeps its own sealed verification identity."""
+        source = source.resolve()
+        parent = source.parent
+        if source.name == "source" and parent.parent == self.directory / "candidates":
+            record = read_json(parent / "verification.json", {})
+            if (record.get("state") != "ready" or record.get("source") != str(source)
+                    or record.get("id") != parent.name
+                    or not {"native-contracts", "bridge-contracts", "runtime-smoke"} <= set(record.get("gates", []))):
+                raise UpdateError("Runtime has no matching immutable verification record")
+            version(record["tag"])
+            if (git(source, "rev-parse", "HEAD") != record.get("commit")
+                    or git(source, "diff", "--name-only")
+                    or git(source, "ls-files", "--others", "--exclude-standard")
+                    or git(source, "write-tree") != record.get("source_tree")):
+                raise UpdateError("Verified runtime source was modified")
+            return {"tag": record["tag"], "base_commit": record["commit"], "recipe": record["recipe"]}
+        if (source / ".git").exists():
+            commit = git(source, "rev-parse", "HEAD")
+        else:
+            commit = read_json(source.parent / "source-provenance.json", {}).get("base_commit")
+        for tag, recipe in self.recipes().items():
             if recipe["base_commit"] == commit:
-                verify_source(self.settings.source, recipe)
-                return tag
+                verify_source(source, recipe)
+                return {"tag": tag, "base_commit": commit, "recipe": recipe["recipe"]}
         raise UpdateError("Active Hermes runtime is not in the compatibility catalog")
 
     def check(self, *, fetch=fetch_release, compare=github_json, installed_only=False) -> dict:
@@ -251,7 +310,7 @@ class Updater:
             result = {"checked_at": time.time(), "last_successful_check": previous.get("last_successful_check")}
             try:
                 current = self.current()
-                recipes = catalog(self.root)
+                recipes = self.recipes()
                 installed = official_commit_id = None
                 if self.settings.official_source:
                     official_commit_id = git(self.settings.official_source, "rev-parse", "HEAD")
@@ -309,6 +368,10 @@ class Updater:
                               last_successful_check=result["checked_at"])
                 if state == "available":
                     result["target"] = tag
+                if state == "current" and self.settings.source.parent.parent == self.directory / "candidates":
+                    active = self.runtime_info(self.settings.source)
+                    if active["recipe"] != recipes[tag]["recipe"]:
+                        result.update(state="available", target=tag, reason="Reviewed same-version learning adapter changed")
                 if assessment:
                     result.update(assessment=assessment, reason=assessment["reason"])
                 if state == "waiting_for_official":
@@ -323,17 +386,21 @@ class Updater:
         # bindings into builds and fixture tests. Each candidate has its own PM store.
         allowed = {"PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", *NETWORK_ENV_KEYS}
         env = {key: value for key, value in os.environ.items() if key in allowed}
+        tools = (self.settings.official_source.parent / "tools" if self.settings.official_source
+                 else Path(self.settings.native_environment()["HERMES_RUNTIME_DIR"]))
         return {**env, **self.settings.network_environment, "HERMES_HOME": str(home),
-                "HERMES_RUNTIME_DIR": str(self.directory / "tools"), "GIT_TERMINAL_PROMPT": "0",
+                "HERMES_RUNTIME_DIR": str(tools), "GIT_TERMINAL_PROMPT": "0",
                 "PYTHONDONTWRITEBYTECODE": "1"}
 
     def prepare(self, tag: str, *, official_source: Path | None = None,
-                upgrade_official: bool | None = None, preflight=False) -> dict:
+                upgrade_official: bool | None = None, preflight=False, _recipe: dict | None = None) -> dict:
         version(tag)
         official_source = None if preflight else (official_source or self.settings.official_source)
         upgrade_official = self.settings.upgrade_official if upgrade_official is None else upgrade_official
         with exclusive(self.lock):
-            recipes = catalog(self.root)
+            recipes = self.recipes()
+            if _recipe is not None:
+                recipes = {**recipes, tag: _recipe}
             if tag not in recipes:
                 raise UpdateError("Release needs a reviewed compatibility recipe before preparation")
             recipe = recipes[tag]
@@ -344,7 +411,7 @@ class Updater:
                     and (existing.get("official_runtime") or {}).get("source") ==
                     (str(official_source.resolve()) if official_source else None)):
                 try:
-                    self.validate_candidate(existing)
+                    self.validate_candidate(existing, _recipe=_recipe)
                     return existing
                 except (UpdateError, OSError):
                     pass
@@ -396,8 +463,9 @@ class Updater:
                     except (UpdateError, OSError):
                         pass
                 if interpreter is None:
+                    extras = [arg for extra in self.settings.runtime_extras for arg in ("--extra", extra)]
                     command("build", [self.settings.interpreter, "-B", "-m", "pm.build_env", "--source", source,
-                                      "--out", runtime, "--group", "dev", "--group", "test"], cwd=source, timeout=1200)
+                                      "--out", runtime, "--group", "dev", "--group", "test", *extras], cwd=source, timeout=1200)
                     interpreter = runtime / "bin/python"
                 if binding:
                     record["fallback_python"] = str(interpreter)
@@ -406,6 +474,9 @@ class Updater:
                     raise UpdateError("Required native learning regression is missing")
                 command("native-contracts", ["bash", "scripts/run_tests.sh", "-j", "2", *recipe["native_tests"]],
                         cwd=source, timeout=1200)
+                if self.settings.site_manifest:
+                    from .site_updates import prepare_site
+                    prepare_site(self, recipe, record, interpreter, command)
                 env["PYTHONPATH"] = str(self.root / "src")
                 command("bridge-contracts", [interpreter, "-B", "-m", "unittest", "discover", "-s", "tests"], cwd=self.root)
                 smoke = [record["python"], "-B", self.root / "scripts/check_update_runtime.py",
@@ -440,8 +511,8 @@ class Updater:
             raise UpdateError("Private candidate interpreter is unavailable")
         return python
 
-    def validate_candidate(self, record: dict) -> None:
-        recipe = catalog(self.root).get(record.get("tag"))
+    def validate_candidate(self, record: dict, *, _recipe: dict | None = None) -> None:
+        recipe = _recipe or self.recipes().get(record.get("tag"))
         if not recipe or record.get("state") != "ready" or record.get("recipe") != recipe["recipe"]:
             raise UpdateError("Candidate is not verified for this compatibility recipe")
         if record.get("commit", recipe["base_commit"]) != recipe["base_commit"]:
@@ -462,6 +533,10 @@ class Updater:
         elif Path(record["python"]) != folder / "runtime/bin/python" or record.get("fallback_python"):
             raise UpdateError("Candidate interpreter is outside the managed candidate")
         required = {"native-contracts", "bridge-contracts", "runtime-smoke"}
+        if self.settings.site_manifest:
+            from .site_updates import validate_site
+            required.add("site-contracts")
+            validate_site(record)
         if not required <= set(record.get("gates", [])):
             raise UpdateError("Candidate verification gates are incomplete")
         if source_seal(Path(record["source"]), recipe) != record.get("source_tree"):
@@ -516,7 +591,8 @@ class Updater:
             try:
                 binding = inspect_official(source, before)
                 run_official_update(binding, candidate["tag"], candidate["commit"], root=self.root,
-                                    env=self.environment(source.parent), log=Path(record["log"]))
+                                    env=self.environment(source.parent), log=Path(record["log"]),
+                                    host_recipe=next((value for value in self.recipes().values() if value["base_commit"] == before), None))
                 if git(source, "rev-parse", "HEAD") != candidate["commit"]:
                     raise UpdateError("Official installer did not publish the tested commit")
                 record["state"] = "published"
@@ -531,6 +607,15 @@ class Updater:
         self.notice(result)
         if self.settings.update_mode != "auto":
             return result
+        if (self.settings.auto_adapt and not installed_only and
+                result["state"] in {"adaptation_required", "mechanism_review_required"}
+                and result.get("latest", {}).get("tag")):
+            from .adaptation import Adapter
+            adapted = Adapter(self).run(result["latest"]["tag"])
+            self.notice(adapted)
+            if adapted["state"] != "verified":
+                return adapted
+            return self.cycle(config=config)
         preflight = result["state"] == "waiting_for_official" and self.settings.upgrade_official and config is not None
         if result["state"] != "available" and not preflight:
             return result
@@ -563,6 +648,8 @@ class Updater:
             "mechanism_review_required": "Hermes 新版学习机制尚待核对；已保留当前版本，需要先确认流程兼容性。",
             "adaptation_required": "发现 Hermes 新版；缺少已验证的适配方案，继续使用当前版本。",
             "waiting_for_official": "已发现兼容的 Hermes 新版，学习服务将在官方安装升级后验证并跟进。",
+            "adaptation_failed": "Hermes 自动适配未通过验证；已保留当前运行版本，详细原因见更新状态。",
+            "unknown": "Hermes 适配作业被中断；请先检查持久记录，未自动重跑。",
             "failed": "Hermes 候选版本未通过验证，当前学习运行时保持运行。",
             "check_failed": "Hermes 版本检查失败，将按周期重试，当前学习继续运行。",
             "committed": "Hermes 学习运行时已通过兼容性验证并完成切换。",
@@ -578,5 +665,8 @@ class Updater:
         try:
             store.notice({"id": "update:" + identity, "kind": "update.notice", "message": summaries[state],
                           "receipt": summaries[state] + "\n\n" + json.dumps(detail, ensure_ascii=False, indent=2)})
+            from .notices import publish
+            publish(self.settings, {"id": "update:" + identity, "kind": "update.notice", "message": summaries[state],
+                                   "receipt": summaries[state] + "\n" + json.dumps(detail, ensure_ascii=False, indent=2)})
         finally:
             store.close()

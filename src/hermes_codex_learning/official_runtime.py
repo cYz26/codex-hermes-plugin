@@ -115,11 +115,24 @@ def verify_update_target(target, tag: str, commit: str):
     return target
 
 
-def guarded_native_update(source: Path, before: str, tag: str, commit: str) -> int:
+def reviewed_update_host(source: Path, before: str, recipe: dict | None = None) -> bool:
+    if before in GUARDED_UPDATE_HOSTS:
+        return True
+    if not recipe or recipe.get("base_commit") != before:
+        return False
+    contract = recipe.get("native_updater", {})
+    paths = {"hermes_cli/source_releases.py", "hermes_cli/update_cmd.py", "hermes_cli/update_lock.py"}
+    if contract.get("protocol") != "resolve_source_target-v1" or set(contract.get("files", {})) != paths:
+        return False
+    return all((source / path).is_file() and hashlib.sha256((source / path).read_bytes()).hexdigest() == checksum
+               for path, checksum in contract["files"].items())
+
+
+def guarded_native_update(source: Path, before: str, tag: str, commit: str, recipe: dict | None = None) -> int:
     """Run the official updater with a process-local check at target selection."""
     from .updates import git
 
-    if before not in GUARDED_UPDATE_HOSTS or git(source, "rev-parse", "HEAD") != before:
+    if not reviewed_update_host(source, before, recipe) or git(source, "rev-parse", "HEAD") != before:
         raise RuntimeError("The official updater host changed or its update contract has not been reviewed")
     sys.path.insert(0, str(source))
     sys.argv = ["hermes", "update", "--channel", "stable", "--yes"]
@@ -141,23 +154,24 @@ def guarded_native_update(source: Path, before: str, tag: str, commit: str) -> i
     return main() or 0
 
 
-def run_official_update(binding: dict, tag: str, commit: str, *, root: Path, env: dict, log: Path) -> None:
+def run_official_update(binding: dict, tag: str, commit: str, *, root: Path, env: dict, log: Path,
+                        host_recipe: dict | None = None) -> None:
     from .updates import UpdateError
 
     source = Path(binding["source"])
-    if binding["commit"] not in GUARDED_UPDATE_HOSTS:
+    if not reviewed_update_host(Path(binding["source"]), binding["commit"], host_recipe):
         raise UpdateError("This official updater host needs a reviewed target-selection adapter")
-    program = """import sys
+    program = """import sys, json
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from hermes_codex_learning.official_runtime import guarded_native_update
-raise SystemExit(guarded_native_update(Path(sys.argv[2]), *sys.argv[3:]))
+raise SystemExit(guarded_native_update(Path(sys.argv[2]), *sys.argv[3:6], json.loads(sys.argv[6])))
 """
     env = {**env, "HERMES_HOME": str(source.parent)}
     env.pop("HERMES_RUNTIME_DIR", None)  # The official installation owns its own tool store.
     with log.open("ab") as output:
         process = subprocess.run([binding["python"], "-I", "-B", "-c", program, str(root / "src"),
-                                  str(source), binding["commit"], tag, commit], cwd=source, env=env,
+                                  str(source), binding["commit"], tag, commit, json.dumps(host_recipe)], cwd=source, env=env,
                                  stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                                  start_new_session=True)
     if process.returncode:

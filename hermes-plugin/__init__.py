@@ -2,6 +2,16 @@
 
 
 def register(ctx):
+    ctx.register_system_prompt_section(
+        "codex-learning-sharing",
+        "Project-specific experience must retain its original applicability. When a skill is genuinely "
+        "generalizable, create an abstracted separate skill with learning_scope: global_candidate in "
+        "its YAML frontmatter. Remove project paths, private identifiers, internal links and credentials. "
+        "State prerequisites, limitations and verification steps. The bridge independently checks "
+        "candidates before sharing; do not copy private evidence into generic examples.",
+        max_chars=1000,
+    )
+
     def setup(parser):
         parser.add_argument("--settings", required=True)
 
@@ -16,12 +26,19 @@ def register(ctx):
         try:
             settings = Settings.load(args.settings)
             api = ctx.learning(version=1)
+            workflow_registration = None
             try:
+                from hermes_codex_learning.workflow_review import install_workflow_policy
+                workflow_registration = install_workflow_policy(api, settings, ctx)
                 install_review_policy(api)
             except Exception:
                 api.close()
                 raise
-            return run(settings, api, review_writes)
+            try:
+                return run(settings, api, review_writes)
+            finally:
+                if workflow_registration is not None:
+                    workflow_registration.dispose()
         finally:
             registration.dispose()
 

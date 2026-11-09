@@ -46,7 +46,9 @@ def reconcile(index: dict, context: dict, *, project: str | None = None,
         # A rewrite may have merged entries from another project. Do not relabel it as this project's fact.
         origin = None
     memory = {key: old_memory.get(key, {"project": origin}) for key, _, _ in memory_entries(context)}
-    skills = {key: dict(value) for key, value in index.get("skills", {}).items()}
+    present_skills = {item["name"] for item in context.get("skills", [])}
+    skills = {key: dict(value) for key, value in index.get("skills", {}).items()
+              if "skills" not in context or key in present_skills}
     for name in changed_skills(result or {}):
         current = skills.get(name, {"projects": []})
         origins = set(current.get("projects", []))
@@ -75,9 +77,18 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
     catalog, ranked = [], []
     for skill in context.get("skills", []):
         origins = index.get("skills", {}).get(skill["name"], {}).get("projects", [])
+        owns_private = origins == [project]
+        if context.get("checked_publication") and not owns_private:
+            publication = context.get("publications", {}).get(skill["name"])
+            if not publication:
+                continue
+            skill = publication["catalog_entry"]
         score = len(terms & _tokens(skill["name"] + " " + skill.get("description", "")))
         item = {**skill, "source_projects": origins,
                 "scope": "shared_skill_with_source_provenance" if origins else "native_catalog"}
+        if context.get("checked_publication"):
+            item["source_projects"] = [project] if owns_private else []
+            item["scope"] = "worktree" if owns_private else "global"
         # Cross-project learned skills require a relevant query, or an explicit skill_load.
         if not origins or project in origins or score:
             catalog.append(item)

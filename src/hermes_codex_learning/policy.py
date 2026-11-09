@@ -1,0 +1,99 @@
+"""Explicit data admission and versioned shared-skill publication.
+
+Built-in checks are not a general classifier. Unknown content needs a configured
+assessment command; rejection records never retain the rejected body.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import subprocess
+from pathlib import Path
+
+from .store import digest, dumps, redact
+
+
+def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe") -> dict:
+    if not policy:
+        return {"allowed": True, "basis": "legacy_configuration"}
+    if redact(payload) != payload:
+        return {"allowed": False, "reason": "credential_material"}
+    roots = policy.get("synthetic_roots", [])
+    if any(Path(project).resolve().is_relative_to(Path(root).resolve()) for root in roots):
+        return {"allowed": True, "basis": "synthetic_acceptance"}
+    command = policy.get("assessment_command")
+    if not command:
+        return {"allowed": False, "reason": "data_classification_unassessed"}
+    if (not isinstance(command, list) or not command or not Path(command[0]).is_absolute()
+            or not all(isinstance(item, str) for item in command)):
+        return {"allowed": False, "reason": "invalid_assessment_command"}
+    try:
+        result = subprocess.run(command, input=dumps({"project": project, "purpose": purpose, "event": payload}),
+                                capture_output=True, text=True, timeout=3, check=True)
+        assessment = json.loads(result.stdout)
+        if purpose == "share" and (assessment.get("classification") != "public" or assessment.get("sharing_allowed") is not True):
+            return {"allowed": False, "reason": "shared_candidate_not_assessed_public"}
+        if (assessment.get("allowed") is True and assessment.get("assessment_id")
+                and assessment.get("classification") in {"public", "synthetic", "approved"}):
+            return {"allowed": True, "basis": "assessment", "assessment_id": str(assessment["assessment_id"])[:128]}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return {"allowed": False, "reason": "assessment_not_approved"}
+
+
+def sharing_check(value: dict, origins: list[str], private_markers: list[str]) -> dict:
+    content = value.get("content") or ""
+    front = content.split("---", 2)
+    if len(front) < 3 or not re.search(r"(?m)^learning_scope:\s*global_candidate\s*$", front[1]):
+        return {"allowed": False, "reason": "project_experience"}
+    if not origins:
+        return {"allowed": False, "reason": "unknown_source"}
+    files = value.get("files", {})
+    root = Path(value["resource_dir"]).resolve()
+    if not files or len(files) > 100:
+        return {"allowed": False, "reason": "resource_manifest_missing_or_oversized"}
+    text = []
+    for relative, checksum in files.items():
+        path = root / relative
+        if path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file():
+            return {"allowed": False, "reason": "resource_escape_or_missing"}
+        if path.stat().st_size > 2 * 1024 * 1024:
+            return {"allowed": False, "reason": "resource_too_large"}
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != checksum:
+            return {"allowed": False, "reason": "resource_changed"}
+        # Executable resources require a separate trusted test receipt. The first
+        # release does not pretend syntax checks prove that arbitrary code works.
+        if path.suffix.lower() not in {".md", ".txt", ".json", ".csv", ".yaml", ".yml"}:
+            return {"allowed": False, "reason": "executable_resource_needs_validation"}
+        try:
+            text.append(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            return {"allowed": False, "reason": "binary_resource_unassessed"}
+    combined = "\n".join(text)
+    if redact(combined) != combined:
+        return {"allowed": False, "reason": "credential_material"}
+    markers = [*origins, *private_markers]
+    if any(marker and len(marker) >= 5 and marker in combined for marker in markers):
+        return {"allowed": False, "reason": "project_private_material"}
+    if re.search(r"https?://[^\s/]*(?:bytedance|larkoffice|feishu|\.internal|\.corp)|/(?:Users|home|data00|etc)/", combined, re.I):
+        return {"allowed": False, "reason": "internal_address_or_absolute_path"}
+    return {"allowed": True, "basis": "explicit_generic_candidate_and_resource_checks",
+            "version": value["version"], "manifest_hash": digest(files)}
+
+
+def published_resource(record: dict, file_path: str | None = None) -> dict:
+    value = record["artifact"]
+    relative = file_path or "SKILL.md"
+    if relative not in value["files"]:
+        raise ValueError("Unknown shared resource")
+    root = Path(value["resource_dir"]).resolve()
+    path = root / relative
+    if path.is_symlink() or not path.resolve().is_relative_to(root):
+        raise ValueError("Shared resource escapes its publication")
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != value["files"][relative]:
+        raise ValueError("Published resource changed")
+    return {**value, "content": raw.decode("utf-8"), "file_path": relative,
+            "content_hash": value["files"][relative], "scope": "global"}

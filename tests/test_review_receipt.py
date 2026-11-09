@@ -51,7 +51,7 @@ class ReviewReceiptTests(unittest.TestCase):
         writes.record(session_id="native-handle", tool_name="memory", tool_call_id="m",
                       args={"action": "add", "content": "Late write"})
         receipt = receipt_text(self.event(applied=facts), calls, 0)
-        self.assertIn("3 项变更生效", receipt)
+        self.assertIn("2 项变更生效", receipt)
         self.assertIn("新增 · 记忆\n写入的内容\nUse frozen inputs", receipt)
         self.assertIn("匹配的原文\nOriginal rule\n写入的内容\nRevised rule", receipt)
         self.assertIn("匹配的原文\nRevised rule\n写入的内容\nUse fixed input hashes", receipt)

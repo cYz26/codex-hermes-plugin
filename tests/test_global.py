@@ -14,7 +14,11 @@ from hermes_codex_learning.store import Store, atomic_json
 
 class GlobalTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        # The host may itself keep /tmp or its home in Git. This case needs a
+        # genuinely non-Git fixture, not a work directory inside that repository.
+        parent = Path("/var/tmp")
+        neutral = parent.is_dir() and not any((item / ".git").exists() for item in (parent, *parent.parents))
+        self.temp = tempfile.TemporaryDirectory(dir=str(parent) if neutral else None)
         self.root = Path(self.temp.name).resolve()
         self.a, self.b = self.root / "pilot", self.root / "other project"
         self.a.mkdir()
@@ -231,7 +235,9 @@ class GlobalTests(unittest.TestCase):
                 return {"handle": source["chat"]}
             def observe(self, handle, body, **kwargs):
                 self.observed.append(body)
-            def read(self, kind):
+            def read(self, kind, name=None, file_path=None):
+                if kind == "skill":
+                    return {"version": "unchanged-fixture-skill"}
                 if kind == "context":
                     return self.context
                 return {"intents": [{"id": "b-intent", "handle": "b", "status": "queued"}],

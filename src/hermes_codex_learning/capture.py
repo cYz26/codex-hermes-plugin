@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 from .config import Settings
 from .delegation import exclude_internal
 from .knowledge import context_view
-from .store import Store
+from .store import Store, digest
 
 ADDITIONAL_CONTEXT_LIMIT = 256
 
@@ -74,6 +75,23 @@ def hook(payload: dict, settings: Settings) -> dict:
             project = settings.project_for(workspace)
         if project is None or command_project is None:
             return {}
+        from .policy import admit
+        # Reserved fields are produced by this bridge, never accepted from a hook body.
+        payload = {key: value for key, value in payload.items() if not key.startswith('bridge_')}
+        admission = admit(payload, settings.data_policy, project)
+        if (not admission['allowed'] and settings.data_policy.get('workflow_projection') is True):
+            from .workflow import project_event
+            payload = project_event(payload)
+            admission = {'allowed': True, 'basis': 'closed_vocabulary_workflow', 'body_retained': False}
+        if not admission["allowed"]:
+            if payload.get("session_id") and payload.get("turn_id"):
+                store.set("withheld-turn:" + digest([payload["session_id"], payload["turn_id"]]), admission["reason"])
+            gaps = store.get("coverage_gaps", [])
+            store.set("coverage_gaps", (gaps + [{"event": payload.get("hook_event_name"),
+                      "reason": admission["reason"], "body_retained": False}])[-100:])
+            return {}
+        payload = {**payload, "bridge_admission": admission,
+                   'bridge_evidence_mode': payload.get('bridge_evidence_mode', 'full')}
         payload = {**payload, "bridge_project": project, "bridge_host": store.get("host_id")}
         store.capture(payload)
         # Wake-up is best-effort; the durable outbox is polled after a restart.
@@ -111,6 +129,8 @@ def hook(payload: dict, settings: Settings) -> dict:
 
 
 def main() -> int:
+    if os.environ.get("HERMES_LEARNING_MAINTENANCE") == "1":
+        return 0
     try:
         settings = Settings.load()
     except FileNotFoundError:

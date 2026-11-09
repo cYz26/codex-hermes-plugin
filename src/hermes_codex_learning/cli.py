@@ -12,6 +12,8 @@ from pathlib import Path
 
 from .config import NETWORK_ENV_KEYS, Settings
 from .store import atomic_json
+from .configuration import build_native_config
+from .source import verify_source
 
 BASE = "b200f5bc60e31588ba2cb60e288029c4a54ba5fa"
 
@@ -20,15 +22,21 @@ def initialize(args) -> int:
     root = Path(__file__).resolve().parents[2]
     home, source = Path(args.home).expanduser().resolve(), Path(args.source).resolve()
     project, interpreter = Path(args.project).resolve(), Path(args.python).expanduser().absolute()
-    from .updates import catalog, git, verify_source
-    recipes = catalog(root)
-    commit = git(source, "rev-parse", "HEAD")
-    recipe = next((item for item in recipes.values() if item["base_commit"] == commit), None)
-    if not recipe:
-        raise ValueError("Hermes checkout needs a pinned compatibility recipe")
-    verify_source(source, recipe)
-    home.mkdir(parents=True, exist_ok=True, mode=0o700)
-    project.mkdir(parents=True, exist_ok=True)
+    from .updates import catalog, git, verify_source as verify_git_source
+    if (source / ".git").exists():
+        commit = git(source, "rev-parse", "HEAD")
+        recipe = next((value for value in catalog(root).values() if value["base_commit"] == commit), None)
+        if recipe is None:
+            raise ValueError("Hermes checkout needs a pinned compatibility recipe")
+        verify_git_source(source, recipe)
+        provenance = {"base_commit": commit, "tag": recipe["tag"], "verified": True}
+    else:
+        provenance = verify_source(source, root / "patches/manifest.json")
+    provider = getattr(args, "provider", "openai-codex")
+    if provider != "openai-codex" and args.profile_home:
+        raise ValueError("--profile-home is only used for native OpenAI OAuth authentication")
+    if not interpreter.is_file() or (project.exists() and not project.is_dir()):
+        raise ValueError("A valid dedicated interpreter and project directory are required")
     config = home / "config.yaml"
     if config.exists():
         raise FileExistsError("Pilot config already exists; use its native Hermes configuration commands")
@@ -37,33 +45,39 @@ def initialize(args) -> int:
     from hermes_cli.config import DEFAULT_CONFIG, atomic_config_write
     from hermes_constants import account_default_hermes_home
     from .authentication import bind_profile_home
-    atomic_config_write(config, {
-        "_config_version": DEFAULT_CONFIG["_config_version"],
-        "model": {"provider": "openai-codex", "default": "gpt-6.1-sol", "api_mode": "codex_responses"},
-        "agent": {"reasoning_effort": "max"},
-        "auth": {"adopt_external_logins": False},
-        "gateway": {"standalone": True},
-        "memory": {"memory_enabled": True, "user_profile_enabled": True, "write_approval": False},
-        "skills": {"write_approval": False},
-        "auxiliary": {"background_review": {"enabled": True, "provider": "auto", "model": ""}},
-        "display": {"memory_notifications": "on"},
-        "plugins": {"isolation": "in_process", "enabled": ["codex-learning-bridge"], "entries": {
-            "codex-learning-bridge": {"enabled": True, "settings": {"learning": {"enabled": True}}},
-        }},
-    })
+    native = build_native_config(version=DEFAULT_CONFIG["_config_version"], provider=provider,
+                                 model=getattr(args, "model", "gpt-6.1-sol"),
+                                 api_mode=getattr(args, "api_mode", "codex_responses"),
+                                 base_url=getattr(args, "base_url", None),
+                                 reasoning_effort=getattr(args, "reasoning_effort", "max"),
+                                 session_affinity_header=getattr(args, "session_affinity_header", None))
+    auth_mode = "native_profile_fallback" if provider == "openai-codex" else "native_provider"
+    if getattr(args, "dry_run", False):
+        print(json.dumps({"dry_run": True, "home": str(home), "project": str(project),
+                          "authentication": auth_mode, "native_config": native, "source": provenance}, ensure_ascii=False))
+        return 0
+    home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    project.mkdir(parents=True, exist_ok=True)
+    atomic_config_write(config, native)
     plugin = home / "plugins" / "codex-learning-bridge"
     plugin.parent.mkdir(parents=True, exist_ok=True)
     plugin.symlink_to(root / "hermes-plugin", target_is_directory=True)
-    profile = bind_profile_home(home, Path(args.profile_home) if args.profile_home else
-                                account_default_hermes_home() / "profiles" / ".codex-learning-pilot")
+    profile = None
+    if provider == "openai-codex":
+        profile = bind_profile_home(home, Path(args.profile_home) if args.profile_home else
+                                    account_default_hermes_home() / "profiles" / ".codex-learning-pilot")
     path = home / "bridge.json"
     atomic_json(path, {"home": str(home), "project": str(project), "source": str(source),
+                       "python": str(interpreter), "profile_home": str(profile) if profile else None,
+                       "idle_seconds": 120, "idle_interval": 600, "notifications": sys.platform == "darwin",
+                       "source_verification": provenance,
                        "capture_scope": args.capture_scope, "excluded_projects": [],
-                       "python": str(interpreter), "profile_home": str(profile),
+                       **({'data_policy': {'enabled': True, 'workflow_projection': True},
+                           'checked_publication': True} if args.capture_scope == 'global' else {}),
                        "network_environment": {key: os.environ[key] for key in NETWORK_ENV_KEYS if os.environ.get(key)},
-                       "idle_seconds": 120, "idle_interval": 600, "notifications": True,
                        "updates": {"mode": "auto", "interval_seconds": 86400}})
-    print(json.dumps({"settings": str(path), "effort": "max", "authentication": "native_profile_fallback", "service": "not_started"}))
+    print(json.dumps({"settings": str(path), "effort": native["agent"]["reasoning_effort"],
+                      "authentication": auth_mode, "service": "not_started"}))
     return 0
 
 
@@ -140,12 +154,28 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("hook")
     commands.add_parser("mcp")
+    notices = commands.add_parser("notices", help="UI-only SSH delivery; not exposed through MCP")
+    notice_actions = notices.add_subparsers(dest="notice_action", required=True)
+    for action in ("poll", "detail", "ack", "capabilities"):
+        sub = notice_actions.add_parser(action)
+        sub.add_argument("--settings")
+        if action != "capabilities":
+            sub.add_argument("--scope", required=action in {"detail", "ack"})
+        if action in {"poll", "ack"}:
+            sub.add_argument("--consumer", required=True)
+        if action in {"detail", "ack"}:
+            sub.add_argument("--id", required=True)
+        if action == "ack":
+            sub.add_argument("--stage", choices=["sent", "read"], required=True)
     commands.add_parser("install-notifier", help="Build and register the local macOS learning notification app")
     update = commands.add_parser("update", help="Check, verify and update the isolated Hermes learning runtime")
     actions = update.add_subparsers(dest="update_action", required=True)
-    for action in ("status", "check", "prepare", "apply", "rollback", "policy", "run"):
+    for action in ("status", "check", "prepare", "apply", "rollback", "policy", "run", "adapt"):
         sub = actions.add_parser(action)
         sub.add_argument("--settings")
+        if action == "adapt":
+            sub.add_argument("--version", required=True)
+            sub.add_argument("--retry", action="store_true")
         if action == "prepare":
             sub.add_argument("--version", help="Reviewed official stable tag; defaults to latest release")
             sub.add_argument("--official-source", type=Path, help="Share this native Hermes installation's dependencies")
@@ -164,6 +194,16 @@ def main() -> int:
                       help="global accepts all local main chats; project retains the pilot allowlist")
     init.add_argument("--python", required=True)
     init.add_argument("--profile-home", help="Root/profiles entry for native auth; defaults to hidden .codex-learning-pilot")
+    init.add_argument("--provider", default="openai-codex")
+    init.add_argument("--model", default="gpt-6.1-sol")
+    init.add_argument("--api-mode", default="codex_responses")
+    init.add_argument("--base-url")
+    init.add_argument("--reasoning-effort", default="max")
+    init.add_argument("--session-affinity-header")
+    init.add_argument("--dry-run", action="store_true")
+    doctor = commands.add_parser("doctor", help="Read configuration and runtime facts")
+    doctor.add_argument("--settings")
+    doctor.add_argument("--json", action="store_true")
     service = commands.add_parser("launchd")
     service.add_argument("--settings", required=True)
     service.add_argument("--start", action="store_true")
@@ -177,6 +217,23 @@ def main() -> int:
     auth_status = commands.add_parser("auth-status")
     auth_status.add_argument("--settings")
     args = parser.parse_args()
+    if args.command == "notices":
+        from .notices import NoticeQueue
+        queue = NoticeQueue(Settings.load(args.settings).state)
+        try:
+            if args.notice_action == "poll":
+                result = queue.poll(args.consumer, args.scope)
+            elif args.notice_action == "detail":
+                result = queue.detail(args.id, args.scope)
+            elif args.notice_action == "ack":
+                result = queue.acknowledge(args.consumer, args.id, args.scope, args.stage)
+            else:
+                result = {"desktop_ssh": True, "chat_ui": False,
+                          "chat_ui_reason": "No verified UI-only host entry point", "model_calls": 0}
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
+        finally:
+            queue.close()
     if args.command == "update":
         from .updates import UpdateError, Updater, exclusive
         config = Path(args.settings or os.environ.get("HERMES_LEARNING_CONFIG",
@@ -197,6 +254,9 @@ def main() -> int:
                 result = updater.check(installed_only=args.installed)
             elif args.update_action == "run":
                 result = updater.cycle(installed_only=args.installed, config=config)
+            elif args.update_action == "adapt":
+                from .adaptation import Adapter
+                result = Adapter(updater).run(args.version, retry=args.retry)
             elif args.update_action == "prepare":
                 tag = args.version
                 official_source = args.official_source or updater.settings.official_source
@@ -220,10 +280,13 @@ def main() -> int:
                 result = updater.request(args.update_action)
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 2 if result.get("state") in {"failed", "check_failed", "adaptation_required",
-                                                "mechanism_review_required", "plan_required"} else 0
+                                                "mechanism_review_required", "plan_required", "adaptation_failed", "unknown"} else 0
         except (UpdateError, OSError, ValueError) as exc:
             print(json.dumps({"state": "blocked", "error": str(exc)}, ensure_ascii=False))
             return 2
+    if args.command == "doctor":
+        from .diagnostics import doctor
+        return doctor(args)
     if args.command == "hook":
         from .capture import main as capture
         return capture()
@@ -240,7 +303,7 @@ def main() -> int:
         from .authentication import native_auth_status
         settings = Settings.load(args.settings)
         status = native_auth_status(settings)
-        if args.command == "auth-status" or status.get("logged_in"):
+        if args.command == "auth-status" or status.get("logged_in") or status.get("auth_mode") == "native_custom_provider":
             print(json.dumps(status, ensure_ascii=False, indent=2))
             return 0
         return subprocess.run([str(settings.interpreter), "-m", "hermes_cli.main", "auth", "add", "openai-codex", "--type", "oauth", "--browser"],
