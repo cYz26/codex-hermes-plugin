@@ -208,6 +208,11 @@ def main() -> int:
     init.add_argument("--reasoning-effort", default="max")
     init.add_argument("--session-affinity-header")
     init.add_argument("--dry-run", action="store_true")
+    linux = commands.add_parser("systemd", help="Render the Linux supervisor service; --start installs it")
+    linux.add_argument("--settings", required=True)
+    linux.add_argument("--start", action="store_true")
+    linux.add_argument("--replace", action="store_true")
+    linux.add_argument("--dry-run", action="store_true")
     doctor = commands.add_parser("doctor", help="Read configuration and runtime facts")
     doctor.add_argument("--settings")
     doctor.add_argument("--json", action="store_true")
@@ -291,6 +296,9 @@ def main() -> int:
         except (UpdateError, OSError, ValueError) as exc:
             print(json.dumps({"state": "blocked", "error": str(exc)}, ensure_ascii=False))
             return 2
+    if args.command == "systemd":
+        from .systemd import systemd
+        return systemd(args)
     if args.command == "doctor":
         from .diagnostics import doctor
         return doctor(args)

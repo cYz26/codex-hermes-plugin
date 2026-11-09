@@ -1,5 +1,5 @@
 {
-  "description": "Project-scoped Hermes learning evidence and feedback. No model calls in hooks.",
+  "description": "Workspace-scoped Hermes learning evidence and recall for Linux/SSH. No model calls in hooks.",
   "hooks": {
     "SessionStart": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 5, "additionalContextLimit": 256}]}],
     "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 5, "additionalContextLimit": 256}]}],
