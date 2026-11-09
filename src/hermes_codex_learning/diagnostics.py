@@ -22,7 +22,7 @@ def inspect(path: str | Path | None = None) -> dict:
                                "source_exists": settings.source.is_dir(), "interpreter_exists": settings.python.is_file()}
     result['data_admission'] = {'workflow_projection': settings.data_policy.get('workflow_projection') is True,
                                 'assessment_configured': bool(settings.data_policy.get('assessment_command')),
-                                'unassessed_body': 'withheld'}
+                                'unassessed_body': 'withheld' if settings.data_policy else 'allowed_by_legacy_configuration'}
     try:
         result["provider"] = native_auth_status(settings)
     except Exception as exc:

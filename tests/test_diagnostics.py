@@ -53,6 +53,16 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertTrue(result["service"]["reachable"])
         self.assertFalse(result["model_probe"]["real_app"])
 
+    def test_legacy_capture_is_not_reported_as_withholding_unassessed_body(self):
+        config = json.loads(self.path.read_text())
+        for policy, expected in (({}, "allowed_by_legacy_configuration"), ({"enabled": True}, "withheld")):
+            with self.subTest(policy=policy):
+                self.path.write_text(json.dumps({**config, "data_policy": policy}))
+                with patch("hermes_codex_learning.diagnostics.native_auth_status", return_value={}), \
+                        patch("hermes_codex_learning.diagnostics.request", side_effect=ConnectionRefusedError):
+                    result = inspect(self.path)
+                self.assertEqual(result["data_admission"]["unassessed_body"], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -23,15 +23,22 @@ def initialize(args) -> int:
     home, source = Path(args.home).expanduser().resolve(), Path(args.source).resolve()
     project, interpreter = Path(args.project).resolve(), Path(args.python).expanduser().absolute()
     from .updates import catalog, git, verify_source as verify_git_source
-    if (source / ".git").exists():
+    git_source = (source / ".git").exists()
+    if git_source:
         commit = git(source, "rev-parse", "HEAD")
-        recipe = next((value for value in catalog(root).values() if value["base_commit"] == commit), None)
-        if recipe is None:
-            raise ValueError("Hermes checkout needs a pinned compatibility recipe")
+    else:
+        record = json.loads((source.parent / "source-provenance.json").read_text())
+        if not isinstance(record, dict):
+            raise ValueError("Archive provenance must be an object")
+        commit = record.get("base_commit")
+    recipe = next((value for value in catalog(root).values() if value["base_commit"] == commit), None)
+    if recipe is None:
+        raise ValueError("Hermes source needs a pinned compatibility recipe")
+    if git_source:
         verify_git_source(source, recipe)
         provenance = {"base_commit": commit, "tag": recipe["tag"], "verified": True}
     else:
-        provenance = verify_source(source, root / "patches/manifest.json")
+        provenance = verify_source(source, Path(recipe["manifest_path"]))
     provider = getattr(args, "provider", "openai-codex")
     if provider != "openai-codex" and args.profile_home:
         raise ValueError("--profile-home is only used for native OpenAI OAuth authentication")
