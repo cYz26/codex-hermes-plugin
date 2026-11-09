@@ -1,5 +1,7 @@
 # Hermes Learning for Codex
 
+本分支 `codex/local-learning-improvements` 提供本地 macOS 学习与通知改进，见 [本地运行与验证](./docs/LOCAL-OPERATIONS.zh-CN.md)。云端 Linux／SSH 组件见 [云端分支](https://github.com/cYz26/codex-hermes-plugin/tree/codex/cloud-dev-self-evolution)。
+
 Codex 执行任务，独立 Hermes 从执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。当前外围版本为 **0.4.2**，学习核心为官方 **Hermes v0.23.0**（`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`）加 Learning API v1 补丁。
 
 [实现整理](./docs/SELF-EVOLUTION.zh-CN.md) 说明执行与学习闭环、资料准入、版本发布、运行时更新和恢复；[流程学习](./docs/WORKFLOW-METADATA.zh-CN.md) 说明全局固定流程投影的边界。安装入口、当前部署说明和历史验收见 [文档索引](./docs/README.md)。

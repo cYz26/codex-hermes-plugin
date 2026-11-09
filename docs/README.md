@@ -2,6 +2,10 @@
 
 当前实现为外围 **0.4.2** 与官方 **Hermes v0.23.0**＋Learning API v1 补丁。Linux／SSH 和本地 macOS 共用学习核心，以不同分支提供平台适配。真实验收记录按当时版本保留，不能把安装或离线测试改写成模型／App 验收。
 
+## 本地 macOS 分支
+
+[本地运行与验证](./LOCAL-OPERATIONS.zh-CN.md) 说明 launchd、原生认证、通知 scope 与 sent／read 回执，以及本次 Linux 宿主可执行的离线检查范围。Linux 服务和 SSH 接收器由 [云端分支](https://github.com/cYz26/codex-hermes-plugin/tree/codex/cloud-dev-self-evolution) 提供。
+
 ## 当前实现
 
 | 文档 | 内容 |

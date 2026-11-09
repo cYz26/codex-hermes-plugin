@@ -4,6 +4,7 @@ import UserNotifications
 private struct Receipt: Decodable {
     let summary: String
     let text: String
+    let scope: String?
 
     init(at url: URL) throws {
         self = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
@@ -49,7 +50,12 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
                 let request = UNNotificationRequest(identifier: url.deletingPathExtension().lastPathComponent,
                                                     content: content, trigger: trigger)
-                self.center.add(request) { error in self.finish(error?.localizedDescription) }
+                self.center.add(request) { error in
+                    if error == nil {
+                        try? Data("accepted".utf8).write(to: URL(fileURLWithPath: url.path + ".sent"), options: .atomic)
+                    }
+                    self.finish(error?.localizedDescription)
+                }
             }
         } catch {
             finish(error.localizedDescription)
@@ -81,7 +87,9 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         let scroll = NSScrollView(frame: frame)
         scroll.hasVerticalScroller = true
         let text = NSTextView(frame: scroll.bounds)
-        text.string = (try? Receipt(at: url).text) ?? "这条通知对应的本地回执已无法读取。"
+        let receipt = try? Receipt(at: url)
+        text.string = receipt.map { "范围：\($0.scope ?? "本机")\n\n\($0.text)" }
+            ?? "这条通知对应的本地回执已无法读取。"
         text.font = .systemFont(ofSize: 14)
         text.isEditable = false
         text.isRichText = false
@@ -100,6 +108,9 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         window = viewer
         NSApp.activate(ignoringOtherApps: true)
         viewer.makeKeyAndOrderFront(nil)
+        if receipt != nil {
+            try? Data("opened".utf8).write(to: URL(fileURLWithPath: url.path + ".read"), options: .atomic)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
