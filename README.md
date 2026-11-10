@@ -2,7 +2,9 @@
 
 本分支 `codex/cloud-dev-self-evolution` 提供云端 Linux／SSH 开发机实现，见 [运行与升级](./docs/LINUX-GLOBAL-UPDATES.zh-CN.md) 和 [SSH 桌面通知](./docs/SSH-NOTIFICATIONS.zh-CN.md)。本地 macOS 的独立分支见 [本地分支](https://github.com/cYz26/codex-hermes-plugin/tree/codex/local-learning-improvements)。
 
-Codex 执行任务，独立 Hermes 从执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。当前外围版本为 **0.4.2**，学习核心为官方 **Hermes v0.23.0**（`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`）加 Learning API v1 补丁。
+Codex 执行任务，独立 Hermes 从执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。当前外围版本为 **0.5.0**，学习核心为官方 **Hermes v0.23.0**（`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`）加 Learning API v1 补丁。
+
+0.5.0 增加来源绑定的语义学习、高价值事件优先、技能应用证据和隔离脚本验证，并修复服务替换、更新恢复及 SSH 通知积压。安装、准入合同和验收边界见 [云端 0.5.0](./docs/CLOUD-0.5.0.zh-CN.md)；实施与各项实际验收状态见 [实施记录](./docs/IMPLEMENTATION-0.5.0.zh-CN.md)。
 
 [实现整理](./docs/SELF-EVOLUTION.zh-CN.md) 说明执行与学习闭环、资料准入、版本发布、运行时更新和恢复；[流程学习](./docs/WORKFLOW-METADATA.zh-CN.md) 说明全局固定流程投影的边界。安装入口、当前部署说明和历史验收见 [文档索引](./docs/README.md)。
 

@@ -9,6 +9,7 @@ from .review_receipt import receipt_text
 from .store import atomic_json, digest
 
 APP_NAME = "Hermes 学习"
+APP_ICON = "hermes-learning-icon.icns"
 APP_ID = "com.cy.hermes-learning-notifier"
 APP_EXECUTABLE = "HermesLearningNotifier"
 

@@ -7,6 +7,13 @@ from .ipc import request
 from . import __version__
 
 TOOLS = [
+    {"name":"record_application", "description":"Record a delivered skill's application claim and host test references. Does not run reviews; a passing test does not prove causation.",
+     "inputSchema":{"type":"object","properties":{"delivery_token":{"type":"string"},"cwd":{"type":"string"},
+        "stage":{"type":"string","enum":["applied","verified","failed"]},
+        "source_events":{"type":"array","maxItems":20,"items":{"type":"object",
+          "properties":{"chat":{"type":"string"},"turn":{"type":"string"},"tool_call":{"type":"string"}},
+          "required":["chat","turn","tool_call"],"additionalProperties":False}}},
+        "required":["delivery_token","cwd","stage"],"additionalProperties":False}},
     {"name": "update_status", "description": "Read automatic Hermes update policy, latest check, candidate compatibility gates and activation/rollback outcome. Works when the learning worker is offline.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "update_check", "description": "Check the official Hermes stable release and exact plugin compatibility. Does not install or activate a release.",

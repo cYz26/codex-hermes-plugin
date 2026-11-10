@@ -56,7 +56,26 @@ class Store:
               consumer TEXT NOT NULL, seq INTEGER NOT NULL,
               PRIMARY KEY(consumer,seq));
             CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS delivery_events(id TEXT PRIMARY KEY, payload TEXT NOT NULL, delivered REAL);
+            CREATE TABLE IF NOT EXISTS learning_signals(chat TEXT, turn TEXT, kind TEXT, created REAL,
+              PRIMARY KEY(chat,turn,kind));
+            CREATE TABLE IF NOT EXISTS review_priority(id TEXT PRIMARY KEY, handle TEXT, revision TEXT,
+              reason TEXT, created REAL, requested REAL);
+            CREATE TABLE IF NOT EXISTS latest_turns(chat TEXT PRIMARY KEY, turn_id TEXT, activity REAL);
+            CREATE TABLE IF NOT EXISTS application_evidence(id TEXT PRIMARY KEY, payload TEXT, created REAL);
+            CREATE TABLE IF NOT EXISTS withheld_versions(name TEXT, version TEXT, evidence TEXT, PRIMARY KEY(name,version));
+            CREATE TABLE IF NOT EXISTS retired_events(source_key TEXT PRIMARY KEY, id TEXT, created REAL);
+            CREATE INDEX IF NOT EXISTS events_pending ON events(delivered,created,id);
+            CREATE INDEX IF NOT EXISTS events_chat_turn ON events(json_extract(payload,'$.session_id'),json_extract(payload,'$.turn_id'));
+            CREATE INDEX IF NOT EXISTS turns_recovery ON turns(observed_revision,activity);
+            CREATE INDEX IF NOT EXISTS delivery_events_pending ON delivery_events(delivered);
         """)
+        if self.db.execute("PRAGMA user_version").fetchone()[0] < 2:
+            with self.db:
+                self.db.execute("INSERT OR REPLACE INTO latest_turns "
+                                "SELECT chat,id,activity FROM (SELECT json_extract(payload,'$.source.chat') chat,id,activity,"
+                                "ROW_NUMBER() OVER (PARTITION BY json_extract(payload,'$.source.chat') ORDER BY activity DESC) rank FROM turns) WHERE rank=1")
+                self.db.execute("PRAGMA user_version=2")
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO meta VALUES ('host_id',?)", (dumps(str(uuid.uuid4())),))
 
@@ -74,6 +93,10 @@ class Store:
             source = digest([session, turn, event, tool_id, digest(payload)])
         event_id = str(uuid.uuid4())
         with self.db:
+            if source:
+                retired = self.db.execute("SELECT id FROM retired_events WHERE source_key=?", (source,)).fetchone()
+                if retired:
+                    return retired["id"]
             self.db.execute("INSERT OR IGNORE INTO events VALUES (?,?,?,?,NULL,NULL)",
                             (event_id, source, dumps(payload), time.time()))
             if source:
@@ -112,7 +135,8 @@ class Store:
 
     def set(self, key: str, value: Any) -> None:
         with self.db:
-            self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, dumps(value)))
+            self.db.execute("INSERT INTO meta VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value "
+                            "WHERE meta.value<>excluded.value", (key, dumps(value)))
 
 
 def atomic_text(path: Path, value: str) -> None:

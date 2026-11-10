@@ -12,11 +12,12 @@ LIMIT = 16 * 1024 * 1024
 
 
 def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: Path | None = None,
-              include_task: bool = True) -> dict:
+              include_task: bool = True, cursor: dict | None = None) -> dict:
     root = (sessions_root or Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "sessions").resolve()
     if path.is_symlink() or not path.resolve().is_relative_to(root):
         raise ValueError("Host transcript is outside the configured Codex sessions directory")
-    if path.stat().st_uid != os.getuid() or path.stat().st_size > LIMIT:
+    stat = path.stat()
+    if stat.st_uid != os.getuid() or (include_task and stat.st_size > LIMIT):
         raise ValueError("Host transcript ownership or bounded-read limit failed")
     inputs, commands = [], {}
     with path.open() as stream:
@@ -26,13 +27,24 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                 or not str(meta.get("cli_version", "")).startswith("0.167.")
                 or not Path(meta.get("cwd") or "/").resolve().is_relative_to(Path(project).resolve())):
             raise ValueError("Host transcript identity or schema is not verified")
-        for line in stream:
+        identity = [stat.st_dev, stat.st_ino, chat, turn]
+        if not include_task:
+            if (cursor and cursor.get("identity") == identity
+                    and stream.tell() <= cursor.get("offset", -1) <= stat.st_size):
+                stream.seek(cursor["offset"])
+                commands = dict(cursor.get("commands", {}))
+            elif stat.st_size > LIMIT:
+                stream.seek(max(stream.tell(), stat.st_size - LIMIT))
+                stream.readline()  # Discard the partial old record at the bounded tail.
+        offset = stream.tell()
+        for line in iter(stream.readline, ""):
             try:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 if not line.endswith("\n"):
                     break  # The host may still be appending the final record.
                 raise
+            offset = stream.tell()
             payload = row.get("payload", {})
             if (row.get("type") != "event_msg" or payload.get("type") != "item_completed"
                     or payload.get("turn_id") != turn):
@@ -59,7 +71,10 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                                "item_id": item["id"], "item_hash": digest(item), "method": item["name"]})
     if len(inputs) > 1:
         raise ValueError("Ambiguous task specifications in one host turn")
-    return {"input": inputs[0] if inputs else None, "commands": commands}
+    result = {"input": inputs[0] if inputs else None, "commands": commands}
+    if not include_task:
+        result["cursor"] = {"identity":identity,"offset":offset,"commands":commands}
+    return result
 
 
 def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
@@ -73,8 +88,11 @@ def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
     if event.get("bridge_project") != source["project"] or event.get("bridge_host") != source["host"]:
         return data
     try:
+        cursor_key = "transcript-cursor:" + digest([source["chat"], source["turn"]])
         facts = read_turn(Path(event["transcript_path"]), source["chat"], source["turn"], source["project"],
-                          include_task=include_task)
+                          include_task=include_task, cursor=store.get(cursor_key) if not include_task else None)
+        if not include_task:
+            store.set(cursor_key, facts["cursor"])
     except (OSError, ValueError, TypeError):
         return {**data, "coverage": sorted(set(data.get("coverage", [])) | {"host_transcript_input_unavailable"})}
     result = {**data, "tools": {key: dict(value) for key, value in data["tools"].items()}}

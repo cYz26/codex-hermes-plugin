@@ -20,9 +20,20 @@ def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe"
     if redact(payload) != payload:
         return {"allowed": False, "reason": "credential_material"}
     roots = policy.get("synthetic_roots", [])
+    if not isinstance(roots,list) or any(not isinstance(root,str) or not Path(root).is_absolute() or Path(root).resolve()==Path("/") for root in roots):
+        return {"allowed":False,"reason":"invalid_synthetic_roots"}
     if any(Path(project).resolve().is_relative_to(Path(root).resolve()) for root in roots):
         return {"allowed": True, "basis": "synthetic_acceptance"}
     command = policy.get("assessment_command")
+    if not command and policy.get("source_manifest") and purpose != "share":
+        from .assessment import assess
+        try:
+            assessment = assess(payload, Path(policy["source_manifest"]))
+            if assessment.get("allowed"):
+                return {**assessment, "basis":"assessed_source_fragments", "body_retained":True}
+            return assessment
+        except (OSError, ValueError, KeyError, TypeError):
+            return {"allowed":False, "reason":"source_manifest_unavailable"}
     if not command:
         return {"allowed": False, "reason": "data_classification_unassessed"}
     if (not isinstance(command, list) or not command or not Path(command[0]).is_absolute()
@@ -32,17 +43,27 @@ def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe"
         result = subprocess.run(command, input=dumps({"project": project, "purpose": purpose, "event": payload}),
                                 capture_output=True, text=True, timeout=3, check=True)
         assessment = json.loads(result.stdout)
+        if (not isinstance(assessment,dict) or type(assessment.get("schema_version",1)) is not int
+                or assessment.get("schema_version",1) not in {1,2}):
+            return {"allowed":False,"reason":"unsupported_assessment_schema"}
         if purpose == "share" and (assessment.get("classification") != "public" or assessment.get("sharing_allowed") is not True):
             return {"allowed": False, "reason": "shared_candidate_not_assessed_public"}
         if (assessment.get("allowed") is True and assessment.get("assessment_id")
                 and assessment.get("classification") in {"public", "synthetic", "approved"}):
-            return {"allowed": True, "basis": "assessment", "assessment_id": str(assessment["assessment_id"])[:128]}
+            result = {"allowed": True, "basis": "assessment", "assessment_id": str(assessment["assessment_id"])[:128],
+                      "classification":assessment["classification"]}
+            if assessment.get("schema_version") == 2:
+                from .assessment import validate_replacement
+                result.update(schema_version=2, payload=validate_replacement(payload, assessment),
+                              policy_version=assessment["policy_version"], source_refs=assessment.get("source_refs", []),
+                              body_retained=True, input_hash=assessment["input_hash"], output_hash=assessment["output_hash"])
+            return result
     except (OSError, ValueError, subprocess.SubprocessError):
         pass
     return {"allowed": False, "reason": "assessment_not_approved"}
 
 
-def sharing_check(value: dict, origins: list[str], private_markers: list[str]) -> dict:
+def sharing_check(value: dict, origins: list[str], private_markers: list[str], *, executable_candidate=False) -> dict:
     content = value.get("content") or ""
     front = content.split("---", 2)
     if len(front) < 3 or not re.search(r"(?m)^learning_scope:\s*global_candidate\s*$", front[1]):
@@ -65,7 +86,8 @@ def sharing_check(value: dict, origins: list[str], private_markers: list[str]) -
             return {"allowed": False, "reason": "resource_changed"}
         # Executable resources require a separate trusted test receipt. The first
         # release does not pretend syntax checks prove that arbitrary code works.
-        if path.suffix.lower() not in {".md", ".txt", ".json", ".csv", ".yaml", ".yml"}:
+        if path.suffix.lower() not in ({".md", ".txt", ".json", ".csv", ".yaml", ".yml"}
+                                       | ({".py", ".sh"} if executable_candidate else set())):
             return {"allowed": False, "reason": "executable_resource_needs_validation"}
         try:
             text.append(raw.decode("utf-8"))

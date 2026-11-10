@@ -78,7 +78,18 @@ def hook(payload: dict, settings: Settings) -> dict:
         from .policy import admit
         # Reserved fields are produced by this bridge, never accepted from a hook body.
         payload = {key: value for key, value in payload.items() if not key.startswith('bridge_')}
+        transient_query = str(payload.get("prompt") or "")[:4000] if payload.get("hook_event_name") == "UserPromptSubmit" else ""
+        technical = {}
+        if settings.proactive:
+            from .scheduling import annotate
+            annotated = annotate(payload, store)
+            technical = {key:val for key,val in annotated.items() if key.startswith("bridge_")}
+        from .delivery import capture_delivery
+        capture_delivery(store, payload, project)
         admission = admit(payload, settings.data_policy, project)
+        if admission.get("allowed") and admission.get("schema_version") == 2:
+            payload = admission.pop("payload")
+            payload["bridge_evidence_mode"] = "semantic-v2"
         if (not admission['allowed'] and settings.data_policy.get('workflow_projection') is True):
             from .workflow import project_event
             payload = project_event(payload)
@@ -90,7 +101,7 @@ def hook(payload: dict, settings: Settings) -> dict:
             store.set("coverage_gaps", (gaps + [{"event": payload.get("hook_event_name"),
                       "reason": admission["reason"], "body_retained": False}])[-100:])
             return {}
-        payload = {**payload, "bridge_admission": admission,
+        payload = {**payload, **technical, "bridge_admission": admission,
                    'bridge_evidence_mode': payload.get('bridge_evidence_mode', 'full')}
         payload = {**payload, "bridge_project": project, "bridge_host": store.get("host_id")}
         store.capture(payload)
@@ -109,7 +120,13 @@ def hook(payload: dict, settings: Settings) -> dict:
         cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
         session = payload.get("session_id", "unknown")
         if event == "UserPromptSubmit":
-            store.set("recall-query:" + session, str(payload.get("prompt") or "")[:4000])
+            query = str(payload.get("prompt") or "")[:4000] if admission.get("body_retained") is not False else ""
+            if not query and transient_query and cache.get("checked_publication"):
+                # Local retrieval can select public catalog names without persisting
+                # the unassessed query or sending it to the learning model.
+                matches = context_view(cache, project, transient_query)
+                query = " ".join(item["name"] for item in matches["skills"] if item.get("scope") == "global")
+            store.set("recall-query:" + session, query)
         if settings.capture_scope == "global":
             cache = context_view(cache, project, store.get("recall-query:" + session, ""))
         version = cache.get("version")

@@ -20,6 +20,8 @@ class DesktopReceiverTests(unittest.TestCase):
                      for name, scope in [("a1", "/a"), ("a2", "/a"), ("b1", "/b")]]
             acknowledgements = []
             def remote(action, *args):
+                if action == "capabilities":
+                    return {"protocol_version": 1}
                 if action == "poll":
                     return items
                 if action == "detail":

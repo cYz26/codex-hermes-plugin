@@ -50,7 +50,8 @@ def file_hash(path: Path) -> str:
 
 def plugin_hash(root: Path = ROOT) -> str:
     paths = []
-    for name in ("src", "scripts", "tests", "hermes-plugin", "hooks", "skills", "patches"):
+    for name in ("src", "scripts", "tests", "hermes-plugin", "hooks", "skills", "patches",
+                 "probes", "fixtures", "desktop", "macos", "assets"):
         paths.extend(p for p in (root / name).rglob("*") if p.is_file()
                      and "__pycache__" not in p.parts and p.suffix != ".pyc")
     paths.extend(root / name for name in ("pyproject.toml", ".codex-plugin/plugin.json", ".mcp.json"))
@@ -116,8 +117,11 @@ def catalog(root: Path = ROOT) -> dict:
         for name, checksum in manifest["files"].items():
             if Path(name).is_absolute() or ".." in Path(name).parts or not re.fullmatch(r"[a-f0-9]{64}", checksum):
                 raise UpdateError("Invalid patched file identity")
-        result[tag] = {**manifest, "patch_path": str(patch), "native_tests": index["native_tests"],
-                       "manifest_path": str(path), "recipe": digest([manifest, index["native_tests"], index["learning_api"]])}
+        native_tests = [*index["native_tests"], *manifest.get("additional_native_tests", [])]
+        if any(Path(name).is_absolute() or ".." in Path(name).parts for name in native_tests):
+            raise UpdateError("Native contract paths must remain within the candidate")
+        result[tag] = {**manifest, "patch_path": str(patch), "native_tests": native_tests,
+                       "manifest_path": str(path), "recipe": digest([manifest, native_tests, index["learning_api"]])}
     return result
 
 
@@ -457,9 +461,15 @@ class Updater:
                 command("patch", ["git", "-C", source, "apply", "--index", recipe["patch_path"]])
                 record["source_tree"] = source_seal(source, recipe)
                 interpreter = None
-                if binding and existing and existing.get("state") == "ready" and existing.get("recipe") == recipe["recipe"]:
+                if binding and existing and existing.get("state") == "ready":
                     try:
-                        interpreter = self.private_interpreter(existing)
+                        old_source = Path(existing["source"])
+                        self.runtime_info(old_source)
+                        same_dependencies = (existing.get("commit") == recipe["base_commit"] and all(
+                            file_hash(old_source/name) == file_hash(source/name) for name in ("pyproject.toml","uv.lock")))
+                        if existing.get("recipe") == recipe["recipe"] or same_dependencies:
+                            interpreter = self.private_interpreter(existing)
+                            record["dependency_reuse"] = {"candidate":existing["id"],"basis":"same_pinned_dependency_inputs"}
                     except (UpdateError, OSError):
                         pass
                 if interpreter is None:
@@ -478,6 +488,7 @@ class Updater:
                     from .site_updates import prepare_site
                     prepare_site(self, recipe, record, interpreter, command)
                 env["PYTHONPATH"] = str(self.root / "src")
+                env["HERMES_LEARNING_NATIVE_SOURCE"] = str(source)
                 command("bridge-contracts", [interpreter, "-B", "-m", "unittest", "discover", "-s", "tests"], cwd=self.root)
                 smoke = [record["python"], "-B", self.root / "scripts/check_update_runtime.py",
                          "--source", source, "--workspace", folder / "smoke"]

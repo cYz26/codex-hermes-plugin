@@ -20,7 +20,8 @@ from .updates import ROOT, UpdateError, Updater, catalog, exclusive, read_json, 
 DATA_PATHS = ("config.yaml", "SOUL.md", "memories", "skills", "learning", "sessions", "state",
               ".curator_backups", "state.db", "state.db-wal", "state.db-shm")
 DERIVED_KEYS = ("knowledge-index-v1", "publications-v1", "publication-decisions", "publication-context-version",
-               "skill-versions-v1", "workflow-skill-attestations")
+               "skill-versions-v1", "workflow-skill-attestations", "semantic-skill-attestations",
+               "semantic-memory-attestations", "publication-aliases")
 
 
 def copy_entry(source: Path, target: Path):
@@ -159,11 +160,7 @@ class Supervisor:
         path = self.updater.directory / "transaction.json"
         transaction = read_json(path)
         if transaction and transaction["state"] == "committed":
-            candidate = read_json(self.updater.directory / "candidate.json", {})
-            current = Settings.load(self.config)
-            if candidate.get("site") and candidate.get("source") == str(current.source):
-                from .site_updates import publish_binding
-                publish_binding(current, candidate, self.config)
+            self.finish_site_publication()
             return
         if not transaction or transaction["state"] not in {"switching", "starting", "restoring"}:
             return
@@ -269,10 +266,11 @@ class Supervisor:
                 self.worker.ready()
                 updater.notice(transaction)
                 return
-            request_path.unlink(missing_ok=True)
             if pending["action"] == "apply" and candidate.get("site"):
-                from .site_updates import publish_binding
-                publish_binding(Settings.load(self.config), candidate, self.config)
+                transaction["site_publication"] = "pending"
+                transaction["site_candidate"] = candidate
+                atomic_json(transaction_path, transaction)
+            request_path.unlink(missing_ok=True)
             try:
                 self.worker.resume()
             except (OSError, RuntimeError, ValueError):
@@ -281,7 +279,26 @@ class Supervisor:
                 self.worker.stop()
                 self.worker.start(Settings.load(self.config), self.config)
                 self.worker.ready()
+            self.finish_site_publication()
             updater.notice(transaction)
+
+    def finish_site_publication(self):
+        """Recover a post-commit side effect without pausing or rolling back learning."""
+        path = self.updater.directory / "transaction.json"
+        transaction = read_json(path, {})
+        if transaction.get("state") != "committed" or transaction.get("site_publication") == "complete":
+            return
+        candidate = transaction.get("site_candidate") or read_json(self.updater.directory / "candidate.json", {})
+        current = Settings.load(self.config)
+        if not candidate.get("site") or candidate.get("source") != str(current.source):
+            return
+        try:
+            from .site_updates import publish_binding
+            publish_binding(current, candidate, self.config)
+            transaction.update(site_publication="complete", site_error=None)
+        except (OSError, ValueError, UpdateError) as exc:
+            transaction.update(site_publication="pending", site_error=type(exc).__name__)
+        atomic_json(path, transaction)
 
     def run(self):
         thread = None
@@ -296,6 +313,7 @@ class Supervisor:
                     self.updater = Updater(Settings.load(self.config), root=self.root)
                     updater = self.updater
                     if updater.settings.site_manifest and time.monotonic() >= next_site_probe:
+                        self.finish_site_publication()
                         from .site_updates import refresh_runtime
                         next_site_probe = time.monotonic() + 30
                         atomic_json(updater.directory / "site-runtime.json", refresh_runtime(updater.settings))

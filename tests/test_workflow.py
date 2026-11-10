@@ -12,6 +12,28 @@ from hermes_codex_learning.workflow import project_event, observation
 
 
 class WorkflowTests(unittest.TestCase):
+    def test_async_test_poll_is_joined_without_retaining_arguments(self):
+        from hermes_codex_learning.normalize import merge_event
+        with tempfile.TemporaryDirectory() as directory:
+            store = Store(Path(directory))
+            try:
+                events = [
+                    {"hook_event_name":"PostToolUse","tool_use_id":"start","tool_name":"exec_command",
+                     "tool_input":{"cmd":"python -m pytest PRIVATE"},"tool_response":{"session_id":17}},
+                    {"hook_event_name":"PostToolUse","tool_use_id":"poll","tool_name":"write_stdin",
+                     "tool_input":{"session_id":17},"tool_response":{"exit_code":0}},
+                    {"hook_event_name":"Stop"},
+                ]
+                for event in events:
+                    value = project_event(dict(event,cwd=directory,session_id="chat",turn_id="turn"))
+                    identity = store.capture(value)
+                    data = merge_event(store, store.db.execute("SELECT * FROM events WHERE id=?", (identity,)).fetchone())
+                self.assertEqual(len(data["tools"]), 1)
+                self.assertEqual(data["tools"]["start"]["name"], "workflow_test")
+                self.assertEqual(data["tools"]["start"]["status"], "completed")
+                self.assertNotIn("PRIVATE", json.dumps(data))
+            finally:
+                store.close()
     def test_arbitrary_output_and_tool_names_cannot_enter_the_projection(self):
         projected = project_event({'hook_event_name': 'PostToolUse', 'tool_name': 'PRIVATE_TOOL',
                                    'tool_input': {'secret': 'PRIVATE'}, 'tool_response': 'PRIVATE exit_code=0'})

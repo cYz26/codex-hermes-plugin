@@ -62,6 +62,14 @@ def _tokens(text: str) -> set[str]:
     terms = set(re.findall(r"[a-z0-9_]{3,}", text.lower()))
     for chunk in re.findall(r"[\u4e00-\u9fff]+", text):
         terms.update(chunk[i:i + 2] for i in range(len(chunk) - 1))
+    for aliases in (
+        {"测试","验证","test","tests","verify","verification","validate","validation"},
+        {"修复","fix","repair"}, {"错误","失败","error","failure","failed"},
+        {"部署","deploy","deployment"}, {"安装","install","installation"},
+        {"表头","header","headers"}, {"规范化","normalize","normalization"},
+    ):
+        if terms & aliases or any(word in text for word in aliases if not word.isascii()):
+            terms.update(word for word in aliases if word.isascii())
     return terms
 
 
@@ -83,7 +91,7 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
             if not publication:
                 continue
             skill = publication["catalog_entry"]
-        score = len(terms & _tokens(skill["name"] + " " + skill.get("description", "")))
+        score = len(terms & _tokens(skill["name"] + " " + skill.get("description", "") + " " + " ".join(skill.get("aliases", []))))
         item = {**skill, "source_projects": origins,
                 "scope": "shared_skill_with_source_provenance" if origins else "native_catalog"}
         if context.get("checked_publication"):

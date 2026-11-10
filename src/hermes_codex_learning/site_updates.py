@@ -39,6 +39,10 @@ def prepare_site(updater, recipe: dict, record: dict, interpreter: Path, command
     command("site-clone", ["git", "clone", "--quiet", "--no-hardlinks", record["source"], source])
     command("site-checkout", ["git", "-C", source, "reset", "--hard", recipe["base_commit"]])
     command("site-patch", ["git", "-C", source, "apply", "--index", patch])
+    for protected in ("scripts/run_tests.sh","scripts/run_tests_parallel.py"):
+        original = subprocess.check_output(["git","-C",str(source),"show",recipe["base_commit"]+":"+protected])
+        if (source/protected).read_bytes() != original:
+            raise UpdateError("Site overlay changed the independent test runner")
     tests = manifest.get("tests", {})
     if not tests:
         raise UpdateError("Site adapter has no pinned regression suite")
@@ -65,7 +69,8 @@ def validate_site(record: dict) -> None:
     if source != Path(record["source"]).parent / "site-source" or source.is_symlink():
         raise UpdateError("Site candidate path changed")
     if (git(source, "rev-parse", "HEAD") != site["base_commit"]
-            or git(source, "diff", "--name-only") or git(source, "write-tree") != site["tree"]):
+            or git(source, "diff", "--name-only") or git(source, "ls-files", "--others", "--exclude-standard")
+            or git(source, "write-tree") != site["tree"]):
         raise UpdateError("Site source changed after validation")
     for name, checksum in site["tests"].items():
         if file_hash(source / name) != checksum:

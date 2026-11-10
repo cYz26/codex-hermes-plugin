@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import plistlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -80,7 +81,9 @@ def initialize(args) -> int:
                        "source_verification": provenance,
                        "capture_scope": args.capture_scope, "excluded_projects": [],
                        **({'data_policy': {'enabled': True, 'workflow_projection': True},
-                           'checked_publication': True} if args.capture_scope == 'global' else {}),
+                           'checked_publication': True,
+                           'learning': {'proactive': True, 'quality_checks': True},
+                           'retention': {'enabled': True}} if args.capture_scope == 'global' else {}),
                        "network_environment": {key: os.environ[key] for key in NETWORK_ENV_KEYS if os.environ.get(key)},
                        "updates": {"mode": "auto", "interval_seconds": 86400}})
     print(json.dumps({"settings": str(path), "effort": native["agent"]["reasoning_effort"],
@@ -118,10 +121,11 @@ def launchd(args) -> int:
 
 
 def install_notifier() -> int:
-    from .notify import APP_EXECUTABLE, APP_ID, APP_NAME, notifier_app
+    from .notify import APP_EXECUTABLE, APP_ICON, APP_ID, APP_NAME, notifier_app
 
     app = notifier_app()
-    source = Path(__file__).resolve().parents[2] / "macos/HermesLearningNotifier.swift"
+    root = Path(__file__).resolve().parents[2]
+    source = root / "macos/HermesLearningNotifier.swift"
     app.parent.mkdir(parents=True, exist_ok=True)
     if app.exists():
         installed = plistlib.loads((app / "Contents/Info.plist").read_bytes())
@@ -132,15 +136,20 @@ def install_notifier() -> int:
         candidate = Path(staging) / app.name
         binary = candidate / "Contents" / "MacOS" / APP_EXECUTABLE
         binary.parent.mkdir(parents=True)
+        resources = candidate / "Contents/Resources"
+        resources.mkdir()
+        shutil.copy2(root/"assets"/APP_ICON,resources/APP_ICON)
         (candidate / "Contents/Info.plist").write_bytes(plistlib.dumps({
             "CFBundleIdentifier": APP_ID, "CFBundleExecutable": APP_EXECUTABLE,
             "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "LSMinimumSystemVersion": "12.0",
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "2", "LSMinimumSystemVersion": "12.0",
+            "CFBundleIconFile":APP_ICON,
             "LSUIElement": True,
         }))
         target = f"{platform.machine()}-apple-macosx12.0"
         subprocess.run(["/usr/bin/xcrun", "swiftc", "-target", target, "-O", str(source), "-o", str(binary)], check=True)
         subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(candidate)], check=True)
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(candidate)], check=True)
         backup = Path(staging) / "previous.app"
         if app.exists():
             app.rename(backup)
@@ -151,6 +160,8 @@ def install_notifier() -> int:
                 backup.rename(app)
             raise
 
+    subprocess.run(["/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                    "-f",str(app)],check=True)
     subprocess.run(["/usr/bin/open", "-gnj", "-a", str(app), "--args", "--authorize"], check=True)
     print(app)
     return 0
@@ -159,16 +170,18 @@ def install_notifier() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Codex–Hermes learning bridge")
     commands = parser.add_subparsers(dest="command", required=True)
+    from .operations import add_parsers
+    add_parsers(commands)
     commands.add_parser("hook")
     commands.add_parser("mcp")
     notices = commands.add_parser("notices", help="UI-only SSH delivery; not exposed through MCP")
     notice_actions = notices.add_subparsers(dest="notice_action", required=True)
-    for action in ("poll", "detail", "ack", "capabilities"):
+    for action in ("poll", "detail", "ack", "capabilities", "sync"):
         sub = notice_actions.add_parser(action)
         sub.add_argument("--settings")
         if action != "capabilities":
             sub.add_argument("--scope", required=action in {"detail", "ack"})
-        if action in {"poll", "ack"}:
+        if action in {"poll", "ack", "sync"}:
             sub.add_argument("--consumer", required=True)
         if action in {"detail", "ack"}:
             sub.add_argument("--id", required=True)
@@ -229,18 +242,33 @@ def main() -> int:
     auth_status = commands.add_parser("auth-status")
     auth_status.add_argument("--settings")
     args = parser.parse_args()
+    if args.command in {"install","sources","learning-config","retention","quality","migration"}:
+        from .operations import execute
+        try:
+            result = execute(args)
+            print(json.dumps(result,ensure_ascii=False,indent=2))
+            return 0 if result.get("state") not in {"failed","pending"} else 2
+        except (OSError,ValueError,RuntimeError,subprocess.SubprocessError) as exc:
+            print(json.dumps({"state":"failed","error_type":type(exc).__name__,"error":str(exc)},ensure_ascii=False))
+            return 2
     if args.command == "notices":
         from .notices import NoticeQueue
         queue = NoticeQueue(Settings.load(args.settings).state)
         try:
             if args.notice_action == "poll":
                 result = queue.poll(args.consumer, args.scope)
+            elif args.notice_action == "sync":
+                raw = sys.stdin.buffer.read(65537)
+                if len(raw) > 65536:
+                    raise ValueError("Notification request exceeds 64 KiB")
+                body = json.loads(raw or "{}")
+                result = queue.sync(args.consumer, after=body.get("after", 0), acknowledgements=body.get("acks", []))
             elif args.notice_action == "detail":
                 result = queue.detail(args.id, args.scope)
             elif args.notice_action == "ack":
                 result = queue.acknowledge(args.consumer, args.id, args.scope, args.stage)
             else:
-                result = {"desktop_ssh": True, "chat_ui": False,
+                result = {"desktop_ssh": True, "chat_ui": False, "protocol_version": 2,
                           "chat_ui_reason": "No verified UI-only host entry point", "model_calls": 0}
             print(json.dumps(result, ensure_ascii=False))
             return 0
@@ -248,8 +276,7 @@ def main() -> int:
             queue.close()
     if args.command == "update":
         from .updates import UpdateError, Updater, exclusive
-        config = Path(args.settings or os.environ.get("HERMES_LEARNING_CONFIG",
-                      Path.home() / ".hermes-codex-learning/pilot/bridge.json")).expanduser().resolve()
+        config = Settings.configuration_path(args.settings).resolve()
         updater = Updater(Settings.load(config))
         try:
             if args.update_action == "policy":
