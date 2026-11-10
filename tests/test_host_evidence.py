@@ -45,6 +45,28 @@ class HostEvidenceTests(unittest.TestCase):
         finally:
             bridge.store.close()
 
+    def test_mcp_terminal_supplement_preserves_already_admitted_content(self):
+        from hermes_codex_learning.config import Settings
+        from hermes_codex_learning.store import Store
+        from hermes_codex_learning.host_evidence import supplement
+        settings=Settings(self.root/"home",self.project,self.root,Path("/usr/bin/python3"))
+        store=Store(settings.state)
+        try:
+            source={"host":"host","project":str(self.project),"chat":"chat","turn":"turn"}
+            store.capture({"session_id":"chat","turn_id":"turn","cwd":str(self.project),
+                           "bridge_host":"host","bridge_project":str(self.project),"transcript_path":str(self.path)})
+            self.write([{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn",
+                        "item":{"type":"McpToolCall","id":"mcp","status":"completed"}}}])
+            content={"output":"Already admitted public evidence."}
+            data={"source":source,"user":"task","tools":{"mcp":{"status":"unknown","result":content}},
+                  "status":"incomplete","_ended_by":"Stop"}
+            with patch.dict(os.environ,{"CODEX_HOME":str(self.root)}):
+                result=supplement(store,data,settings=settings)
+            self.assertEqual(result["tools"]["mcp"]["result"],content)
+            self.assertEqual(result["status"],"completed")
+        finally:
+            store.close()
+
     def test_mcp_denial_and_file_change_are_terminal_without_importing_bodies(self):
         def row(item):
             return {"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn","item":item}}

@@ -117,9 +117,13 @@ def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
         elif status in {"inprogress", "running"}:
             result["tools"][identifier].update(status="running", process=str(fact["process_id"] or ""))
         elif status in {"failed", "interrupted"}:
-            result["tools"][identifier].update(status=status,process="",result={"outcome":status,"status_source":"host_transcript"})
+            result["tools"][identifier].update(status=status,process="",status_source="host_transcript")
+            if not include_task or result["tools"][identifier].get("result") is None:
+                result["tools"][identifier]["result"]={"outcome":status}
         elif fact.get("kind") in {"McpToolCall","FileChange"} and status == "completed":
-            result["tools"][identifier].update(status="completed",process="",result={"outcome":"completed","status_source":"host_transcript"})
+            result["tools"][identifier].update(status="completed",process="",status_source="host_transcript")
+            if not include_task or result["tools"][identifier].get("result") is None:
+                result["tools"][identifier]["result"]={"outcome":"completed"}
     if result.get("_ended_by") == "Stop":
         result["status"] = "incomplete" if any(t["status"] in {"running", "unknown"} for t in result["tools"].values()) else "completed"
     return result

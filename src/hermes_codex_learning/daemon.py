@@ -186,10 +186,7 @@ class Bridge:
             return
         self.store.set("last_input_retry", now)
         rows = self.store.db.execute("SELECT payload FROM turns WHERE observed_revision IS NULL "
-                                     "AND ((json_extract(payload,'$.user')='' "
-                                     "AND json_extract(payload,'$.status') IN ('completed','interrupted')) "
-                                     "OR (json_extract(payload,'$.status')='incomplete' "
-                                     "AND json_extract(payload,'$._ended_by') IN ('Stop','Interrupt'))) "
+                                     "AND json_extract(payload,'$.status') IN ('completed','interrupted','incomplete') "
                                      "ORDER BY activity DESC LIMIT 8").fetchall()
         for row in rows:
             data = json.loads(row["payload"])
