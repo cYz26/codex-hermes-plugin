@@ -50,8 +50,9 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                     or payload.get("turn_id") != turn):
                 continue
             item = payload.get("item", {})
-            if item.get("type") == "CommandExecution" and item.get("id"):
+            if item.get("type") in {"CommandExecution","McpToolCall","FileChange"} and item.get("id"):
                 commands[item["id"]] = {key: item.get(key) for key in ("status", "exit_code", "process_id")}
+                commands[item["id"]]["kind"] = item["type"]
             if not include_task:
                 continue
             if (item.get("type") != "FunctionCallOutput" or item.get("namespace") != "codex_app"
@@ -116,7 +117,9 @@ def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
         elif status in {"inprogress", "running"}:
             result["tools"][identifier].update(status="running", process=str(fact["process_id"] or ""))
         elif status in {"failed", "interrupted"}:
-            result["tools"][identifier]["status"] = status
+            result["tools"][identifier].update(status=status,process="",result={"outcome":status,"status_source":"host_transcript"})
+        elif fact.get("kind") in {"McpToolCall","FileChange"} and status == "completed":
+            result["tools"][identifier].update(status="completed",process="",result={"outcome":"completed","status_source":"host_transcript"})
     if result.get("_ended_by") == "Stop":
         result["status"] = "incomplete" if any(t["status"] in {"running", "unknown"} for t in result["tools"].values()) else "completed"
     return result

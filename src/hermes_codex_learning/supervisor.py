@@ -21,7 +21,7 @@ DATA_PATHS = ("config.yaml", "SOUL.md", "memories", "skills", "learning", "sessi
               ".curator_backups", "state.db", "state.db-wal", "state.db-shm")
 DERIVED_KEYS = ("knowledge-index-v1", "publications-v1", "publication-decisions", "publication-context-version",
                "skill-versions-v1", "workflow-skill-attestations", "semantic-skill-attestations",
-               "semantic-memory-attestations", "publication-aliases")
+               "semantic-memory-attestations", "publication-aliases", "artifact-read-cache")
 
 
 def copy_entry(source: Path, target: Path):

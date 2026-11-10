@@ -27,6 +27,13 @@ TOOLS = [
                      "required": ["name"], "additionalProperties": False}},
 ]
 
+for tool in TOOLS:
+    readonly=tool["name"] in {"context","skill_load","learning_status","update_status"}
+    tool["annotations"]={"readOnlyHint":readonly,"destructiveHint":False,
+                         "openWorldHint":tool["name"]=="update_check"}
+    if tool["name"]=="record_application":
+        tool["annotations"]["idempotentHint"]=True
+
 
 def handle(message: dict, settings: Settings) -> dict | None:
     if "id" not in message:
@@ -46,7 +53,7 @@ def handle(message: dict, settings: Settings) -> dict | None:
             raise ValueError("Unknown tool")
         if name in {"update_status", "update_check"}:
             from .updates import Updater
-            updater = Updater(settings)
+            updater = Updater(settings,create_directory=name!="update_status")
             result = updater.status() if name == "update_status" else updater.check()
         else:
             result = request(settings, name, params.get("arguments", {}))

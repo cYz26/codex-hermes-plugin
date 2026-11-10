@@ -1,12 +1,62 @@
 import json
 import tempfile
 import unittest
+import os
+from unittest.mock import patch
+from types import SimpleNamespace
 from pathlib import Path
 
 from hermes_codex_learning.host_evidence import read_turn
 
 
 class HostEvidenceTests(unittest.TestCase):
+    def test_pending_semantic_turn_recovers_from_verified_noncommand_terminal_items(self):
+        from hermes_codex_learning.config import Settings
+        from hermes_codex_learning.daemon import Bridge
+        from hermes_codex_learning.normalize import merge_event
+        settings=Settings(self.root/"home",self.project,self.root,Path("/usr/bin/python3"))
+        observed=[]
+        api=SimpleNamespace(open=lambda source:{"handle":"h"},observe=lambda *a,**kw:observed.append((a,kw)))
+        bridge=Bridge(settings,api)
+        try:
+            events=[
+                {"hook_event_name":"UserPromptSubmit","prompt":"Synthetic task"},
+                {"hook_event_name":"PreToolUse","tool_use_id":"mcp","tool_name":"mcp__hermes_learning__context"},
+                {"hook_event_name":"PreToolUse","tool_use_id":"edit","tool_name":"apply_patch"},
+                {"hook_event_name":"Stop","last_assistant_message":"Synthetic task ended"},
+            ]
+            for event in events:
+                value={**event,"session_id":"chat","turn_id":"turn","cwd":str(self.project),
+                       "bridge_project":str(self.project),"bridge_host":"host","transcript_path":str(self.path)}
+                identity=bridge.store.capture(value)
+                merge_event(bridge.store,bridge.store.db.execute("SELECT * FROM events WHERE id=?",(identity,)).fetchone())
+            self.write([{"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn","item":item}} for item in [
+                {"type":"McpToolCall","id":"mcp","status":"failed"},
+                {"type":"FileChange","id":"edit","status":"completed"},
+            ]])
+            with patch.dict(os.environ,{"CODEX_HOME":str(self.root)}):
+                bridge.retry_completed_inputs()
+                bridge.store.set("last_input_retry",0)
+                bridge.retry_completed_inputs()
+            self.assertEqual(len(observed),1)
+            self.assertEqual(observed[0][0][1]["status"],"completed")
+            self.assertEqual({tool["call_id"]:tool["status"] for tool in observed[0][0][1]["tools"]},
+                             {"mcp":"failed","edit":"completed"})
+        finally:
+            bridge.store.close()
+
+    def test_mcp_denial_and_file_change_are_terminal_without_importing_bodies(self):
+        def row(item):
+            return {"type":"event_msg","payload":{"type":"item_completed","turn_id":"turn","item":item}}
+        self.write([
+            row({"type":"McpToolCall","id":"mcp","status":"failed","error":{"message":"PRIVATE denial detail"}}),
+            row({"type":"FileChange","id":"edit","status":"completed","stdout":"PRIVATE diff"}),
+        ])
+        result = read_turn(self.path,"chat","turn",str(self.project),sessions_root=self.sessions,include_task=False)
+        self.assertEqual(result["commands"]["mcp"]["status"],"failed")
+        self.assertEqual(result["commands"]["edit"]["status"],"completed")
+        self.assertNotIn("PRIVATE",str(result))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()

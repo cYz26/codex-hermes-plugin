@@ -246,10 +246,11 @@ def review_gate(recipe: dict) -> None:
 
 
 class Updater:
-    def __init__(self, settings: Settings, *, root: Path = ROOT):
+    def __init__(self, settings: Settings, *, root: Path = ROOT, create_directory=True):
         self.settings, self.root = settings, root
         self.directory = settings.home.parent / "updates" / digest(str(settings.home))[:16]
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if create_directory:
+            self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.status_path = self.directory / "status.json"
         self.lock = self.directory / "update.lock"
 

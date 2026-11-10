@@ -34,11 +34,11 @@ def capture_delivery(store, payload: dict, project: str) -> None:
     if not isinstance(value, dict):
         return
     token = value.get("delivery_token")
-    if not isinstance(token, str) or not token or len(token) > 256:
+    if not isinstance(token, str) or not token or len(token) > 4096:
         return
     # Native issuance validates the opaque receipt. Never copy skill text/resources.
     safe = {key: value[key] for key in ("delivery_token", "name", "version")
-            if isinstance(value.get(key), str) and len(value[key]) <= 256}
+            if isinstance(value.get(key), str) and len(value[key]) <= (4096 if key=="delivery_token" else 256)}
     event = {key: payload[key] for key in ("session_id", "turn_id", "tool_use_id", "tool_name")}
     event.update(bridge_project=project, tool_response={"structuredContent": safe})
     with store.db:

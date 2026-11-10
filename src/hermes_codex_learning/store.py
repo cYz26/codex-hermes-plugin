@@ -139,6 +139,19 @@ class Store:
                             "WHERE meta.value<>excluded.value", (key, dumps(value)))
 
 
+class ReadStore:
+    def __init__(self, root: Path):
+        self.db=sqlite3.connect((root/"bridge.sqlite").absolute().as_uri()+"?mode=ro",uri=True,timeout=5)
+        self.db.row_factory=sqlite3.Row
+
+    def get(self,key,default=None):
+        row=self.db.execute("SELECT value FROM meta WHERE key=?",(key,)).fetchone()
+        return json.loads(row[0]) if row else default
+
+    def close(self):
+        self.db.close()
+
+
 def atomic_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")

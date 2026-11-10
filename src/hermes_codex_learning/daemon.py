@@ -27,6 +27,8 @@ class Bridge:
         self.settings, self.api = settings, api
         self.review_writes = review_writes or ReviewWrites()
         self.store = Store(settings.state)
+        from .read_receipts import initialize
+        initialize(settings.state)
         self.stop = threading.Event()
         self.drain = threading.Event()
         self.ready = threading.Event()
@@ -184,8 +186,10 @@ class Bridge:
             return
         self.store.set("last_input_retry", now)
         rows = self.store.db.execute("SELECT payload FROM turns WHERE observed_revision IS NULL "
-                                     "AND json_extract(payload,'$.user')='' "
-                                     "AND json_extract(payload,'$.status') IN ('completed','interrupted') "
+                                     "AND ((json_extract(payload,'$.user')='' "
+                                     "AND json_extract(payload,'$.status') IN ('completed','interrupted')) "
+                                     "OR (json_extract(payload,'$.status')='incomplete' "
+                                     "AND json_extract(payload,'$._ended_by') IN ('Stop','Interrupt'))) "
                                      "ORDER BY activity DESC LIMIT 8").fetchall()
         for row in rows:
             data = json.loads(row["payload"])
@@ -219,6 +223,25 @@ class Bridge:
                         break
         token = delivered.get("delivery_token") if isinstance(delivered, dict) else None
         if token and payload.get("tool_use_id"):
+            from .read_receipts import PREFIX, verify
+            if token.startswith(PREFIX):
+                value=verify(self.settings.state,token,payload["bridge_project"])
+                if value["name"]!=delivered.get("name") or value["version"]!=delivered.get("version"):
+                    raise ValueError("Delivery receipt does not match the returned artifact")
+                key="confirmed-read:"+digest(token)
+                if self.store.get(key,{}).get("recorded"):
+                    return
+                native=self.store.get(key,{}).get("native_token")
+                if not native:
+                    receipt=native_reads.delivered_snapshot(self.api,value["name"],value["version"],value["file_path"])
+                    native=receipt.get("delivery_token") if receipt else None
+                    self.store.set(key,{"native_token":native})
+                evidence={"stage":"body_delivered","source_event":[payload["session_id"],payload.get("turn_id"),payload["tool_use_id"]]}
+                if native:
+                    self.api.record_usage(native,evidence)
+                self.store.set("issued-delivery:"+token,{**value,"project":payload["bridge_project"],"source_event":evidence["source_event"]})
+                self.store.set(key,{"recorded":True,"native_token":native})
+                return
             if token.startswith("bridge:"):
                 receipt = self.store.get("delivery:" + token)
                 if receipt and not receipt.get("source_event") and receipt.get("project") == payload.get("bridge_project"):
@@ -310,7 +333,7 @@ class Bridge:
                     event["receipt"] = receipt_text({**event, "message": message(event)}, calls, finished_at,
                                                     started_at=started_at)
                 self.emit(event)
-            self.store.set("state", "idle")
+            self.store.set("state", "publishing")
             if result["run_status"] in {"completed","failed","interrupted","unknown","superseded"}:
                 with self.store.db:
                     self.store.db.execute("DELETE FROM review_priority WHERE handle=? AND requested IS NOT NULL AND created<=?",
@@ -399,6 +422,7 @@ class Bridge:
         context = self.api.read(kind="context")
         if self.settings.capture_scope == "global":
             context = self.update_knowledge(context)
+        self.cache_artifacts(context)
         if self.settings.checked_publication:
             context = self.publish_checked(context)
         atomic_json(self.settings.state / "context.json", context)
@@ -406,6 +430,23 @@ class Bridge:
             **native_reads.status(self.api), "daemon": self.store.get("state"), "updated_at": time.time(),
         })
         self.last_publish = time.monotonic()
+
+    def cache_artifacts(self, context):
+        previous=self.store.get("artifact-read-cache",{})
+        current={}
+        for item in context.get("skills",[]):
+            name=item["name"];cached=previous.get(name,{})
+            if (cached.get("catalog_version")==item.get("version") and cached.get("artifact")
+                    and Path(cached["artifact"].get("resource_dir","")).is_dir()):
+                current[name]=cached
+                continue
+            try:
+                artifact=native_reads.skill(self.api,name=name)
+                current[name]={"artifact":{key:value for key,value in artifact.items() if key!="delivery_token"},
+                               "catalog_version":item.get("version")}
+            except (OSError,ValueError):
+                continue
+        self.store.set("artifact-read-cache",current)
 
     def publish_checked(self, context: dict) -> dict:
         from .policy import admit, sharing_check
@@ -578,9 +619,9 @@ class Bridge:
                 self.store.set("closing", closing)
                 if not self.has_active_turns():
                     self.api.maintenance()
+                self.publish()
                 if self.store.get("state") != "idle":
                     self.store.set("state", "idle")
-                self.publish()
                 self.notifications()
                 if self.store.get("retention-request") or (self.settings.retention_enabled and
                         time.time() - self.store.get("retention:last", {}).get("at", 0) >= 86400):
@@ -628,7 +669,7 @@ class Bridge:
             return {"accepted": True}
         if method == "learning_status":
             status = self.settings.state / "status.json"
-            with StoreConnection(self.settings) as store:
+            with StoreConnection(self.settings, read_only=True) as store:
                 snapshot = self.startup_status if not self.resume.is_set() else (
                     json.loads(status.read_text()) if status.exists() else None)
                 return {"snapshot": snapshot,
@@ -666,62 +707,9 @@ class Bridge:
         if method == "skill_load":
             if not self.resume.is_set():
                 raise RuntimeError("Learning runtime is paused for an update; retry shortly")
-            project = self.request_project(params)
-            with StoreConnection(self.settings) as store:
-                alias = store.get("publication-aliases", {}).get(params["name"])
-                if alias:
-                    params = {**params,"name":alias}
-            if self.settings.checked_publication:
-                from .policy import published_resource
-                with StoreConnection(self.settings) as store:
-                    origins = store.get("knowledge-index-v1", {}).get("skills", {}).get(params["name"], {}).get("projects", [])
-                    if origins != [project]:
-                        publication = store.get("publications-v1", {}).get(params["name"])
-                        if not publication:
-                            raise PermissionError("Skill has not passed shared publication checks")
-                        value = published_resource(publication, params.get("file_path"))
-                        current = native_reads.delivered_snapshot(self.api, params["name"], value["version"], params.get("file_path"))
-                        if current:
-                            return self.issued({**current, "scope": "global", "source_ids": [digest(item) for item in publication["sources"]]}, project)
-                        token = "bridge:" + uuid.uuid4().hex
-                        store.set("delivery:" + token, {"name": params["name"], "version": value["version"], "project": project})
-                        return self.issued({**value, "delivery_token": token, "source_ids": [digest(item) for item in publication["sources"]]}, project)
-            value = native_reads.skill(self.api, name=params["name"], file_path=params.get("file_path"))
-            with StoreConnection(self.settings) as store:
-                origin = store.get("knowledge-index-v1", {}).get("skills", {}).get(params["name"], {})
-                if store.db.execute("SELECT 1 FROM withheld_versions WHERE name=? AND version=?",
-                                    (params["name"],value["version"])).fetchone():
-                    from .policy import published_resource
-                    previous = store.get("publications-v1", {}).get(params["name"])
-                    if previous and previous["artifact"]["version"] != value["version"]:
-                        value = published_resource(previous,params.get("file_path"))
-            delivered = native_reads.delivered_snapshot(self.api, params["name"], value["version"], params.get("file_path"))
-            if delivered:
-                value = delivered
-            elif not value.get("delivery_token"):
-                value = {**value,"delivery_token":"bridge:"+uuid.uuid4().hex}
-                with StoreConnection(self.settings) as store:
-                    store.set("delivery:"+value["delivery_token"],{"name":params["name"],"version":value["version"],"project":project})
-            return self.issued({**value, "request_project": project, "source_projects": origin.get("projects", []),
-                    "applicability": "Shared procedure; project-specific examples and paths must be checked against the current task."}, project)
+            from .skill_reads import load
+            return load(self.settings,params["name"],self.request_project(params),params.get("file_path"))
         raise ValueError("Unknown bridge method")
-
-    def issued(self, value, project):
-        with StoreConnection(self.settings) as store:
-            if store.db.execute("SELECT 1 FROM withheld_versions WHERE name=? AND version=?",
-                                (value["name"],value["version"])).fetchone():
-                raise PermissionError("This skill version has a failed host validation")
-            if self.settings.quality_checks:
-                proof = store.get("quality:" + digest([value["name"],value["version"]]), {})
-                value = {**value, "validation":proof or {"state":"pending","business_effectiveness":"not_inferred"}}
-                if Path(value.get("file_path", "SKILL.md")).suffix in {".py", ".sh"}:
-                    from .quality import proof_valid
-                    if not proof_valid(value, proof):
-                        raise PermissionError("Executable skill resource has not passed independent validation")
-            if value.get("delivery_token"):
-                store.set("issued-delivery:" + value["delivery_token"],
-                          {"name":value["name"],"version":value["version"],"project":project,"issued_at":time.time()})
-        return value
 
     def request_project(self, params: dict) -> str | None:
         if "cwd" not in params:
@@ -734,11 +722,13 @@ class Bridge:
 
 
 class StoreConnection:
-    def __init__(self, settings):
+    def __init__(self, settings, read_only=False):
         self.settings = settings
+        self.read_only = read_only
 
     def __enter__(self):
-        self.store = Store(self.settings.state)
+        from .store import ReadStore
+        self.store = ReadStore(self.settings.state) if self.read_only else Store(self.settings.state)
         return self.store
 
     def __exit__(self, *args):

@@ -77,3 +77,9 @@ migration 默认预览，--apply 才执行。seal 要求每个冲突与遗漏都
 离线发布检查与固定原生合同由 scripts/verify_native.py 执行；真实 provider、App A→B→C、Mac 横幅／点击和 24 小时观察分别保留证据。历史报告不重新标记为 0.5.0 验收。
 
 先用公开／合成任务验证：A 自动学到经验，B 加载并应用后给出反例，C 用修订版本验证。Mac 现场确认通知可见和点击，另测断线、未知投递与重启去重。当前宿主支持 Codex 0.167；未知版本保留覆盖缺口并降级，不猜测格式。
+
+## 0.5.1 接入修正
+
+真实云端 CLI 验收补齐 McpToolCall 拒绝与 FileChange 完成的终态归一化，并恢复已采集但等待这些终态的回合。不会从缺少结果推断成功。
+
+context、skill_load、learning_status、update_status 按实际只读行为声明 MCP annotations。技能读取只读后台准备的快照并生成无状态签名回执；记录实际交付及原生使用量由受信任的 PostToolUse 完成。update_check 和 record_application 仍明确声明会改变状态。annotations 不替代宿主授权，保持原有审批策略。
