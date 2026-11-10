@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "implementation_version": "0.5.1",
+  "source_commit": "8b3a5a037c6802b4264e43c7876c24499789444f",
+  "build": {
+    "version": "0.5.1",
+    "digest": "40e014c21b83b012762ecc8d0dcc689f357e9f7fb7fee50be143f063bd98d245"
+  },
+  "state": "deployed_waiting_for_native_hook_trust",
+  "verification": {
+    "native": {
+      "files": 20,
+      "passed": 337,
+      "failed": 0
+    },
+    "bridge_integrated": {
+      "passed": 175,
+      "failed": 0
+    },
+    "real_worker_mcp_smoke": true,
+    "real_codex_cli": {
+      "A_tests": {
+        "initial_errors": 5,
+        "final_passed": 5,
+        "exit_code": 0,
+        "tests_unchanged": true
+      },
+      "A_capture": true,
+      "A_terminal_recovered": true,
+      "A_automatic_learning": "project_memory_written",
+      "readonly_context_with_original_never_policy": "passed",
+      "readonly_skill_load_with_original_never_policy": "passed"
+    },
+    "readonly_contract": {
+      "persistent_writes_during_skill_read": 0,
+      "confirmed_delivery_recorded_once": true,
+      "cross_project_and_tampered_receipts_rejected": true
+    }
+  },
+  "fixes": [
+    "Normalize verified McpToolCall and FileChange terminal statuses",
+    "Revisit already captured terminal turns waiting for host results",
+    "Serve prepared skill snapshots without persistent writes; sign receipts and record actual delivery from trusted hooks",
+    "Declare MCP read/write annotations according to actual behavior"
+  ],
+  "pending": {
+    "hooks": "7 modified hooks require native trust for 0.5.1",
+    "B_C_sessions": "waiting_for_native_hook_trust",
+    "observation_24h": "running_new_build_window",
+    "macos_ui": "deferred_by_user"
+  },
+  "observation_expected_finish": "2026-11-11T19:49:08.821689+08:00",
+  "archive_sha256": "ed9ef14263b5573a1d3c3c3d3b6eb178702a4f92068f91b002bfb59efe035a6a",
+  "limits": "No completed B/C session loop or 24-hour observation is claimed. Prior 0.5.0 evidence remains historical."
+}
