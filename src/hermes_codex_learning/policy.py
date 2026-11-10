@@ -15,6 +15,9 @@ from .store import digest, dumps, redact
 
 
 def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe") -> dict:
+    if policy.get("mode") == "trusted_enterprise":
+        from .enterprise import assess
+        return assess(payload,policy,purpose)
     if not policy:
         return {"allowed": True, "basis": "legacy_configuration"}
     if redact(payload) != payload:
@@ -63,7 +66,7 @@ def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe"
     return {"allowed": False, "reason": "assessment_not_approved"}
 
 
-def sharing_check(value: dict, origins: list[str], private_markers: list[str], *, executable_candidate=False) -> dict:
+def sharing_check(value: dict, origins: list[str], private_markers: list[str], *, executable_candidate=False, enterprise=False) -> dict:
     content = value.get("content") or ""
     front = content.split("---", 2)
     if len(front) < 3 or not re.search(r"(?m)^learning_scope:\s*global_candidate\s*$", front[1]):
@@ -94,12 +97,19 @@ def sharing_check(value: dict, origins: list[str], private_markers: list[str], *
         except UnicodeDecodeError:
             return {"allowed": False, "reason": "binary_resource_unassessed"}
     combined = "\n".join(text)
+    if enterprise:
+        from .enterprise import scrub
+        if scrub(combined)!=combined:
+            return {"allowed":False,"reason":"credential_material"}
     if redact(combined) != combined:
         return {"allowed": False, "reason": "credential_material"}
-    markers = [*origins, *private_markers]
+    # Internal method/API names are useful inside the authorized enterprise scope;
+    # absolute project roots still do not become portable shared instructions.
+    markers = [*origins, *([] if enterprise else private_markers)]
     if any(marker and len(marker) >= 5 and marker in combined for marker in markers):
         return {"allowed": False, "reason": "project_private_material"}
-    if re.search(r"https?://[^\s/]*(?:bytedance|larkoffice|feishu|\.internal|\.corp)|/(?:Users|home|data00|etc)/", combined, re.I):
+    forbidden = r"/(?:Users|home|data00|etc)/" if enterprise else r"https?://[^\s/]*(?:bytedance|larkoffice|feishu|\.internal|\.corp)|/(?:Users|home|data00|etc)/"
+    if re.search(forbidden, combined, re.I):
         return {"allowed": False, "reason": "internal_address_or_absolute_path"}
     return {"allowed": True, "basis": "explicit_generic_candidate_and_resource_checks",
             "version": value["version"], "manifest_hash": digest(files)}

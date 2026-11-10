@@ -105,6 +105,9 @@ class Bridge:
             assessment = admit(observation(enriched), self.settings.data_policy, data["source"]["project"])
             if not assessment["allowed"]:
                 return
+            if self.settings.data_policy.get("mode")=="trusted_enterprise":
+                from .enterprise import scrub
+                enriched=scrub(enriched)
         else:
             assessment = {"allowed":True, "basis":"legacy_configuration"}
         if not enriched["user"]:
@@ -116,6 +119,13 @@ class Bridge:
                     self.store.db.execute("UPDATE turns SET payload=?,revision=? WHERE id=?", (dumps(enriched), digest(enriched), key))
             return
         handle = self.handle_for(enriched["source"])
+        from .enterprise import scope_boundary
+        required=scope_boundary(self.store,handle)
+        if required and required!=assessment.get("boundary_id"):
+            self.store.set("policy-withheld:"+event_id,"enterprise_scope_not_active")
+            return
+        if assessment.get("boundary_id"):
+            self.store.set("enterprise-scope:"+handle,assessment["boundary_id"])
         self.bind_chat_handle(enriched["source"], handle)
         self.store.set("assessment:" + handle, {key:value for key,value in assessment.items() if key != "payload"})
         self.api.observe(handle, assessment.get("payload", observation(enriched)), event_id=event_id)
@@ -254,6 +264,12 @@ class Bridge:
                            "project": payload["bridge_project"], "chat": payload["session_id"]})
 
     def reviews(self) -> None:
+        from .enterprise import MODE, boundary, scope_boundary
+        enterprise=boundary(self.settings.data_policy)
+        if self.settings.data_policy.get("mode")==MODE and not enterprise:
+            self.store.set("enterprise-policy-state","boundary_changed")
+            return
+        self.store.set("enterprise-policy-state","ready" if enterprise else "not_enabled")
         status = native_reads.status(self.api)
         from .scheduling import ordered_intents
         for intent in ordered_intents(self.store, status["intents"]):
@@ -261,16 +277,25 @@ class Bridge:
                 break
             if intent["status"] != "queued":
                 continue
+            required=scope_boundary(self.store,intent["handle"])
+            if required and (not enterprise or required!=enterprise["id"]):
+                self.store.set("policy-withheld:"+intent["id"],"enterprise_boundary_not_active")
+                continue
             attempt_id = self.store.get("attempt:" + intent["id"])
             if not attempt_id:
                 attempt_id = str(uuid.uuid4())
                 self.store.set("attempt:" + intent["id"], attempt_id)
             source = self.store.get("scope:" + intent["handle"], {})
+            if enterprise and source.get("evidence_mode")!="workflow-v1":
+                self.store.set("enterprise-scope:"+intent["handle"],enterprise["id"])
+                assessment=self.store.get("assessment:"+intent["handle"],{})
+                self.store.set("assessment:"+intent["handle"],{**assessment,"allowed":True,"classification":"approved",
+                               "audience":"enterprise","boundary_id":enterprise["id"],"policy_version":enterprise["policy_version"]})
             local = self.store.get("workflow-local-source:" + intent["handle"], source)
             provenance = {"project": local.get("project"), "source_chat": local.get("chat")}
             before_context = self.api.read(kind="context")
             before_versions = self.skill_versions(before_context)
-            if self.settings.capture_scope == "global":
+            if self.settings.capture_scope == "global" or enterprise:
                 self.update_knowledge(before_context)
             started_at = time.time()
             self.emit({"id": attempt_id + ":start", "kind": "review.started", **provenance})
@@ -298,7 +323,8 @@ class Bridge:
                         "synthetic" if assessment.get("basis") == "synthetic_acceptance" else "approved")
                     proof = {"project":source.get("project"), "classification":classification,
                              "source_refs":assessment.get("source_refs", []), "attempt_id":attempt_id,
-                             "policy_version":assessment.get("policy_version")}
+                             "policy_version":assessment.get("policy_version"),
+                             "audience":assessment.get("audience"),"boundary_id":assessment.get("boundary_id")}
                     proofs = self.store.get("semantic-skill-attestations", {})
                     catalog_versions = {item["name"]:item.get("version") for item in after_context.get("skills", [])}
                     for name in changed_skills(result):
@@ -314,7 +340,7 @@ class Bridge:
                             if key not in before_keys:
                                 memory_proofs[key] = proof
                         self.store.set("semantic-memory-attestations", memory_proofs)
-            if self.settings.capture_scope == "global":
+            if self.settings.capture_scope == "global" or enterprise:
                 self.update_knowledge(after_context, project=source.get("project"), result=result)
             if result["run_status"] not in {"deferred", "superseded"}:
                 from .knowledge import changed_skills
@@ -417,11 +443,16 @@ class Bridge:
         if time.monotonic() - self.last_publish < 10:
             return
         context = self.api.read(kind="context")
-        if self.settings.capture_scope == "global":
+        if self.settings.capture_scope == "global" or self.settings.data_policy.get("mode")=="trusted_enterprise":
             context = self.update_knowledge(context)
         self.cache_artifacts(context)
         if self.settings.checked_publication:
             context = self.publish_checked(context)
+        from .enterprise import scope_view
+        context=scope_view({**context,
+            "enterprise_memory_boundaries":{key:proof["boundary_id"] for key,proof in self.store.get("semantic-memory-attestations",{}).items() if proof.get("boundary_id")},
+            "enterprise_skill_boundaries":{key:proof["boundary_id"] for key,proof in self.store.get("semantic-skill-attestations",{}).items() if proof.get("boundary_id")}},
+            self.settings.data_policy)
         atomic_json(self.settings.state / "context.json", context)
         atomic_json(self.settings.state / "status.json", {
             **native_reads.status(self.api), "daemon": self.store.get("state"), "updated_at": time.time(),
@@ -447,6 +478,8 @@ class Bridge:
 
     def publish_checked(self, context: dict) -> dict:
         from .policy import admit, sharing_check
+        from .enterprise import boundary
+        enterprise=boundary(self.settings.data_policy)
         if not isinstance(context.get("skills"), list):
             raise ValueError("Native skill catalog is unavailable; keep the previous publication")
         publications = self.store.get("publications-v1", {})
@@ -456,6 +489,7 @@ class Bridge:
         publication_key = digest([context.get('version'), context.get('bridge_provenance'),
                                   self.store.get('workflow-skill-attestations', {}),
                                   self.store.get('semantic-skill-attestations', {}), self.settings.data_policy,
+                                  enterprise["id"] if enterprise else None,
                                   [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]])
         if self.store.get("publication-context-version") != publication_key:
             index = context.get("bridge_provenance", {})
@@ -472,7 +506,13 @@ class Bridge:
                     artifact_root = Path(value["resource_dir"]).resolve()
                     if not artifact_root.is_relative_to((self.settings.home / "learning/artifacts").resolve()):
                         raise ValueError("Artifact is outside the learning publication directory")
-                    decision = sharing_check(value, origins, markers, executable_candidate=self.settings.quality_checks)
+                    decision = sharing_check(value, origins, markers, executable_candidate=self.settings.quality_checks,
+                                             enterprise=bool(enterprise))
+                    required={proof.get("boundary_id") for proof in (
+                        self.store.get("semantic-skill-attestations",{}).get(name,{}),
+                        publications.get(name,{}).get("check",{})) if proof.get("boundary_id")}
+                    if required and (not enterprise or required!={enterprise["id"]}):
+                        decision={"allowed":False,"reason":"enterprise_boundary_not_active"}
                     if decision["allowed"]:
                         resources = {name: (artifact_root / name).read_text() for name in value["files"]}
                         assessment = admit({"kind": "shared_candidate", "resources": resources, "source_projects": origins},
@@ -492,6 +532,8 @@ class Bridge:
                             assessment = {"allowed":True, "basis":"scoped_assessed_native_review"}
                         if not assessment["allowed"]:
                             decision = assessment
+                        elif enterprise:
+                            decision={**decision,"audience":"enterprise","boundary_id":enterprise["id"]}
                     if self.settings.quality_checks and decision["allowed"]:
                         from .quality import proof_valid, verify
                         key = "quality:" + digest([name, value["version"]])
@@ -558,7 +600,8 @@ class Bridge:
                 self.store.set(key, version)
         # Only the small catalog belongs in hook caches, never whole skill bodies.
         visible = {name: {"catalog_entry": {**item["catalog_entry"],"aliases":[key for key,target in aliases.items() if target == name]},
-                          "version": item["artifact"]["version"]}
+                          "version": item["artifact"]["version"],"audience":item.get("check",{}).get("audience","public"),
+                          "boundary_id":item.get("check",{}).get("boundary_id")}
                    for name, item in publications.items()}
         withheld = {(row[0],row[1]) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")}
         catalog = []
@@ -591,7 +634,7 @@ class Bridge:
             self.startup_context = self.api.read(kind="context")
             if self.settings.capture_scope == "global":
                 self.startup_context = self.update_knowledge(self.startup_context, persist=False)
-            self.startup_status = self.api.read(kind="status")
+            self.startup_status = native_reads.status(self.api)
         self.store.set("state", "idle" if self.resume.is_set() else "update-paused")
         self.ready.set()
         delay = 1
@@ -679,6 +722,7 @@ class Bridge:
                                 "SELECT json_extract(payload,'$.validation'),COUNT(*) FROM application_evidence GROUP BY 1")}
                         },
                         "retention":store.get("retention:last"),
+                        "enterprise_policy":store.get("enterprise-policy-state"),
                         "pid": os.getpid(), "ready": self.ready.is_set(), "learning_api": self.api.version,
                         "source": str(self.settings.source),
                         "python": sys.executable,
@@ -694,11 +738,16 @@ class Bridge:
                         "capture_exclusions": [{"chat": row["key"][len("excluded-chat:"):], **json.loads(row["value"])}
                                                for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'excluded-chat:%'")]}
         if method == "context":
+            if not self.resume.is_set():
+                empty=context_view({"memories":{},"skills":[]},self.request_project(params))
+                return {**empty,"available":False,"reason":"update_paused"}
             path = self.settings.state / "context.json"
             context = self.startup_context if not self.resume.is_set() else (
                 json.loads(path.read_text()) if path.exists() else {"available": False})
             context = context or {"available": False}
-            if self.settings.capture_scope == "global":
+            from .enterprise import scope_view, requires_scoping
+            context=scope_view(context,self.settings.data_policy)
+            if self.settings.capture_scope == "global" or requires_scoping(context,self.settings.data_policy):
                 return context_view(context, self.request_project(params), params.get("query", ""))
             return context
         if method == "skill_load":

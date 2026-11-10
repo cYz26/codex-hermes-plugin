@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--settings",type=Path,required=True)
     parser.add_argument("--source",type=Path)
     parser.add_argument("--workspace",type=Path,required=True)
+    parser.add_argument("--enterprise",action="store_true")
     args = parser.parse_args()
     from hermes_codex_learning.config import Settings
     from hermes_codex_learning.store import atomic_json, redact
@@ -74,6 +75,12 @@ def main():
     settings = Settings(home,project,source,live.python,capture_scope="global",checked_publication=True,
                         data_policy={"enabled":True,"source_manifest":str(manifest),"workflow_projection":True},
                         proactive=True,quality_checks=True,idle_seconds=0,idle_interval=0)
+    if args.enterprise:
+        from dataclasses import replace
+        from hermes_codex_learning.enterprise import make_boundary
+        policy_path=home/"enterprise-boundary.json"
+        atomic_json(policy_path,make_boundary(settings))
+        settings=replace(settings,data_policy={"enabled":True,"mode":"trusted_enterprise","enterprise_boundary":str(policy_path)})
     from hermes_cli.plugins import PluginContext, PluginManifest, get_plugin_manager
     from hermes_codex_learning.semantic_review import install_semantic_policy
     from hermes_codex_learning.review_input import install_review_policy
@@ -90,6 +97,7 @@ def main():
     receipt = {"state":"started","real_provider":True,"actual_codex":False,"scope":"explicit synthetic contract",
                "model":{key:original["model"].get(key) for key in ("provider","default","api_mode")},
                "reasoning_effort":original.get("agent",{}).get("reasoning_effort"),"phases":[],"requests":[]}
+    receipt["enterprise_mode"]=args.enterprise
     def audit(**event):
         payload = json.dumps({key:event.get(key) for key in ("request_messages","system_prompt")},ensure_ascii=False)
         receipt["requests"].append({"foreign_canary_present":marker in payload,"payload_bytes":len(payload.encode())})
@@ -121,6 +129,11 @@ def main():
                        foreign_memory_preserved=marker in (home/"memories/MEMORY.md").read_text())
         receipt["passed"] = all(receipt[key] for key in ("skill_revised","final_script_verified","project_memory_written",
                                                         "isolation_verified","foreign_memory_preserved"))
+        if args.enterprise:
+            shared=bridge.rpc("context",{"cwd":str(workspace/"other-project"),"query":"header normalization"})
+            receipt["enterprise_shared"]=any(x.get("name")=="learned-header-normalization" and x.get("audience")=="enterprise" for x in shared["skills"])
+            receipt["other_project_memory_empty"]=not shared["memories"]
+            receipt["passed"]=receipt["passed"] and receipt["enterprise_shared"] and receipt["other_project_memory_empty"]
     except Exception as exc:
         receipt.update(state="failed",passed=False,error=type(exc).__name__+": "+str(exc))
     finally:

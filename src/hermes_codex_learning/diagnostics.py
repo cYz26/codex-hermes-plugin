@@ -23,6 +23,12 @@ def inspect(path: str | Path | None = None) -> dict:
     result['data_admission'] = {'workflow_projection': settings.data_policy.get('workflow_projection') is True,
                                 'assessment_configured': bool(settings.data_policy.get('assessment_command') or settings.data_policy.get('source_manifest')),
                                 'unassessed_body': 'withheld' if settings.data_policy else 'allowed_by_legacy_configuration'}
+    if settings.data_policy.get("mode")=="trusted_enterprise":
+        from .enterprise import boundary
+        approved=boundary(settings.data_policy)
+        result["data_admission"].update(mode="trusted_enterprise",boundary_valid=bool(approved),
+                                       assessment_configured=True,
+                                       unassessed_body="ordinary_enterprise_authorized" if approved else "withheld")
     from .identity import build_identity
     result["build"] = {"client":build_identity(),"running":None,"matches":None}
     result["configuration"]["selected_file"] = str(Settings.configuration_path(path))

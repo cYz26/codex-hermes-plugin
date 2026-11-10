@@ -18,3 +18,5 @@ When available, use `record_application` after actually applying a delivered ski
 Background learning needs no manual summary or explicit review request. `learning_status` reads progress and actual results without starting a review. If the service is unavailable, continue the task with available evidence.
 
 With checked publication enabled, only accepted generic versions are shared across workspaces. A withheld candidate is not a published lesson. Notification delivery is independent of business recall: do not fetch or quote notice receipts unless the user explicitly asks to use that material. There is no verified UI-only Codex chat notice channel on this SSH host.
+
+An artifact with audience=enterprise is approved for this managed enterprise knowledge domain, not for public release. Reuse it only in the authorized enterprise environment, check its project applicability, and do not copy enterprise details into public repositories or external accounts. Project memory remains project-scoped. Enterprise deployment authorization may admit ordinary internal task content without a public-source manifest; credentials and explicit restrictions still apply.

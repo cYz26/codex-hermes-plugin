@@ -90,7 +90,8 @@ def hook(payload: dict, settings: Settings) -> dict:
         if admission.get("allowed") and admission.get("schema_version") == 2:
             payload = admission.pop("payload")
             payload["bridge_evidence_mode"] = "semantic-v2"
-        if (not admission['allowed'] and settings.data_policy.get('workflow_projection') is True):
+        if (not admission['allowed'] and admission.get("reason")!="explicitly_restricted_material"
+                and settings.data_policy.get('workflow_projection') is True):
             from .workflow import project_event
             payload = project_event(payload)
             admission = {'allowed': True, 'basis': 'closed_vocabulary_workflow', 'body_retained': False}
@@ -118,6 +119,8 @@ def hook(payload: dict, settings: Settings) -> dict:
             return {}
         cache_file = settings.state / "context.json"
         cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
+        from .enterprise import scope_view, requires_scoping
+        cache=scope_view(cache,settings.data_policy)
         session = payload.get("session_id", "unknown")
         if event == "UserPromptSubmit":
             query = str(payload.get("prompt") or "")[:4000] if admission.get("body_retained") is not False else ""
@@ -127,7 +130,7 @@ def hook(payload: dict, settings: Settings) -> dict:
                 matches = context_view(cache, project, transient_query)
                 query = " ".join(item["name"] for item in matches["skills"] if item.get("scope") == "global")
             store.set("recall-query:" + session, query)
-        if settings.capture_scope == "global":
+        if settings.capture_scope == "global" or requires_scoping(cache,settings.data_policy):
             cache = context_view(cache, project, store.get("recall-query:" + session, ""))
         version = cache.get("version")
         key = f"context-delivered:{session}:{project}" if settings.capture_scope == "global" else f"context-delivered:{session}"

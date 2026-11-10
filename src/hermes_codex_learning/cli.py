@@ -242,7 +242,7 @@ def main() -> int:
     auth_status = commands.add_parser("auth-status")
     auth_status.add_argument("--settings")
     args = parser.parse_args()
-    if args.command in {"install","sources","learning-config","retention","quality","migration"}:
+    if args.command in {"install","sources","learning-config","enterprise-config","retention","quality","migration"}:
         from .operations import execute
         try:
             result = execute(args)

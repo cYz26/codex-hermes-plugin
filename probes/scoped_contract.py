@@ -16,6 +16,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source",type=Path,required=True)
     parser.add_argument("--workspace",type=Path,required=True)
+    parser.add_argument("--enterprise",action="store_true")
     args = parser.parse_args()
     args.workspace = args.workspace.resolve()
     args.source = args.source.resolve()
@@ -86,6 +87,13 @@ def main():
     settings = Settings(home,project,args.source,Path(sys.executable),capture_scope="global",
                         data_policy={"enabled":True,"synthetic_roots":[str(project)]},idle_seconds=0,idle_interval=0,
                         checked_publication=True,quality_checks=True)
+    if args.enterprise:
+        from dataclasses import replace
+        from hermes_codex_learning.enterprise import make_boundary
+        from hermes_codex_learning.store import atomic_json
+        policy_path=home/"enterprise-boundary.json"
+        atomic_json(policy_path,make_boundary(settings))
+        settings=replace(settings,data_policy={"enabled":True,"mode":"trusted_enterprise","enterprise_boundary":str(policy_path)})
     ctx = PluginContext(PluginManifest(name="codex-learning-bridge",source="user"),get_plugin_manager())
     api = ctx.learning(version=1)
     guard = install_semantic_policy(api,settings,ctx)
@@ -111,6 +119,15 @@ def main():
             "foreign_memory_not_recalled":marker not in json.dumps(context),
             "skill_created":(home/"skills/learned-nfkc-checks/SKILL.md").is_file(),
         }
+        if args.enterprise:
+            other=bridge.rpc("context",{"cwd":str(args.workspace/"other"),"query":"header normalization"})
+            result["enterprise_shared"]=any(x.get("name")=="learned-nfkc-checks" and x.get("audience")=="enterprise" for x in other["skills"])
+            result["other_project_memory_empty"]=not other["memories"]
+            with (home/"config.yaml").open("a") as stream:
+                stream.write("\n# model configuration changed\n")
+            revoked=bridge.rpc("context",{"cwd":str(project),"query":"header normalization"})
+            result["revoked_enterprise_memory_hidden"]=not revoked["memories"]
+            result["revoked_enterprise_skill_hidden"]=not any(x["name"]=="learned-nfkc-checks" for x in revoked["skills"])
         result["passed"] = result["requests"] >= 2 and all(value for key,value in result.items() if key not in {"scope","requests"})
         print(json.dumps(result))
         return 0 if result["passed"] else 1

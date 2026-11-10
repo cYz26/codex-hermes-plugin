@@ -100,7 +100,9 @@ class SemanticGuard:
         if scope is None:
             return None
         denied = {"action":"block", "message":"Use only admitted project memory and listed skills. No external tools or private resources."}
-        if not isinstance(args, dict) or redact(args) != args:
+        from .enterprise import MODE, scrub
+        filtered=scrub(args) if getattr(self.settings,"data_policy",{}).get("mode")==MODE else redact(args)
+        if not isinstance(args, dict) or filtered != args:
             return denied
         if tool_name == "memory":
             if args.get("target", "memory") != "memory":
@@ -181,7 +183,12 @@ class SemanticGuard:
         classification = assessment.get("classification") or (
             "synthetic" if assessment.get("basis") == "synthetic_acceptance" else "approved")
         public_review = classification in {"public","synthetic"}
+        from .enterprise import boundary
+        approved=boundary(self.settings.data_policy)
+        enterprise_review=bool(approved and assessment.get("boundary_id")==approved["id"])
         def admissible(proof):
+            if proof.get("boundary_id"):
+                return bool(enterprise_review and proof["boundary_id"]==approved["id"])
             return (proof.get("classification") in {"public","synthetic"} or
                     (not public_review and proof.get("policy_version") and
                      proof.get("policy_version") == assessment.get("policy_version")))
@@ -190,15 +197,22 @@ class SemanticGuard:
                    and memory_proofs.get(key, {}).get("project") == project
                    and admissible(memory_proofs.get(key,{}))]
         versions = {item["name"]:item.get("version") for item in context.get("skills", [])}
+        def publication_allowed(name):
+            check=publications.get(name,{}).get("check",{})
+            return check.get("audience")!="enterprise" or (enterprise_review and check.get("boundary_id")==approved["id"])
         owned = {name for name in versions if index.get("skills", {}).get(name, {}).get("projects") == [project]
-                 and skills.get(name, {}).get("catalog_version") == versions[name] and admissible(skills.get(name,{}))}
-        shared = {name for name in versions if publications.get(name, {}).get("catalog_entry", {}).get("version") == versions[name]}
-        if public_review:
+                 and skills.get(name, {}).get("catalog_version") == versions[name] and admissible(skills.get(name,{}))
+                 and publication_allowed(name)}
+        shared = {name for name in versions if publications.get(name, {}).get("catalog_entry", {}).get("version") == versions[name]
+                  and (publications.get(name,{}).get("check",{}).get("audience")!="enterprise" or
+                       (enterprise_review and publications[name]["check"].get("boundary_id")==approved["id"]))}
+        if public_review or enterprise_review:
             owned |= {name for name in shared if name.startswith("learned-")}
         scope = {"owned":owned, "readable":owned | shared, "existing":set(versions), "memory":entries}
         self.active[handle] = scope
         try:
-            yield PROMPT + "\nProject memory:\n" + "\n".join(entries) + "\nAvailable skills: " + ", ".join(sorted(scope["readable"])), entries
+            audience = "\nThis review is for the approved enterprise deployment. Generic skills may be reused inside this enterprise library; they are not public material. Never retain credentials, raw chat logs or unrelated personal details.\n" if enterprise_review else ""
+            yield PROMPT + audience + "\nProject memory:\n" + "\n".join(entries) + "\nAvailable skills: " + ", ".join(sorted(scope["readable"])), entries
         finally:
             self.active.pop(handle, None)
 
@@ -230,6 +244,21 @@ def install_semantic_policy(api, settings, ctx):
     def review(handle, source, messages, intent):
         if source.get("executor") == EXECUTOR:
             return original_review(handle, source, messages, intent)
+        from .enterprise import MODE, scrub, explicitly_restricted, boundary, scope_boundary
+        store=Store(settings.state)
+        try:
+            required=scope_boundary(store,handle)
+        finally:
+            store.close()
+        approved=boundary(settings.data_policy)
+        if required and (not approved or required!=approved["id"]):
+            return {"run_status":"deferred","reason":"enterprise_scope_not_active","applied":[],"staged":[],"uncertain":[]}
+        if settings.data_policy.get("mode")==MODE:
+            if not approved:
+                return {"run_status":"deferred","reason":"enterprise_boundary_changed","applied":[],"staged":[],"uncertain":[]}
+            if explicitly_restricted(messages):
+                return {"run_status":"failed","reason":"explicitly_restricted_material","applied":[],"staged":[],"uncertain":[]}
+            messages=scrub(messages)
         from agent import background_review
         fork_original = background_review.build_cache_parity_fork
         with guard.scope(handle) as (prompt, entries):

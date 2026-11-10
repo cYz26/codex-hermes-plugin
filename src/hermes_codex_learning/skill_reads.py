@@ -10,11 +10,17 @@ from .store import ReadStore, digest
 
 
 def load(settings, name, project, file_path=None):
+    from .enterprise import boundary
+    approved=boundary(settings.data_policy)
+    active_boundary=approved["id"] if approved else None
     store=ReadStore(settings.state)
     try:
         name=store.get("publication-aliases",{}).get(name,name)
         origins=store.get("knowledge-index-v1",{}).get("skills",{}).get(name,{}).get("projects",[])
         publication=store.get("publications-v1",{}).get(name)
+        required=store.get("semantic-skill-attestations",{}).get(name,{}).get("boundary_id")
+        if publication and publication.get("check",{}).get("audience")=="enterprise":
+            required=publication["check"].get("boundary_id")
         shared=settings.checked_publication and origins!=[project]
         if shared:
             if not publication:
@@ -25,6 +31,9 @@ def load(settings, name, project, file_path=None):
             if not record:
                 raise RuntimeError("Skill snapshot is not ready; retry after the next background publication")
         value=published_resource(record,file_path)
+        required=record.get("check",{}).get("boundary_id") or required
+        if required and required!=active_boundary:
+            raise PermissionError("Enterprise knowledge is unavailable outside its approved deployment")
         if store.db.execute("SELECT 1 FROM withheld_versions WHERE name=? AND version=?",(name,value["version"])).fetchone():
             if publication and publication["artifact"]["version"]!=value["version"]:
                 value=published_resource(publication,file_path);shared=True
@@ -36,6 +45,8 @@ def load(settings, name, project, file_path=None):
         value.update(scope="global" if shared else "worktree",request_project=project,
                      source_projects=[] if shared else origins,
                      validation=proof or {"state":"pending","business_effectiveness":"not_inferred"})
+        if required:
+            value.update(audience="enterprise",boundary_id=required)
         if shared:
             value["source_ids"]=[digest(item) for item in record.get("sources",[])]
         value["delivery_token"]=issue(settings.state,value,project)

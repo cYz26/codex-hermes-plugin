@@ -11,6 +11,10 @@ from .store import Store, atomic_json, digest
 
 
 def add_parsers(commands):
+    enterprise=commands.add_parser("enterprise-config",help="Bind operator-authorized enterprise learning to this host and model configuration")
+    enterprise.add_argument("--settings")
+    enterprise.add_argument("--apply",action="store_true")
+    enterprise.add_argument("--disable",action="store_true",help="Restore the pre-enterprise data policy")
     install = commands.add_parser("install", help="Preview or install an immutable learning bundle")
     install.add_argument("--settings")
     install.add_argument("--start", action="store_true")
@@ -44,6 +48,34 @@ def add_parsers(commands):
 
 
 def execute(args):
+    if args.command=="enterprise-config":
+        from .enterprise import make_boundary
+        from .updates import exclusive, Updater
+        path=Settings.configuration_path(args.settings);settings=Settings.load(path)
+        receipt=settings.state/"enterprise-boundary.json"
+        backup=settings.state/"before-enterprise-policy.json"
+        if args.disable:
+            if not backup.is_file():
+                raise ValueError("No pre-enterprise policy is recorded")
+            policy=json.loads(backup.read_text())["data_policy"]
+            proposed={"mode":"restored_previous_policy"}
+        else:
+            record=make_boundary(settings)
+            policy={**settings.data_policy,"enabled":True,"mode":"trusted_enterprise",
+                    "workflow_projection":True,"enterprise_boundary":str(receipt)}
+            proposed={"mode":"trusted_enterprise","ordinary_enterprise_body":True,
+                      "sharing_audience":"enterprise","credentials":"filtered",
+                      "explicit_restrictions":"preserved","model_config_sha256":record["model_config_sha256"]}
+        if args.apply:
+            with exclusive(Updater(settings).lock):
+                current=json.loads(path.read_text())
+                if not args.disable:
+                    if not backup.exists():
+                        atomic_json(backup,{"data_policy":current.get("data_policy",{})})
+                    atomic_json(receipt,record)
+                current["data_policy"]=policy
+                atomic_json(path,current)
+        return {"settings":str(path),"policy":proposed,"applied":args.apply,"restart_required":args.apply}
     if args.command == "install":
         from .installation import install
         return install(args)
