@@ -111,7 +111,11 @@ def seal(output: Path) -> dict:
     """Seal reviewed conflict resolutions; never implies runtime verification."""
     record = json.loads((output / "migration.json").read_text())
     source, candidate = Path(record["source"]), Path(record["candidate"])
-    resolutions = json.loads((output / "resolutions.json").read_text()) if record["conflicts"] else {}
+    resolutions = json.loads((output / "resolutions.json").read_text()) if (record["conflicts"] or record.get("omitted")) else {}
+    for omitted in record.get("omitted", []):
+        decision = resolutions.get("omitted:" + omitted["path"], {})
+        if decision.get("decision") != "omit" or not decision.get("reason"):
+            raise UpdateError("Omitted migration input needs an explicit resolution: " + omitted["path"])
     if source_inventory(source) != json.loads((output / "source-inventory.json").read_text()):
         raise UpdateError("Original Hermes changes no longer match the migration snapshot")
     for name in record["conflicts"]:

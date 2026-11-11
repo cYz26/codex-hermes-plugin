@@ -33,8 +33,13 @@ class Settings:
     checked_publication: bool = False
     site_manifest: Path | None = None
     runtime_extras: tuple[str, ...] = ()
+    proactive: bool = False
+    quality_checks: bool = False
+    retention_enabled: bool = False
 
     def __post_init__(self):
+        if any(not isinstance(value, bool) for value in (self.proactive,self.quality_checks,self.retention_enabled)):
+            raise ValueError("Learning and retention switches must be booleans")
         if self.capture_scope not in {"project", "global"}:
             raise ValueError("capture_scope must be project or global")
         if any(not Path(path).is_absolute() for path in self.excluded_projects):
@@ -104,8 +109,22 @@ class Settings:
         return str(path)  # Non-Git and projectless chats keep their actual host cwd.
 
     @classmethod
+    def configuration_path(cls, path: str | Path | None = None) -> Path:
+        explicit = path or os.environ.get("HERMES_LEARNING_CONFIG")
+        if explicit:
+            return Path(explicit).expanduser().absolute()
+        pointer = Path.home() / ".hermes-codex-learning/installation.json"
+        if pointer.exists():
+            binding = json.loads(pointer.read_text())
+            selected = binding.get("settings")
+            if binding.get("schema_version") != 1 or not isinstance(selected, str) or not Path(selected).is_absolute():
+                raise ValueError("Invalid installed learning configuration pointer")
+            return Path(selected)
+        return Path.home() / ".hermes-codex-learning/pilot/bridge.json"
+
+    @classmethod
     def load(cls, path: str | Path | None = None) -> Settings:
-        config = Path(path or os.environ.get("HERMES_LEARNING_CONFIG", Path.home() / ".hermes-codex-learning/pilot/bridge.json"))
+        config = cls.configuration_path(path)
         data = json.loads(config.read_text())
         return cls(
             home=Path(data["home"]).resolve(), project=Path(data["project"]).resolve(),
@@ -129,4 +148,7 @@ class Settings:
             checked_publication=data.get("checked_publication", False),
             site_manifest=Path(data["updates"]["site_manifest"]).resolve() if data.get("updates", {}).get("site_manifest") else None,
             runtime_extras=tuple(data.get("runtime_extras", [])),
+            proactive=data.get("learning", {}).get("proactive", False),
+            quality_checks=data.get("learning", {}).get("quality_checks", False),
+            retention_enabled=data.get("retention", {}).get("enabled", False),
         )

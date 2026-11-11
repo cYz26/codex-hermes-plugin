@@ -3,19 +3,20 @@
   "tag": "v0.23.0",
   "base_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
   "patch_file": "native-learning-api-v1.patch",
-  "patch_sha256": "60d1efddca0c30a98b1af8dfedbd241a54fc3d4a34dc6b77a813efe6ec90e843",
+  "patch_sha256": "3883591dfaa574d565df1f299aafb209086d5cde90baa0c9529c50f5ffe34bea",
   "replay_matches_working_source": true,
   "files": {
     "agent/background_review.py": "611f892375f747ad159938310051ef59ddbb6c86a786b9da8433ed876eaa3b95",
     "agent/codex_runtime.py": "3fc26a08e43138012b3750458b6dcf652070bcd1bc95d129790bd4826af8a051",
-    "agent/learning_api.py": "2eb900dcc86dc9f8968b263918ab256726f7af0b82c3f7fa94277107eabf6b3d",
-    "agent/learning_artifacts.py": "0dcb0544489e99979fc053ccbb5872ee98043200b7849bbbbd21944e7327fda9",
+    "agent/learning_api.py": "4f90d26c896b7402647b934f2d34db2068f5ab2068c7d14b3c5546fc7066d75f",
+    "agent/learning_artifacts.py": "93bcfd8b690f597bf240e59796282aa9903181f0a4009790a8f57c381750a5e6",
     "agent/learning_policy.py": "261d9e0ea1d5e09dc36687b931f8a8982fd95a911c5d32c11a7d674c8d6e67be",
     "agent/learning_results.py": "ad4443d06b67ae0b89123c7f60ebdc6d1f4c89e8b50e1c198e4178be9d907d03",
-    "agent/learning_runtime.py": "4d7daa7916e9c49394e3296257b0f2e10368d290be29ed73c2b24d6ba3356fe4",
-    "agent/learning_service.py": "eaea839cb928ec59ec959236a53b8bb6aad24ccf2e85fe87955b4af2c5ef513e",
+    "agent/learning_runtime.py": "a84b089b386ce309990615657be09f3232c05a88915f6127ee16367051b06ad4",
+    "agent/learning_service.py": "e73fc48817da22e50e87f83666bc63c4a6e5b5191f4816b8656026c9960457c6",
     "hermes_cli/plugin_isolation.py": "d58a128c34834185bb9903a85bcd33754867ac63084fe0f37329b8907a57c35b",
     "hermes_cli/plugins_capability_ctx.py": "aef315e73dd95d8887808e428856a148e91ad38732bf5c96db6a81f774dad86e",
+    "tests/agent/test_learning_cloud_contracts.py": "666b7e48bcef66318a10723d32a0efbc889344eeb09b7bf6f974b7f0a990c7bd",
     "tests/agent/test_learning_native_loop.py": "e65c52eca553dce9a230f36857ba0a672599e5f6caa445a093016bc113749d8a",
     "tests/agent/test_learning_service.py": "186bff89315de8577e45f506a3a9391cc299b5a0b61776aca9a981e822ccab73",
     "tests/hermes_cli/test_learning_profile_auth.py": "fc9af1e77755047303d0805f7c6ef751e529740a4226cfbc712618b34995ce6e",
@@ -24,12 +25,11 @@
   "previous_custom_inputs": [],
   "source_committed": false,
   "mechanism_review": {
-    "classification": "compatible",
-    "reason": "The complete pinned-source diff preserves native trigger counters, review dispatch/write guards, Learning API v1 storage and receipts, Curator, and the checkout-locked exact target selection contract. The direct API review now binds the same non-interactive secret-capture guard introduced by v0.23.0. No workflow redesign or data migration is needed; activation still requires independent native, bridge, and runtime verification.",
-    "baseline_commit": "b200f5bc60e31588ba2cb60e288029c4a54ba5fa",
-    "diff_sha256": "65388b6b3ebfd3c4796a0da5f27e430077651c2d00b581556b5929e711d04037",
-    "diff_complete": true,
-    "changed_files": 1223
+    "classification": "adapted",
+    "reason": "User-approved cloud 0.5.0 implementation: scoped semantic review, terminal failure evidence, receipt-free previews, bounded diagnostics and native-owned retention with identity tombstones. Existing native guards and model configuration remain in force.",
+    "agreed_plan": "docs/IMPLEMENTATION-0.5.0.zh-CN.md",
+    "approved_on": "2026-11-10",
+    "source_tree": "0d9d2654cb3de4d1c72b1c5cd137a5e13cf0fd77"
   },
   "native_updater": {
     "protocol": "resolve_source_target-v1",
@@ -38,5 +38,8 @@
       "hermes_cli/update_cmd.py": "a732b739a877d764a2ffed643ababc30d95df1613cccd6a63cea709c6e90823c",
       "hermes_cli/update_lock.py": "2e02db3e627de248b88d912c1f9421a40a738899ebdef9d93998ce8d09e01a8d"
     }
-  }
+  },
+  "additional_native_tests": [
+    "tests/agent/test_learning_cloud_contracts.py"
+  ]
 }

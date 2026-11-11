@@ -58,8 +58,10 @@ class SystemdTests(unittest.TestCase):
         args.start = True
         with patch("hermes_codex_learning.systemd.Path.home", return_value=self.home), \
              patch("hermes_codex_learning.systemd.subprocess.run") as run, \
+             patch("hermes_codex_learning.systemd.verify_service") as verify, \
              contextlib.redirect_stdout(io.StringIO()):
             systemd(args)
+        verify.assert_called_once()
         self.assertIn("Restart=on-failure", self.target.read_text())
         self.assertEqual([call.args[0] for call in run.call_args_list], [
             ["systemd-analyze", "--user", "verify", str(self.settings.state / (LABEL + ".service"))],

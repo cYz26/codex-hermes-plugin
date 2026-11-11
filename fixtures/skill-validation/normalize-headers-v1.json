@@ -1,0 +1,9 @@
+{
+  "id": "normalize-headers-v1",
+  "contract": "Read a JSON array of strings from stdin; emit the strings stripped and NFKC-normalized as a JSON array.",
+  "cases": [
+    {"input": [" ｕｓｅｒ＿ｉｄ ", "name"], "expected": ["user_id", "name"]},
+    {"input": ["Å", "ﬁeld", ""], "expected": ["Å", "field", ""]},
+    {"input": ["CaseSensitive", "  spaced  ", "①"], "expected": ["CaseSensitive", "spaced", "1"]}
+  ]
+}

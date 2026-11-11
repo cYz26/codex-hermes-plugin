@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "implementation_version": "0.5.1",
+  "source_commit": "e3dd03fbcf2c2534f81ddcd88784d5ed7debbc53",
+  "build": {
+    "version": "0.5.1",
+    "digest": "a26d74b7b1eae8bc2d3ee6c357fc177059a21b6ef0e4250f64f759d4d1c761f1"
+  },
+  "state": "cloud_acceptance_passed_observation_running",
+  "verification": {
+    "native": {
+      "files": 20,
+      "passed": 337,
+      "failed": 0
+    },
+    "bridge_integrated": {
+      "passed": 176,
+      "failed": 0
+    },
+    "real_worker_mcp_smoke": true,
+    "real_codex_cli": {
+      "A_tests": {
+        "initial_errors": 5,
+        "final_passed": 5,
+        "exit_code": 0,
+        "tests_unchanged": true
+      },
+      "A_capture": true,
+      "A_terminal_recovered": true,
+      "A_automatic_learning": "project_memory_written",
+      "readonly_context_with_original_never_policy": "passed",
+      "readonly_skill_load_with_original_never_policy": "passed"
+    },
+    "readonly_contract": {
+      "persistent_writes_during_skill_read": 0,
+      "confirmed_delivery_recorded_once": true,
+      "cross_project_and_tampered_receipts_rejected": true
+    },
+    "cloud_session_effects": {
+      "passed": true,
+      "checks": {
+        "A_failed_then_passed": true,
+        "B_recalled_A_memory": true,
+        "B_counterexample_failed_then_passed": true,
+        "C_loaded_new_project_skill": true,
+        "C_loaded_unicode_reference": true,
+        "C_failed_then_passed": true,
+        "cross_project_memory_withheld": true,
+        "shared_skill_delivery_confirmed": true,
+        "shared_skill_applied_to_synthetic_record": true,
+        "real_turns_captured": true
+      },
+      "evidence_sha256": "4efeb36271e52495301d49d5a14296c0cc8157d7eb82f6c791eac6eedf2ad9c2",
+      "scope": "real Linux Codex CLI; A project memory, B correction and new project skill, C skill/reference application; separate cross-project public skill use and memory isolation",
+      "A_tests": {
+        "before_errors": 5,
+        "after_passed": 5
+      },
+      "B_tests": {
+        "before_failures": 2,
+        "after_passed": 8
+      },
+      "C_tests": {
+        "before_failures": 4,
+        "after_passed": 8
+      },
+      "independent_counterexamples_passed": 6
+    },
+    "final_hook_trust": {
+      "ready": true,
+      "trusted": 7,
+      "checked_at": "2026-11-10T20:39:35.598288+08:00"
+    },
+    "final_runtime": {
+      "ready": true,
+      "state": "idle",
+      "error": null,
+      "build_matches": true
+    }
+  },
+  "fixes": [
+    "Normalize verified McpToolCall and FileChange terminal statuses",
+    "Revisit already captured terminal turns waiting for host results",
+    "Serve prepared skill snapshots without persistent writes; sign receipts and record actual delivery from trusted hooks",
+    "Declare MCP read/write annotations according to actual behavior",
+    "Preserve admitted MCP result content when supplementing terminal status and recover all already-captured terminal observations"
+  ],
+  "pending": {
+    "observation_24h": "running_final_build_window",
+    "macos_ui": "deferred_by_user"
+  },
+  "observation_expected_finish": "2026-11-11T20:34:43.005141+08:00",
+  "archive_sha256": "3567447d4c01828560ada2f4d1ede443623ce082348556f279c32782d78d8b80",
+  "limits": "Cloud CLI session effects and final-build hook trust passed. No Desktop UI or completed 24-hour observation is claimed.",
+  "qualification": {
+    "new_csv_skill": "project-scoped; global publication withheld for project-specific material",
+    "memory_replacement": "staged by native write guards; old memory retained",
+    "application_causation": "not inferred from loading and passing tests alone"
+  }
+}

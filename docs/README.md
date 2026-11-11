@@ -1,15 +1,18 @@
 # 文档索引
 
-当前实现为外围 **0.4.2** 与官方 **Hermes v0.23.0**＋Learning API v1 补丁。Linux／SSH 和本地 macOS 共用学习核心，以不同分支提供平台适配。真实验收记录按当时版本保留，不能把安装或离线测试改写成模型／App 验收。
+当前实现为外围 **0.6.0** 与官方 **Hermes v0.23.0**＋Learning API v1 补丁。Linux／SSH 和本地 macOS 共用学习核心，以不同分支提供平台适配。真实验收记录按当时版本保留，不能把安装或离线测试改写成模型／App 验收。
 
 ## 云端 Linux／SSH 分支
 
 | 文档 | 内容 |
 | --- | --- |
+| [企业专用环境学习](./ENTERPRISE-LEARNING.zh-CN.md) | 0.6.0 正文学习授权、企业内共享、配置绑定与恢复 |
+| [云端 0.5.0](./CLOUD-0.5.0.zh-CN.md) | 当前安装、主动学习、验证、通知协议及留存合同 |
+| [0.5.0 实施与验收](./IMPLEMENTATION-0.5.0.zh-CN.md) | 当前实现进度和分别记录的验收状态 |
 | [云端实现与分工](./CODEX-CLOUD-SELF-EVOLUTION.zh-CN.md) | 组件归属、平台边界和部署选择 |
 | [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md) | 初始化、systemd、诊断、自动适配和回退 |
 | [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md) | Mac 接收器安装、持久投递、只读明细和验收 |
-| [当前分支验证](../evidence/releases/cloud-0.4.2.json) | 本次离线测试与补丁验证 |
+| [0.4.2 分支验证](../evidence/releases/cloud-0.4.2.json) | 历史离线测试与补丁验证 |
 | [历史全局宿主报告](../ACCEPTANCE.linux-global.json) | 整理前 0.4.2／0.4.1 的验证摘要，机器标识与私有路径省略 |
 | [历史 Linux 试点](./LINUX-OPERATIONS.zh-CN.md) | 0.2.0 的运行记录及 [当时验收](../ACCEPTANCE.linux.json) |
 

@@ -76,9 +76,12 @@ def merge_event(store: Store, row: dict) -> dict | None:
         "user": "", "assistant": "", "tools": {}, "status": "running", "coverage": [],
     }
     if event.get('bridge_evidence_mode') == 'workflow-v1':
-        data['_evidence_mode'] = 'workflow-v1'
+        if data.get('_evidence_mode') != 'semantic-v2':
+            data['_evidence_mode'] = 'workflow-v1'
         from .workflow import USER
-        data['user'] = USER
+        data['user'] = data.get('user') or USER
+    elif event.get('bridge_evidence_mode') == 'semantic-v2':
+        data['_evidence_mode'] = 'semantic-v2'
     if name == "UserPromptSubmit":
         data["user"] = event.get("prompt", "")
         data["status"] = "running"
@@ -105,12 +108,12 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 from .workflow import OUTCOMES
                 status = response.get('outcome', 'unknown')
                 status = status if status in OUTCOMES else 'unknown'
-                process, gap = '', None
+                process, gap = event.get('bridge_process', ''), None
             arguments = event.get("tool_input") or {}
             if not isinstance(arguments, dict):
                 arguments = {}
                 data["coverage"] = sorted(set(data["coverage"]) | {"unrecognized_tool_input:" + tool_id})
-            polled = arguments.get("session_id") or arguments.get("cell_id")
+            polled = event.get("bridge_polled") or arguments.get("session_id") or arguments.get("cell_id")
             original = next((t for t in data["tools"].values()
                              if t.get("process") and str(t["process"]) == str(polled)), None)
             target_id = original["call_id"] if original else tool_id
@@ -120,6 +123,8 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 "call_id": target_id, "name": original["name"] if original else tool_name,
                 "arguments": original["arguments"] if original else arguments,
                 "result": response, "status": status, "process": process,
+                "action": original.get("action") if original else event.get("bridge_action"),
+                "test_key": original.get("test_key") if original else event.get("bridge_test_key"),
             }
             if gap:
                 data["coverage"] = sorted(set(data["coverage"]) | {gap + ":" + target_id})
@@ -146,6 +151,7 @@ def merge_event(store: Store, row: dict) -> dict | None:
         store.db.execute("INSERT INTO turns(id,payload,revision,stopped,activity) VALUES (?,?,?,?,?) "
                          "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,revision=excluded.revision,"
                          "stopped=excluded.stopped,activity=excluded.activity", (key, dumps(data), revision, stopped, now))
+        store.db.execute("INSERT OR REPLACE INTO latest_turns VALUES (?,?,?)", (session, key, now))
     return data
 
 

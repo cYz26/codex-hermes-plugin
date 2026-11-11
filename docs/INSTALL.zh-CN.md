@@ -1,5 +1,7 @@
 # 安装与更新
 
+Linux／SSH 的当前安装流程见 [云端 0.5.0](./CLOUD-0.5.0.zh-CN.md)。下文保留本地 macOS 路线；两者均需核对实际配置、构建身份与当前 hooks 信任。
+
 需要 Python 3.11+、Codex CLI 或带 Codex 的桌面 App，以及与 [兼容清单](../patches/compatibility.json) 匹配的 Hermes 源码。Codex 插件负责采集和召回；macOS 学习服务负责后台复盘。两个部分分别安装。
 
 ## Codex 插件

@@ -1,5 +1,5 @@
 diff --git a/agent/background_review.py b/agent/background_review.py
-index 9215d65d44e9c84f91c0a12808847e7baa9b6496..c6f7cd20fd8ccf3766cd841241c54a10a17128e5 100644
+index 9215d65d..c6f7cd20 100644
 --- a/agent/background_review.py
 +++ b/agent/background_review.py
 @@ -1161,6 +1161,7 @@ class _ReviewForkState:
@@ -29,7 +29,7 @@ index 9215d65d44e9c84f91c0a12808847e7baa9b6496..c6f7cd20fd8ccf3766cd841241c54a10
          # Publish completion as soon as the provider-capable phase has returned or startup
          # cancellation has fenced it out (unregister + finish are identity-scoped and idempotent).
 diff --git a/agent/codex_runtime.py b/agent/codex_runtime.py
-index cfc3b9c64d37fd6794d9313bbb3acc0495394e41..f47e2f1e6dbd28465c75ec0f03a69ea731aa418f 100644
+index cfc3b9c6..f47e2f1e 100644
 --- a/agent/codex_runtime.py
 +++ b/agent/codex_runtime.py
 @@ -706,10 +706,8 @@ def _finish_codex_turn(agent, turn, messages: list[dict[str, Any]], *, original_
@@ -47,10 +47,10 @@ index cfc3b9c64d37fd6794d9313bbb3acc0495394e41..f47e2f1e6dbd28465c75ec0f03a69ea7
          _call_guarded(getattr(agent, "_sync_external_memory_for_turn", None), "external memory sync raised", kwargs=dict(
 diff --git a/agent/learning_api.py b/agent/learning_api.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..27bc02e4bf63a155027f573280986f47971e77be
+index 00000000..35b67327
 --- /dev/null
 +++ b/agent/learning_api.py
-@@ -0,0 +1,37 @@
+@@ -0,0 +1,42 @@
 +"""Supported plugin-facing Learning API v1; all method results are serializable values."""
 +from __future__ import annotations
 +
@@ -74,8 +74,13 @@ index 0000000000000000000000000000000000000000..27bc02e4bf63a155027f573280986f47
 +    def run_review(self, handle: str, intent_id: str, *, attempt_id: str) -> dict:
 +        return self._service.run_review(handle, intent_id, attempt_id=attempt_id)
 +
-+    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None) -> dict:
-+        return self._service.read(kind=kind, name=name, file_path=file_path)
++    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None,
++             issue_receipt: bool = True, detail: str = "full", artifact_version: str | None = None) -> dict:
++        return self._service.read(kind=kind, name=name, file_path=file_path, issue_receipt=issue_receipt,
++                                  detail=detail, artifact_version=artifact_version)
++
++    def prune(self, *, retention_seconds: float = 30 * 86400, dry_run: bool = True) -> dict:
++        return self._service.prune(retention_seconds=retention_seconds, dry_run=dry_run)
 +
 +    def record_usage(self, token: str, evidence: dict) -> dict:
 +        return self._service.record_usage(token, evidence)
@@ -90,16 +95,17 @@ index 0000000000000000000000000000000000000000..27bc02e4bf63a155027f573280986f47
 +        return self._service.close(handle=handle, event_id=event_id)
 diff --git a/agent/learning_artifacts.py b/agent/learning_artifacts.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..5dc32296f2fc9fadf7b03c4d3753cb13b57d8f35
+index 00000000..abc93ee0
 --- /dev/null
 +++ b/agent/learning_artifacts.py
-@@ -0,0 +1,76 @@
+@@ -0,0 +1,110 @@
 +"""Read native learning artifacts without recording catalog scans as skill use."""
 +from __future__ import annotations
 +
 +import hashlib
 +import json
 +import shutil
++import re
 +from pathlib import Path
 +
 +
@@ -170,9 +176,42 @@ index 0000000000000000000000000000000000000000..5dc32296f2fc9fadf7b03c4d3753cb13
 +            "file_path": str(relative), "resource_dir": str(artifact), "files": files,
 +            "content_hash": files[str(relative)],
 +            **{k: result[k] for k in ("readiness_status", "compatibility", "deps_note") if k in result}}
++
++
++def snapshot(home: Path, name: str, version: str, file_path: str | None = None) -> dict:
++    import hermes_yaml as yaml
++    if not isinstance(version, str) or not re.fullmatch(r"[a-f0-9]{64}", version):
++        raise ValueError("Invalid artifact version")
++    root = home / "learning" / "artifacts" / version
++    if root.is_symlink() or not root.is_dir():
++        raise ValueError("Artifact snapshot is unavailable")
++    files = {}
++    for path in root.rglob("*"):
++        if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
++            raise ValueError("Artifact resource escapes its snapshot")
++        if path.is_file():
++            if path.stat().st_size > 2 * 1024 * 1024:
++                raise ValueError("Artifact resource is oversized")
++            files[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
++    if len(files) > 100 or fingerprint(files) != version or "SKILL.md" not in files:
++        raise ValueError("Artifact snapshot changed")
++    parts = (root / "SKILL.md").read_text().split("---", 2)
++    metadata = yaml.safe_load(parts[1]) if len(parts) == 3 else {}
++    if not isinstance(metadata, dict) or metadata.get("name") != name:
++        raise ValueError("Artifact snapshot belongs to a different skill")
++    relative = file_path or "SKILL.md"
++    if relative not in files:
++        raise ValueError("Unknown snapshot resource")
++    raw = (root / relative).read_bytes()
++    try:
++        content = raw.decode("utf-8")
++    except UnicodeDecodeError:
++        content = None
++    return {"name":name,"version":version,"file_path":relative,"resource_dir":str(root),"files":files,
++            "content":content,"content_hash":files[relative],"readiness_status":"available"}
 diff --git a/agent/learning_policy.py b/agent/learning_policy.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..18052db397d59015ba1ac09368968cabf51af4a2
+index 00000000..18052db3
 --- /dev/null
 +++ b/agent/learning_policy.py
 @@ -0,0 +1,10 @@
@@ -188,7 +227,7 @@ index 0000000000000000000000000000000000000000..18052db397d59015ba1ac09368968cab
 +    return due
 diff --git a/agent/learning_results.py b/agent/learning_results.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..f9f2fe2346e839aad1bdb46a2fc5d3fd10e9dbf8
+index 00000000..f9f2fe23
 --- /dev/null
 +++ b/agent/learning_results.py
 @@ -0,0 +1,67 @@
@@ -261,10 +300,10 @@ index 0000000000000000000000000000000000000000..f9f2fe2346e839aad1bdb46a2fc5d3fd
 +    return outcome
 diff --git a/agent/learning_runtime.py b/agent/learning_runtime.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..3639cafb5a94cb834911ddfa2b9d25635cd60cf7
+index 00000000..87186a10
 --- /dev/null
 +++ b/agent/learning_runtime.py
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,155 @@
 +"""Internal adapter to the native learning engine. No executor-specific transport here."""
 +from __future__ import annotations
 +
@@ -409,12 +448,23 @@ index 0000000000000000000000000000000000000000..3639cafb5a94cb834911ddfa2b9d2563
 +        agent.close()
 +        self.recalled.pop(handle, None)
 +        return {"provider_drain": drain}
++
++    def prune_scope(self, handle: str) -> None:
++        self.close_scope(handle)
++        from hermes_state import SessionDB
++        owned = self.db is None
++        db = self.db or SessionDB()
++        try:
++            db.delete_session(handle)
++        finally:
++            if owned:
++                db.close()
 diff --git a/agent/learning_service.py b/agent/learning_service.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01cd3921ca1
+index 00000000..70d255dc
 --- /dev/null
 +++ b/agent/learning_service.py
-@@ -0,0 +1,339 @@
+@@ -0,0 +1,411 @@
 +"""Learning API v1: profile-bound values, native execution, durable admission receipts.
 +
 +The learning journal owns admission/counters atomically. Native transcript projection is
@@ -487,6 +537,9 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +            version TEXT NOT NULL, status TEXT NOT NULL, evidence TEXT);
 +          CREATE TABLE IF NOT EXISTS closures (id TEXT PRIMARY KEY, handle TEXT NOT NULL,
 +            status TEXT NOT NULL, payload TEXT NOT NULL);
++          CREATE TABLE IF NOT EXISTS retired_observations(handle TEXT, turn TEXT, body_hash TEXT, event_id TEXT,
++            PRIMARY KEY(handle,turn,body_hash));
++          CREATE TABLE IF NOT EXISTS retired_scopes(handle TEXT PRIMARY KEY, revision INTEGER, retired_at REAL);
 +        """)
 +        with self.db:
 +            self.db.execute("PRAGMA user_version=1")
@@ -524,7 +577,7 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +        messages = [{"role": "user", "content": body["user"] if new_turn else
 +                     "[Supplemental external execution evidence for the prior turn; not a new user request.]"}]
 +        for tool in body.get("tools", []):
-+            if tool["call_id"] in known_calls or tool["status"] != "completed":
++            if tool["call_id"] in known_calls or tool["status"] not in {"completed", "failed", "interrupted"}:
 +                continue
 +            call_id = "external-" + fingerprint([body["source"], tool["call_id"]])[:32]
 +            messages.extend([
@@ -557,6 +610,13 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +            if body.get("status") not in {"completed", "interrupted"} or not isinstance(body.get("user"), str):
 +                raise ValueError("Only terminal observed turns are accepted")
 +            turn = body["source"]["turn"]
++            retired = self.db.execute("SELECT event_id FROM retired_observations WHERE handle=? AND turn=? AND body_hash=?",
++                                      (handle, turn, body_hash)).fetchone()
++            if retired:
++                receipt = json.loads(self.db.execute("SELECT payload FROM receipts WHERE id=?", (retired[0],)).fetchone()[0])
++                receipt = {**receipt, "id":event_id, "duplicate_of":retired[0]}
++                self.db.execute("INSERT INTO receipts VALUES (?,?)", (event_id, json.dumps(receipt)))
++                return receipt
 +            same = self.db.execute("SELECT id FROM observations WHERE handle=? AND turn=? AND body=?",
 +                                   (handle, turn, json.dumps(body, sort_keys=True))).fetchone()
 +            if same:
@@ -567,7 +627,7 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +            new_turn = not self.db.execute("SELECT 1 FROM observations WHERE handle=? AND turn=?", (handle, turn)).fetchone()
 +            known = {r[0] for r in self.db.execute("SELECT call_id FROM calls WHERE handle=? AND turn=?", (handle, turn))}
 +            messages = self._messages(body, event_id, new_turn, known)
-+            calls = {t["call_id"] for t in body.get("tools", []) if t["status"] == "completed"} - known
++            calls = {t["call_id"] for t in body.get("tools", []) if t["status"] in {"completed", "failed", "interrupted"}} - known
 +            ticks = self.runtime.tick(handle, json.loads(scope["source"]), scope["memory_count"], scope["skill_count"],
 +                                      new_turn=new_turn, tools=len(calls))
 +            revision = scope["revision"] + 1
@@ -649,7 +709,15 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +        return {**outcome, "id": attempt_id, "intent_id": intent_id}
 +
 +    @_bound
-+    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None) -> dict:
++    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None,
++             issue_receipt: bool = True, detail: str = "full", artifact_version: str | None = None) -> dict:
++        if kind == "capabilities":
++            return {"version":1, "artifact_preview":True, "bounded_status":True, "retention":True,"snapshot_delivery":True}
++        if kind == "retention_state":
++            with self.lock:
++                row = self.db.execute("SELECT r.revision>=s.revision retired FROM retired_scopes r "
++                                      "JOIN scopes s ON s.id=r.handle WHERE r.handle=?", (name,)).fetchone()
++                return {"retired":bool(row and row["retired"])}
 +        if kind == "context":
 +            from agent.learning_artifacts import context
 +            value = context(self.home)
@@ -670,13 +738,29 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +            value["version"] = fingerprint([value["version"], recalled])
 +            return value
 +        if kind == "skill":
-+            from agent.learning_artifacts import skill
-+            value = skill(self.home, name, file_path)
++            from agent.learning_artifacts import skill, snapshot
++            value = snapshot(self.home, name, artifact_version, file_path) if artifact_version else skill(self.home, name, file_path)
++            if not issue_receipt:
++                return value
 +            token = uuid.uuid4().hex
 +            with self.lock, self.db:
 +                self.db.execute("INSERT INTO deliveries VALUES (?,?,?,'issued',NULL)", (token, value["name"], value["version"]))
 +            return {**value, "delivery_token": token}
 +        if kind == "status":
++            if detail == "summary":
++                with self.lock:
++                    intents = [{**json.loads(r["payload"]), "status":r["status"]} for r in self.db.execute(
++                        "SELECT * FROM intents WHERE status IN ('queued','running','unknown') ORDER BY rowid LIMIT 100")]
++                    attempts = [{"id":r["id"],"run_status":r["status"]} for r in self.db.execute(
++                        "SELECT id,status FROM attempts ORDER BY rowid DESC LIMIT 10")]
++                    counts = {table:self.db.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
++                              for table in ("scopes","observations","attempts","deliveries")}
++                    usage = {key:self.db.execute("SELECT COALESCE(SUM(json_extract(payload,?)),0) FROM attempts",
++                                                  ("$.usage."+key,)).fetchone()[0]
++                             for key in ("input_tokens","output_tokens","cache_read_tokens","api_calls")}
++                    return {"version":1,"intents":intents,"attempts":attempts,"counts":counts,
++                            "usage":{"native_review_attempts":usage,"telemetry":"best_effort","paid_cost":None},
++                            "retention":{"scopes":self.db.execute("SELECT COUNT(*) FROM retired_scopes").fetchone()[0]}}
 +            with self.lock:
 +                intents = [{**json.loads(r["payload"]), "status": r["status"]} for r in self.db.execute("SELECT * FROM intents")]
 +                attempts = [{**json.loads(r["payload"]), "id": r["id"], "run_status": r["status"]} for r in self.db.execute("SELECT * FROM attempts")]
@@ -688,6 +772,44 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +                    "usage": {"source_execution": None, "native_auxiliary_by_session": self.runtime.usage(handles),
 +                              "external_provider_usage": None, "attempt_usage_overlaps_native_ledger": True}}
 +        raise ValueError("Unknown read request")
++
++    @_bound
++    def prune(self, *, retention_seconds: float = 30 * 86400, dry_run: bool = True) -> dict:
++        if not isinstance(dry_run, bool) or not 86400 <= retention_seconds <= 3650 * 86400:
++            raise ValueError("Retention requires a boolean preview and at least one day")
++        with self.lock:
++            rows = self.db.execute(
++                "SELECT s.id,s.revision FROM scopes s WHERE s.activity<? AND s.reviewed>=s.revision "
++                "AND NOT EXISTS (SELECT 1 FROM intents i WHERE i.handle=s.id AND i.status IN ('queued','running','unknown')) "
++                "AND NOT EXISTS (SELECT 1 FROM observations o WHERE o.handle=s.id AND o.projection!='projected') "
++                "AND NOT EXISTS (SELECT 1 FROM retired_scopes r WHERE r.handle=s.id AND r.revision>=s.revision) "
++                "ORDER BY s.activity LIMIT 100", (time.time()-retention_seconds,)).fetchall()
++            result = {"eligible_scopes":len(rows), "eligible_handles":[row["id"] for row in rows],
++                      "retired_scopes":0, "dry_run":dry_run}
++            if dry_run:
++                return result
++            for row in rows:
++                # Native projection storage owns its own retirement. Repeated deletion
++                # after interruption is safe; journal tombstones commit afterward.
++                self.runtime.prune_scope(row["id"])
++                with self.db:
++                    for observation in self.db.execute("SELECT id,turn,body FROM observations WHERE handle=?", (row["id"],)).fetchall():
++                        body = json.loads(observation["body"])
++                        if body.get("retired"):
++                            continue
++                        self.db.execute("INSERT OR IGNORE INTO retired_observations VALUES (?,?,?,?)",
++                                        (row["id"],observation["turn"],fingerprint(body),observation["id"]))
++                    self.db.execute("UPDATE observations SET body=?,messages='[]' WHERE handle=?",
++                                    (json.dumps({"retired":True}),row["id"]))
++                    for attempt in self.db.execute("SELECT a.id,a.payload FROM attempts a JOIN intents i ON a.intent=i.id WHERE i.handle=?",
++                                                    (row["id"],)).fetchall():
++                        value = json.loads(attempt["payload"])
++                        summary = {key:value[key] for key in ("run_status","usage","id","intent_id") if key in value}
++                        summary.update(retired=True, applied_count=len(value.get("applied", [])), staged_count=len(value.get("staged", [])))
++                        self.db.execute("UPDATE attempts SET payload=? WHERE id=?", (json.dumps(summary),attempt["id"]))
++                    self.db.execute("INSERT OR REPLACE INTO retired_scopes VALUES (?,?,?)", (row["id"],row["revision"],time.time()))
++                result["retired_scopes"] += 1
++            return result
 +
 +    @_bound
 +    def record_usage(self, token: str, evidence: dict) -> dict:
@@ -755,7 +877,7 @@ index 0000000000000000000000000000000000000000..4ba54beeafbf1c5813e2070f06f6b01c
 +            self.db.execute("UPDATE closures SET status='closed',payload=? WHERE id=?", (json.dumps(result), event_id))
 +        return {"status": "closed", **result}
 diff --git a/hermes_cli/plugin_isolation.py b/hermes_cli/plugin_isolation.py
-index b6014d539468d27a731c69364d1e90bc87e20c69..0e71f45183ad7e02b55084103e22e53895beb7d1 100644
+index b6014d53..0e71f451 100644
 --- a/hermes_cli/plugin_isolation.py
 +++ b/hermes_cli/plugin_isolation.py
 @@ -33,6 +33,7 @@ _ISOLATION_MODES = frozenset({ISOLATION_IN_PROCESS, ISOLATION_HOST})
@@ -767,7 +889,7 @@ index b6014d539468d27a731c69364d1e90bc87e20c69..0e71f45183ad7e02b55084103e22e538
      "register_browser_page_backend": "browser-vault fill scripts carry credentials that stay in the Hermes process",
      "register_platform": "platform adapters run on the gateway's event loop with native SDK clients",
 diff --git a/hermes_cli/plugins_capability_ctx.py b/hermes_cli/plugins_capability_ctx.py
-index 8aa55ff30f6412b4d31565748b7d360c05e158fd..5bf7889ce5d2df027e0256d05588f03136f4059b 100644
+index 8aa55ff3..5bf7889c 100644
 --- a/hermes_cli/plugins_capability_ctx.py
 +++ b/hermes_cli/plugins_capability_ctx.py
 @@ -16,6 +16,22 @@ class PluginCapabilityCtxMixin:
@@ -793,9 +915,104 @@ index 8aa55ff30f6412b4d31565748b7d360c05e158fd..5bf7889ce5d2df027e0256d05588f031
      def has_capability(self, capability: str) -> bool:
          """True when *capability* is live for this plugin (probe, then degrade gracefully). Bundled
          plugins are trusted for ``tools.override``; otherwise granted_capabilities or the legacy
+diff --git a/tests/agent/test_learning_cloud_contracts.py b/tests/agent/test_learning_cloud_contracts.py
+new file mode 100644
+index 00000000..02a81804
+--- /dev/null
++++ b/tests/agent/test_learning_cloud_contracts.py
+@@ -0,0 +1,89 @@
++import json
++import time
++import pytest
++
++
++class Runtime:
++    def __init__(self):
++        self.projects, self.retired = [], []
++    def tick(self, handle, source, memory_count, skill_count, **kwargs):
++        return dict(memory=False,skills=False,memory_count=memory_count,skill_count=skill_count)
++    def project(self, handle, source, messages, **kwargs):
++        self.projects.extend(messages)
++        return "not_configured"
++    def review(self, *args):
++        return dict(run_status="completed",applied=[],staged=[],uncertain=[])
++    def maintenance(self, *args):
++        return {}
++    def usage(self, *args):
++        return None
++    def close(self):
++        return {}
++    def prune_scope(self, handle):
++        self.retired.append(handle)
++
++
++@pytest.fixture
++def service(tmp_path, monkeypatch):
++    from agent import learning_runtime
++    from agent.learning_service import LearningService
++    monkeypatch.setattr(learning_runtime, "NativeLearningRuntime", Runtime)
++    api = LearningService(tmp_path, "cloud-contract")
++    yield api
++    api.close()
++
++
++def observation():
++    return {"source":{"host":"fixture","project":"/fixture","chat":"c","turn":"t"},
++            "user":"Verify the failure","assistant":"Observed failure","status":"completed",
++            "tools":[{"call_id":"failed-call","name":"terminal","arguments":{},"result":"synthetic failure","status":"failed"}]}
++
++
++def test_failed_terminal_execution_is_in_review_evidence(service):
++    body = observation()
++    handle = service.open({k:v for k,v in body["source"].items() if k != "turn"})["handle"]
++    service.observe(handle,body,event_id="first")
++    assert any(m.get("role") == "tool" and "synthetic failure" in m["content"] for m in service.runtime.projects)
++
++
++def test_retention_preserves_identity_and_does_not_replay_processed_body(service):
++    body = observation()
++    handle = service.open({k:v for k,v in body["source"].items() if k != "turn"})["handle"]
++    service.observe(handle,body,event_id="first")
++    intent = service.maintenance(handle=handle,idle_flush=True)["intent"]
++    service.run_review(handle,intent,attempt_id="review")
++    service.db.execute("UPDATE scopes SET activity=?", (time.time()-40*86400,))
++    service.db.commit()
++    assert service.prune(dry_run=True)["eligible_scopes"] == 1
++    assert service.prune(dry_run=False)["retired_scopes"] == 1
++    assert service.observe(handle,body,event_id="late-duplicate")["duplicate_of"] == "first"
++    row = service.db.execute("SELECT body,messages FROM observations").fetchone()
++    assert "synthetic failure" not in row["body"] + row["messages"]
++    assert service.read(kind="status", detail="summary")["retention"]["scopes"] == 1
++
++
++def test_internal_skill_preview_does_not_issue_a_delivery(service, monkeypatch):
++    from agent import learning_artifacts
++    monkeypatch.setattr(learning_artifacts, "skill", lambda *a: {"name":"fixture","version":"v1"})
++    assert "delivery_token" not in service.read(kind="skill",name="fixture",issue_receipt=False)
++    assert service.db.execute("SELECT COUNT(*) FROM deliveries").fetchone()[0] == 0
++    assert service.read(kind="skill",name="fixture")["delivery_token"]
++
++
++def test_published_snapshot_delivery_records_its_actual_version(service):
++    from agent.learning_artifacts import fingerprint
++    import hashlib
++    content = "---\nname: fixture\ndescription: Synthetic snapshot.\n---\nSynthetic procedure."
++    files = {"SKILL.md":hashlib.sha256(content.encode()).hexdigest()}
++    version = fingerprint(files)
++    artifact = service.home/"learning/artifacts"/version
++    artifact.mkdir(parents=True)
++    (artifact/"SKILL.md").write_text(content)
++    value = service.read(kind="skill",name="fixture",artifact_version=version)
++    row = service.db.execute("SELECT version FROM deliveries WHERE token=?", (value["delivery_token"],)).fetchone()
++    assert row["version"] == version
++    with pytest.raises(ValueError):
++        service.read(kind="skill",name="different",artifact_version=version)
++    (artifact/"SKILL.md").write_text(content+"changed")
++    with pytest.raises(ValueError):
++        service.read(kind="skill",name="fixture",artifact_version=version)
 diff --git a/tests/agent/test_learning_native_loop.py b/tests/agent/test_learning_native_loop.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..ef7a6bc18b9656c37f35d86be33cb5255039a028
+index 00000000..ef7a6bc1
 --- /dev/null
 +++ b/tests/agent/test_learning_native_loop.py
 @@ -0,0 +1,127 @@
@@ -928,7 +1145,7 @@ index 0000000000000000000000000000000000000000..ef7a6bc18b9656c37f35d86be33cb525
 +        runtime.close()
 diff --git a/tests/agent/test_learning_service.py b/tests/agent/test_learning_service.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..7152cbc3962bd8c61e08b5ce1cb7693293d9386a
+index 00000000..7152cbc3
 --- /dev/null
 +++ b/tests/agent/test_learning_service.py
 @@ -0,0 +1,175 @@
@@ -1109,7 +1326,7 @@ index 0000000000000000000000000000000000000000..7152cbc3962bd8c61e08b5ce1cb76932
 +    assert "新更新技能：build-verify" in service.read(kind="context")["summary"]
 diff --git a/tests/hermes_cli/test_learning_profile_auth.py b/tests/hermes_cli/test_learning_profile_auth.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..93ef7e07058512db544e043ba11aa2d51f71775f
+index 00000000..93ef7e07
 --- /dev/null
 +++ b/tests/hermes_cli/test_learning_profile_auth.py
 @@ -0,0 +1,78 @@
@@ -1193,7 +1410,7 @@ index 0000000000000000000000000000000000000000..93ef7e07058512db544e043ba11aa2d5
 +        api.close()
 diff --git a/tests/hermes_cli/test_plugin_learning_api.py b/tests/hermes_cli/test_plugin_learning_api.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..bd2859dc005f74fc57c1d73c2d11fd1a9c7e1089
+index 00000000..bd2859dc
 --- /dev/null
 +++ b/tests/hermes_cli/test_plugin_learning_api.py
 @@ -0,0 +1,35 @@

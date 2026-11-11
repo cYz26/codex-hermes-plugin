@@ -62,6 +62,14 @@ def _tokens(text: str) -> set[str]:
     terms = set(re.findall(r"[a-z0-9_]{3,}", text.lower()))
     for chunk in re.findall(r"[\u4e00-\u9fff]+", text):
         terms.update(chunk[i:i + 2] for i in range(len(chunk) - 1))
+    for aliases in (
+        {"测试","验证","test","tests","verify","verification","validate","validation"},
+        {"修复","fix","repair"}, {"错误","失败","error","failure","failed"},
+        {"部署","deploy","deployment"}, {"安装","install","installation"},
+        {"表头","header","headers"}, {"规范化","normalize","normalization"},
+    ):
+        if terms & aliases or any(word in text for word in aliases if not word.isascii()):
+            terms.update(word for word in aliases if word.isascii())
     return terms
 
 
@@ -69,26 +77,41 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
     """Do not expose unscoped native/provider memory in global Codex recall."""
     index = context.get("bridge_provenance", {})
     selected = {}
+    active_boundary=context.get("active_enterprise_boundary")
     for key, target, entry in memory_entries(context):
+        required=context.get("enterprise_memory_boundaries",{}).get(key)
+        if required and required!=active_boundary:
+            continue
         if project and index.get("memory", {}).get(key, {}).get("project") == project:
             selected.setdefault(target, []).append(entry)
     memories = {key: ENTRY_DELIMITER.join(entries) for key, entries in selected.items()}
     terms = _tokens(query[:4000])
     catalog, ranked = [], []
     for skill in context.get("skills", []):
+        required=context.get("enterprise_skill_boundaries",{}).get(skill["name"])
+        known_publication=context.get("publications",{}).get(skill["name"],{})
+        if known_publication.get("audience")=="enterprise":
+            required=known_publication.get("boundary_id")
+        if required and required!=active_boundary:
+            continue
         origins = index.get("skills", {}).get(skill["name"], {}).get("projects", [])
         owns_private = origins == [project]
         if context.get("checked_publication") and not owns_private:
             publication = context.get("publications", {}).get(skill["name"])
             if not publication:
                 continue
+            if publication.get("audience")=="enterprise" and publication.get("boundary_id")!=active_boundary:
+                continue
             skill = publication["catalog_entry"]
-        score = len(terms & _tokens(skill["name"] + " " + skill.get("description", "")))
+        score = len(terms & _tokens(skill["name"] + " " + skill.get("description", "") + " " + " ".join(skill.get("aliases", []))))
         item = {**skill, "source_projects": origins,
                 "scope": "shared_skill_with_source_provenance" if origins else "native_catalog"}
         if context.get("checked_publication"):
             item["source_projects"] = [project] if owns_private else []
             item["scope"] = "worktree" if owns_private else "global"
+            publication=context.get("publications",{}).get(skill["name"],{})
+            if required or publication.get("audience")=="enterprise":
+                item.update(audience="enterprise",boundary_id=required or publication.get("boundary_id"))
         # Cross-project learned skills require a relevant query, or an explicit skill_load.
         if not origins or project in origins or score:
             catalog.append(item)

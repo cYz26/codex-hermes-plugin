@@ -59,6 +59,15 @@ def project_event(payload: dict) -> dict:
             response = payload.get('tool_response')
             # Free-form result text is not an authoritative exit status.
             state = _result_state(name, response)[0] if isinstance(response, dict) else 'unknown'
+            if isinstance(response, dict):
+                process = _result_state(name, response)[1]
+                if process:
+                    result['bridge_process'] = digest([payload.get('session_id'), process])
+        args = payload.get('tool_input')
+        if isinstance(args, dict):
+            polled = args.get('session_id', args.get('cell_id'))
+            if isinstance(polled, (str, int)) and not isinstance(polled, bool):
+                result['bridge_polled'] = digest([payload.get('session_id'), str(polled)])
         result['tool_response'] = {'outcome': state if state in OUTCOMES else 'unknown'}
     return result
 
