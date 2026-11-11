@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import platform
 import plistlib
 import subprocess
 import sys
@@ -118,41 +117,10 @@ def launchd(args) -> int:
 
 
 def install_notifier() -> int:
-    from .notify import APP_EXECUTABLE, APP_ID, APP_NAME, notifier_app
+    from .macos_bundle import install_notification_app
 
-    app = notifier_app()
-    source = Path(__file__).resolve().parents[2] / "macos/HermesLearningNotifier.swift"
-    app.parent.mkdir(parents=True, exist_ok=True)
-    if app.exists():
-        installed = plistlib.loads((app / "Contents/Info.plist").read_bytes())
-        if installed.get("CFBundleIdentifier") != APP_ID:
-            raise FileExistsError(str(app))
-
-    with tempfile.TemporaryDirectory(prefix=".hermes-learning-", dir=app.parent) as staging:
-        candidate = Path(staging) / app.name
-        binary = candidate / "Contents" / "MacOS" / APP_EXECUTABLE
-        binary.parent.mkdir(parents=True)
-        (candidate / "Contents/Info.plist").write_bytes(plistlib.dumps({
-            "CFBundleIdentifier": APP_ID, "CFBundleExecutable": APP_EXECUTABLE,
-            "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "LSMinimumSystemVersion": "12.0",
-            "LSUIElement": True,
-        }))
-        target = f"{platform.machine()}-apple-macosx12.0"
-        subprocess.run(["/usr/bin/xcrun", "swiftc", "-target", target, "-O", str(source), "-o", str(binary)], check=True)
-        subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(candidate)], check=True)
-        backup = Path(staging) / "previous.app"
-        if app.exists():
-            app.rename(backup)
-        try:
-            candidate.rename(app)
-        except OSError:
-            if backup.exists():
-                backup.rename(app)
-            raise
-
-    subprocess.run(["/usr/bin/open", "-gnj", "-a", str(app), "--args", "--authorize"], check=True)
-    print(app)
+    result = install_notification_app(Path(__file__).resolve().parents[2])
+    print(result["app"])
     return 0
 
 

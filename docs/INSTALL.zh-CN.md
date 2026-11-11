@@ -39,7 +39,9 @@ python3 -B -m pm.build_env --source . --out /absolute/learning/runtime --group d
 python3 -B scripts/bridge launchd --settings /absolute/learning/pilot/bridge.json --start
 ```
 
-可选：运行 `scripts/bridge install-notifier` 安装 **Hermes 学习** 通知 App，并在系统设置允许通知。
+可选：运行 `scripts/bridge install-notifier` 安装 **Hermes 学习** 通知 App。安装器使用[现有插件图标](./design/hermes-learning-icon/README.md)，并采用新的发送方标识 `com.cy.hermes-learning-receipts` 刷新应用注册信息。新通知的实际图标显示仍需在 Mac 上核对。
+
+已有通知 App 时，重新运行此命令即可迁移。首次迁移按 macOS 提示允许「Hermes 学习」发送通知；授权成功并等待运行中的通知 App 退出后才替换。旧发送方保留在 `~/Applications/.hermes-learning-legacy/Hermes 学习.app` 并重新注册，供历史通知打开回执。
 
 ## 更新现有学习服务
 
