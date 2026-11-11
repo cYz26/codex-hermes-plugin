@@ -16,7 +16,10 @@ class NativeScopedContractTests(unittest.TestCase):
                 "--source",os.environ["HERMES_LEARNING_NATIVE_SOURCE"],"--workspace",str(Path(temporary)/"active"),
                 "--explicit"],capture_output=True,text=True,timeout=180)
             self.assertEqual(result.returncode,0,result.stdout[-6000:]+result.stderr[-3000:])
-            self.assertTrue(json.loads(result.stdout.strip().splitlines()[-1])["passed"])
+            outcome = json.loads(result.stdout.strip().splitlines()[-1])
+            self.assertTrue(outcome["passed"])
+            self.assertEqual(outcome["summary_review_requests"], 2)
+            self.assertGreater(outcome["requests"], outcome["summary_review_requests"])
 
     @unittest.skipUnless(os.environ.get("HERMES_LEARNING_NATIVE_SOURCE"), "Runs in the verified native candidate gate")
     def test_enterprise_scope_shares_internally_and_revokes_on_model_change(self):
