@@ -21,6 +21,8 @@ def run(settings, store, api, *, dry_run=True):
             store.set("retention:last",{**result,"at":time.time()})
         return result
     result["native"] = api.prune(retention_seconds=30*86400, dry_run=dry_run)
+    from .learning_requests import retire
+    result["explicit_learning"] = retire(store, cutoff, dry_run=dry_run)
     rows = store.db.execute("SELECT id,payload FROM turns WHERE activity<? AND observed_revision=revision "
                             "AND json_extract(payload,'$.status') IN ('completed','interrupted') ORDER BY activity LIMIT 1000",
                             (cutoff,)).fetchall()

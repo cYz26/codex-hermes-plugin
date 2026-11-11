@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes 主动复盘"
+  short_description: "按要求复盘当前任务，提炼项目记忆和可复用技能"
+  default_prompt: "Use $hermes-refine to learn from the task we just completed."

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 
 class NativeReviewGuardTests(unittest.TestCase):
-    def exercise(self, *, tag="v0.23.0", fail=False):
+    def exercise(self, *, tag="v0.23.0", fail=False, enabled=True, intent=None):
         root = Path(__file__).resolve().parents[1]
         manifest_path = root / "patches" / tag / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
@@ -32,11 +32,12 @@ class NativeReviewGuardTests(unittest.TestCase):
                 capture.reset(token)
         seen = []
         def fork(*args):
+            self.fork_details = {"prompt":args[2], "attended":args[-1]}
             seen.append(capture.get()("FIXTURE_KEY", "synthetic request"))
             if fail:
                 raise RuntimeError("fixture failure")
         review = types.SimpleNamespace(
-            load_background_review_settings=lambda: (True, {}), _parent_can_emit_tool_calls=lambda _: True,
+            load_background_review_settings=lambda: (enabled, {}), _parent_can_emit_tool_calls=lambda _: True,
             _ReviewForkState=lambda: types.SimpleNamespace(review_agent=None),
             _PROMPT_NAME_BY_SCOPE={(True, True): "prompt"}, prepare_background_review_run=lambda _: {},
             _set_thread_approval_callback=lambda _: None, _bg_review_auto_deny=lambda *_: False,
@@ -51,7 +52,7 @@ class NativeReviewGuardTests(unittest.TestCase):
         runtime = namespace["NativeLearningRuntime"]()
         runtime.agent = lambda *_: types.SimpleNamespace(prompt="fixture")
         with patch.dict(sys.modules, modules), patch.object(namespace["logger"], "exception"):
-            result = runtime.review("fixture", {}, [], {"memory": True, "skills": True})
+            result = runtime.review("fixture", {}, [], intent or {"memory": True, "skills": True})
         return result, seen, capture.get() is interactive
 
     def test_unattended_direct_review_never_uses_interactive_secret_capture(self):
@@ -69,3 +70,17 @@ class NativeReviewGuardTests(unittest.TestCase):
                 self.assertEqual(result["run_status"], "failed")
                 self.assertEqual(seen, [None])
                 self.assertTrue(restored)
+
+    def test_manual_focus_runs_when_automatic_reviews_are_disabled_without_elevating_writes(self):
+        for tag in ("v0.23.0", "v0.23.1"):
+            with self.subTest(tag=tag):
+                result, seen, restored = self.exercise(tag=tag, enabled=False, intent={"memory":True,"skills":True,
+                    "reason":"user_request","focus":"Only retain the verified retry rule","attended":False})
+                self.assertEqual(result["run_status"], "completed")
+                self.assertIn("Only retain the verified retry rule", self.fork_details["prompt"])
+                self.assertFalse(self.fork_details["attended"])
+                self.assertEqual(seen, [None])
+                self.assertTrue(restored)
+                result, seen, _ = self.exercise(tag=tag, enabled=False)
+                self.assertEqual(result["reason"], "native_review_disabled")
+                self.assertEqual(seen, [])

@@ -47,10 +47,10 @@ index cfc3b9c6..f47e2f1e 100644
          _call_guarded(getattr(agent, "_sync_external_memory_for_turn", None), "external memory sync raised", kwargs=dict(
 diff --git a/agent/learning_api.py b/agent/learning_api.py
 new file mode 100644
-index 00000000..35b67327
+index 00000000..3196dcfd
 --- /dev/null
 +++ b/agent/learning_api.py
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,50 @@
 +"""Supported plugin-facing Learning API v1; all method results are serializable values."""
 +from __future__ import annotations
 +
@@ -73,6 +73,14 @@ index 00000000..35b67327
 +
 +    def run_review(self, handle: str, intent_id: str, *, attempt_id: str) -> dict:
 +        return self._service.run_review(handle, intent_id, attempt_id=attempt_id)
++
++    def request_review(self, handle: str, *, request_id: str, messages: list[dict], focus: str = "",
++                       memory: bool = True, skills: bool = True, attended: bool = False) -> dict:
++        return self._service.request_review(handle, request_id=request_id, messages=messages,
++                                            focus=focus, memory=memory, skills=skills, attended=attended)
++
++    def cancel_request(self, request_id: str) -> dict:
++        return self._service.cancel_request(request_id)
 +
 +    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None,
 +             issue_receipt: bool = True, detail: str = "full", artifact_version: str | None = None) -> dict:
@@ -300,10 +308,10 @@ index 00000000..f9f2fe23
 +    return outcome
 diff --git a/agent/learning_runtime.py b/agent/learning_runtime.py
 new file mode 100644
-index 00000000..87186a10
+index 00000000..187cd028
 --- /dev/null
 +++ b/agent/learning_runtime.py
-@@ -0,0 +1,155 @@
+@@ -0,0 +1,159 @@
 +"""Internal adapter to the native learning engine. No executor-specific transport here."""
 +from __future__ import annotations
 +
@@ -383,22 +391,26 @@ index 00000000..87186a10
 +
 +        agent = self.agent(handle, source)
 +        enabled, task = review.load_background_review_settings()
-+        if not enabled:
++        explicit = intent.get("reason") == "user_request"
++        if not enabled and not explicit:
 +            return {"run_status": "deferred", "reason": "native_review_disabled"}
 +        if not review._parent_can_emit_tool_calls(agent) and not review._resolve_review_runtime(agent, task).get("routed"):
 +            return {"run_status": "deferred", "reason": "native_tools_unavailable"}
 +        from run_agent import _review_should_defer
-+        if _review_should_defer(agent, task):
++        if not explicit and _review_should_defer(agent, task):
 +            from agent.review_idle_queue import _managed_server_idle
 +            if not _managed_server_idle():
 +                return {"run_status": "deferred", "reason": "native_local_model_busy"}
 +        st, error = review._ReviewForkState(), None
 +        prompt = getattr(agent, review._PROMPT_NAME_BY_SCOPE[(intent["memory"], intent["skills"])])
++        if explicit and intent.get("focus"):
++            prompt += "\n\nUser-requested learning focus (within the configured project and tool scope):\n" + intent["focus"]
 +        run = review.prepare_background_review_run(agent)
 +        review._set_thread_approval_callback(review._bg_review_auto_deny)
 +        try:
 +            with thread_scoped_silence(), bind_turn_secret_capture(review._bg_review_skip_secret):
-+                review._run_review_fork(agent, messages, prompt, task, run, st, intent["memory"], False)
++                review._run_review_fork(agent, messages, prompt, task, run, st, intent["memory"],
++                                       explicit and intent.get("attended", False))
 +        except Exception as exc:
 +            logger.exception("Native learning review failed")
 +            error = f"{type(exc).__name__}: {exc}"
@@ -461,10 +473,10 @@ index 00000000..87186a10
 +                db.close()
 diff --git a/agent/learning_service.py b/agent/learning_service.py
 new file mode 100644
-index 00000000..70d255dc
+index 00000000..1656576f
 --- /dev/null
 +++ b/agent/learning_service.py
-@@ -0,0 +1,411 @@
+@@ -0,0 +1,494 @@
 +"""Learning API v1: profile-bound values, native execution, durable admission receipts.
 +
 +The learning journal owns admission/counters atomically. Native transcript projection is
@@ -540,6 +552,8 @@ index 00000000..70d255dc
 +          CREATE TABLE IF NOT EXISTS retired_observations(handle TEXT, turn TEXT, body_hash TEXT, event_id TEXT,
 +            PRIMARY KEY(handle,turn,body_hash));
 +          CREATE TABLE IF NOT EXISTS retired_scopes(handle TEXT PRIMARY KEY, revision INTEGER, retired_at REAL);
++          CREATE TABLE IF NOT EXISTS explicit_reviews(id TEXT PRIMARY KEY, intent TEXT NOT NULL UNIQUE,
++            fingerprint TEXT NOT NULL, messages TEXT NOT NULL, created REAL NOT NULL);
 +        """)
 +        with self.db:
 +            self.db.execute("PRAGMA user_version=1")
@@ -667,6 +681,60 @@ index 00000000..70d255dc
 +            self.db.execute("UPDATE observations SET projection='projected',provider=? WHERE id=?", (provider, identity))
 +
 +    @_bound
++    def request_review(self, handle: str, *, request_id: str, messages: list[dict], focus: str = "",
++                       memory: bool = True, skills: bool = True, attended: bool = False) -> dict:
++        """Queue an admitted immutable snapshot, independently of automatic review counters.
++
++        The owning integration admits the evidence and authorizes the write scope. Explicit
++        scheduling alone does not authorize attended memory replacement/removal.
++        """
++        if not isinstance(request_id, str) or not request_id or len(request_id) > 128:
++            raise ValueError("Invalid request identity")
++        if not isinstance(focus, str) or len(focus.encode()) > 16384:
++            raise ValueError("Invalid review focus")
++        if any(type(v) is not bool for v in (memory, skills, attended)) or not (memory or skills):
++            raise ValueError("Invalid review scope")
++        if not isinstance(messages, list) or not messages or any(not isinstance(m, dict) or
++                m.get("role") not in {"user", "assistant", "tool"} for m in messages):
++            raise ValueError("A bounded evidence snapshot is required")
++        snapshot = json.dumps(messages, ensure_ascii=False)
++        if len(snapshot.encode()) > 65536:
++            raise ValueError("Review snapshot exceeds 64 KiB")
++        signature = fingerprint([handle, messages, focus, memory, skills, attended])
++        with self.lock, self.db:
++            scope = self._scope(handle)
++            old = self.db.execute("SELECT * FROM explicit_reviews WHERE id=?", (request_id,)).fetchone()
++            if old:
++                if old["fingerprint"] != signature:
++                    raise ValueError("Explicit request identity conflict")
++                row = self.db.execute("SELECT payload FROM intents WHERE id=?", (old["intent"],)).fetchone()
++                return json.loads(row[0])
++            if self.db.execute("SELECT 1 FROM intents WHERE handle=? AND status='unknown'", (handle,)).fetchone():
++                raise ValueError("An uncertain review in this scope requires inspection before another request")
++            intent_id = fingerprint(["user_request", request_id, handle])
++            value = {"id": intent_id, "handle": handle, "revision": scope["revision"], "memory": memory,
++                     "skills": skills, "reason": "user_request", "request_id": request_id,
++                     "focus": focus, "attended": attended}
++            self.db.execute("INSERT INTO explicit_reviews VALUES (?,?,?,?,?)",
++                            (request_id, intent_id, signature, snapshot, time.time()))
++            self.db.execute("INSERT INTO intents VALUES (?,?,?,'queued',?)",
++                            (intent_id, handle, scope["revision"], json.dumps(value)))
++            self.db.execute("UPDATE scopes SET activity=? WHERE id=?", (time.time(), handle))
++            return value
++
++    @_bound
++    def cancel_request(self, request_id: str) -> dict:
++        with self.lock, self.db:
++            row = self.db.execute("SELECT i.id,i.status FROM intents i JOIN explicit_reviews e ON e.intent=i.id WHERE e.id=?",
++                                  (request_id,)).fetchone()
++            if row is None:
++                raise ValueError("Unknown explicit request")
++            if row["status"] == "queued":
++                self.db.execute("UPDATE intents SET status='cancelled' WHERE id=?", (row["id"],))
++                return {"status": "cancelled", "rollback": False}
++            return {"status": row["status"], "rollback": False}
++
++    @_bound
 +    def run_review(self, handle: str, intent_id: str, *, attempt_id: str) -> dict:
 +        with self.lock, self.db:
 +            previous = self.db.execute("SELECT * FROM attempts WHERE intent=? OR id=?", (intent_id, attempt_id)).fetchone()
@@ -679,17 +747,18 @@ index 00000000..70d255dc
 +                raise ValueError("Review intent is not queued for this scope")
 +            if self.db.execute("SELECT 1 FROM attempts WHERE status='running'").fetchone():
 +                return {"run_status": "deferred", "reason": "another_review_running"}
-+            if self.db.execute("SELECT 1 FROM observations WHERE handle=? AND revision<=? AND projection!='projected'",
++            intent = json.loads(row["payload"])
++            explicit = intent.get("reason") == "user_request"
++            if not explicit and self.db.execute("SELECT 1 FROM observations WHERE handle=? AND revision<=? AND projection!='projected'",
 +                               (handle, row["revision"])).fetchone():
 +                return {"run_status": "deferred", "reason": "projection_incomplete"}
-+            intent = json.loads(row["payload"])
 +            scope = self._scope(handle)
-+            if row["revision"] <= scope["reviewed"]:
++            if not explicit and row["revision"] <= scope["reviewed"]:
 +                self.db.execute("UPDATE intents SET status='superseded' WHERE id=?", (intent_id,))
 +                return {"run_status": "superseded"}
 +            self.db.execute("INSERT INTO attempts VALUES (?,?,'running',?)", (attempt_id, intent_id, json.dumps({"id": attempt_id})))
 +            self.db.execute("UPDATE intents SET status='running' WHERE id=?", (intent_id,))
-+            messages = [m for r in self.db.execute("SELECT messages FROM observations WHERE handle=? AND revision<=? ORDER BY revision",
++            messages = json.loads(self.db.execute("SELECT messages FROM explicit_reviews WHERE intent=?", (intent_id,)).fetchone()[0]) if explicit else [m for r in self.db.execute("SELECT messages FROM observations WHERE handle=? AND revision<=? ORDER BY revision",
 +                                                   (handle, row["revision"])) for m in json.loads(r[0])]
 +        try:
 +            outcome = self.runtime.review(handle, json.loads(scope["source"]), messages, intent)
@@ -704,7 +773,7 @@ index 00000000..70d255dc
 +            else:
 +                self.db.execute("UPDATE attempts SET status=?,payload=? WHERE id=?", (state, json.dumps(outcome), attempt_id))
 +                self.db.execute("UPDATE intents SET status=? WHERE id=?", (state, intent_id))
-+                if state == "completed":
++                if state == "completed" and not explicit:
 +                    self.db.execute("UPDATE scopes SET reviewed=MAX(reviewed,?) WHERE id=?", (row["revision"], handle))
 +        return {**outcome, "id": attempt_id, "intent_id": intent_id}
 +
@@ -712,7 +781,16 @@ index 00000000..70d255dc
 +    def read(self, *, kind: str, name: str | None = None, file_path: str | None = None,
 +             issue_receipt: bool = True, detail: str = "full", artifact_version: str | None = None) -> dict:
 +        if kind == "capabilities":
-+            return {"version":1, "artifact_preview":True, "bounded_status":True, "retention":True,"snapshot_delivery":True}
++            return {"version":1, "artifact_preview":True, "bounded_status":True, "retention":True,"snapshot_delivery":True,
++                    "explicit_reviews":True}
++        if kind == "request":
++            with self.lock:
++                row = self.db.execute("SELECT i.* FROM intents i JOIN explicit_reviews e ON e.intent=i.id WHERE e.id=?", (name,)).fetchone()
++                if row is None:
++                    raise ValueError("Unknown explicit request")
++                attempt = self.db.execute("SELECT * FROM attempts WHERE intent=?", (row["id"],)).fetchone()
++                return {"intent": {**json.loads(row["payload"]), "status": row["status"]},
++                        "attempt": {**json.loads(attempt["payload"]), "id":attempt["id"], "run_status":attempt["status"]} if attempt else None}
 +        if kind == "retention_state":
 +            with self.lock:
 +                row = self.db.execute("SELECT r.revision>=s.revision retired FROM retired_scopes r "
@@ -786,8 +864,25 @@ index 00000000..70d255dc
 +                "ORDER BY s.activity LIMIT 100", (time.time()-retention_seconds,)).fetchall()
 +            result = {"eligible_scopes":len(rows), "eligible_handles":[row["id"] for row in rows],
 +                      "retired_scopes":0, "dry_run":dry_run}
++            explicit = self.db.execute("SELECT e.id,i.id intent,i.payload FROM explicit_reviews e JOIN intents i ON i.id=e.intent "
++                "WHERE e.created<? AND e.messages!='[]' AND i.status IN ('completed','failed','interrupted','cancelled') LIMIT 1000",
++                (time.time()-retention_seconds,)).fetchall()
++            result["eligible_explicit_requests"] = len(explicit)
 +            if dry_run:
 +                return result
++            with self.db:
++                for request in explicit:
++                    self.db.execute("UPDATE explicit_reviews SET messages='[]' WHERE id=?", (request["id"],))
++                    payload = json.loads(request["payload"])
++                    payload.pop("focus", None)
++                    payload["body_retired"] = True
++                    self.db.execute("UPDATE intents SET payload=? WHERE id=?", (json.dumps(payload),request["intent"]))
++                    attempt = self.db.execute("SELECT id,payload FROM attempts WHERE intent=?", (request["intent"],)).fetchone()
++                    if attempt:
++                        outcome = json.loads(attempt["payload"])
++                        summary = {key:outcome[key] for key in ("run_status","usage","id","intent_id") if key in outcome}
++                        summary.update(retired=True, applied_count=len(outcome.get("applied",[])), staged_count=len(outcome.get("staged",[])))
++                        self.db.execute("UPDATE attempts SET payload=? WHERE id=?", (json.dumps(summary),attempt["id"]))
 +            for row in rows:
 +                # Native projection storage owns its own retirement. Repeated deletion
 +                # after interruption is safe; journal tombstones commit afterward.
@@ -1012,10 +1107,10 @@ index 00000000..02a81804
 +        service.read(kind="skill",name="fixture",artifact_version=version)
 diff --git a/tests/agent/test_learning_native_loop.py b/tests/agent/test_learning_native_loop.py
 new file mode 100644
-index 00000000..ef7a6bc1
+index 00000000..ea852080
 --- /dev/null
 +++ b/tests/agent/test_learning_native_loop.py
-@@ -0,0 +1,127 @@
+@@ -0,0 +1,134 @@
 +"""Real native review loop against a loopback scripted provider; no business-model replay."""
 +import json
 +import threading
@@ -1027,7 +1122,8 @@ index 00000000..ef7a6bc1
 +
 +
 +@pytest.mark.parametrize("memory_action", ["add", "patch"])
-+def test_native_review_and_skill_delivery_have_real_effects(tmp_path, monkeypatch, memory_action):
++@pytest.mark.parametrize("trigger", ["automatic", "explicit"])
++def test_native_review_and_skill_delivery_have_real_effects(tmp_path, monkeypatch, memory_action, trigger):
 +    calls = []
 +
 +    class Handler(BaseHTTPRequestHandler):
@@ -1086,6 +1182,7 @@ index 00000000..ef7a6bc1
 +        "model": {"provider": "custom", "default": "gpt-4.1", "base_url": f"http://127.0.0.1:{server.server_port}/v1"},
 +        "agent": {"reasoning_effort": "max"},
 +        "memory": {"memory_enabled": True, "user_profile_enabled": True},
++        "auxiliary": {"background_review": {"enabled": trigger == "automatic"}},
 +    })
 +    from agent.learning_service import LearningService
 +    from tools.skill_usage import get_record
@@ -1096,11 +1193,16 @@ index 00000000..ef7a6bc1
 +        api.observe(handle, {"source": {**source, "turn": "turn-1"}, "user": "Validate the frozen input first.",
 +                             "assistant": "Validated the receipt and ran the checks successfully.", "status": "completed", "tools": []}, event_id="event-1")
 +        assert calls == []
-+        intent = api.maintenance(handle=handle, idle_flush=True)["intent"]
++        if trigger == "explicit":
++            intent = api.request_review(handle, request_id="explicit-fixture", focus="Save the verified receipt procedure",
++                messages=[{"role":"user","content":"The fixture validated its frozen input before checking output."}],
++                attended=memory_action == "patch")["id"]
++        else:
++            intent = api.maintenance(handle=handle, idle_flush=True)["intent"]
 +        result = api.run_review(handle, intent, attempt_id="review-1")
 +        assert result["run_status"] == "completed", result
-+        assert len(result["applied"]) == (2 if memory_action == "add" else 1), result
-+        if memory_action == "add":
++        assert len(result["applied"]) == (2 if memory_action == "add" or trigger == "explicit" else 1), result
++        if memory_action == "add" or trigger == "explicit":
 +            assert "frozen input receipt" in api.read(kind="context")["memories"]["MEMORY.md"]
 +        else:
 +            assert len(result["staged"]) == 1, result
@@ -1145,10 +1247,10 @@ index 00000000..ef7a6bc1
 +        runtime.close()
 diff --git a/tests/agent/test_learning_service.py b/tests/agent/test_learning_service.py
 new file mode 100644
-index 00000000..7152cbc3
+index 00000000..55107729
 --- /dev/null
 +++ b/tests/agent/test_learning_service.py
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,228 @@
 +"""External observation admission, recovery and actual native result semantics."""
 +import json
 +from types import SimpleNamespace
@@ -1252,6 +1354,59 @@ index 00000000..7152cbc3
 +    assert intent["reason"] == "idle_flush"
 +    service.run_review(handle, intent_id, attempt_id="attempt")
 +    assert service.maintenance(handle=handle, idle_flush=True)["intent"] is None
++
++
++def test_explicit_requests_can_relearn_a_snapshot_without_reobserving(service):
++    handle = service.open(source())["handle"]
++    snapshot = [{"role": "user", "content": "Verified source material"}]
++    first = service.request_review(handle, request_id="manual-1", messages=snapshot,
++                                   focus="Only the retry rule", memory=False, skills=True)
++    assert service.request_review(handle, request_id="manual-1", messages=snapshot,
++                                  focus="Only the retry rule", memory=False, skills=True) == first
++    with pytest.raises(ValueError, match="conflict"):
++        service.request_review(handle, request_id="manual-1", messages=snapshot, focus="Changed")
++    result = service.run_review(handle, first["id"], attempt_id="manual-attempt-1")
++    assert result["run_status"] == "completed"
++    second = service.request_review(handle, request_id="manual-2", messages=snapshot, focus="Now the validation")
++    service.run_review(handle, second["id"], attempt_id="manual-attempt-2")
++    assert service.runtime.reviews == 2
++    assert service.db.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 0
++    assert service.read(kind="request", name="manual-1")["attempt"]["run_status"] == "completed"
++
++
++def test_cancelled_explicit_request_cannot_start(service):
++    handle = service.open(source())["handle"]
++    intent = service.request_review(handle, request_id="cancel-1", messages=[{"role":"user","content":"fixture"}])
++    assert service.cancel_request("cancel-1")["status"] == "cancelled"
++    with pytest.raises(ValueError, match="not queued"):
++        service.run_review(handle, intent["id"], attempt_id="should-not-run")
++    assert service.runtime.reviews == 0
++
++
++def test_uncertain_review_cannot_be_replayed_by_changing_the_request_id(service):
++    handle = service.open(source())["handle"]
++    messages = [{"role":"user","content":"fixture"}]
++    intent = service.request_review(handle, request_id="uncertain", messages=messages)
++    with service.db:
++        service.db.execute("UPDATE intents SET status='unknown' WHERE id=?", (intent["id"],))
++    with pytest.raises(ValueError, match="uncertain review"):
++        service.request_review(handle, request_id="another-id", messages=messages)
++    assert service.request_review(handle, request_id="uncertain", messages=messages) == intent
++
++
++def test_explicit_retention_keeps_idempotency_without_retaining_source_body(service):
++    import time
++    handle = service.open(source())["handle"]
++    messages = [{"role":"user","content":"BODY-TO-RETIRE"}]
++    intent = service.request_review(handle, request_id="retire-me", messages=messages, focus="PRIVATE-FOCUS")
++    service.run_review(handle, intent["id"], attempt_id="retired-attempt")
++    with service.db:
++        service.db.execute("UPDATE explicit_reviews SET created=?", (time.time()-40*86400,))
++    assert service.prune(dry_run=False)["eligible_explicit_requests"] == 1
++    assert service.db.execute("SELECT messages FROM explicit_reviews").fetchone()[0] == "[]"
++    replay = service.request_review(handle, request_id="retire-me", messages=messages, focus="PRIVATE-FOCUS")
++    assert replay["id"] == intent["id"] and replay["body_retired"]
++    assert service.runtime.reviews == 1
 +
 +
 +def test_partial_mutation_is_preserved_when_review_failed():

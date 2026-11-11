@@ -8,6 +8,18 @@ from hermes_codex_learning.semantic_review import ScopedMemory, SemanticGuard, r
 
 
 class SemanticReviewTests(unittest.TestCase):
+    def test_review_scope_is_enforced_at_the_write_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = SemanticGuard(None, SimpleNamespace(home=Path(directory)))
+            guard.active["h"] = {"owned":{"learned-local"}, "readable":{"learned-local"},
+                "existing":{"learned-local"}, "memory":["own fact"], "review_memory":False, "review_skills":True}
+            self.assertIsNotNone(guard.pre_tool(session_id="h", tool_name="memory",
+                                               args={"action":"add","content":"outside selected scope"}))
+            guard.active["h"].update(review_memory=True, review_skills=False)
+            self.assertIsNotNone(guard.pre_tool(session_id="h", tool_name="skill_manage",
+                args={"operations":[{"action":"patch","name":"learned-local","content":"outside selected scope"}]}))
+            self.assertIsNone(guard.pre_tool(session_id="h", tool_name="memory", args={"action":"add","content":"allowed"}))
+
     def test_public_review_can_revise_shared_skill_without_private_project_memory(self):
         from hermes_codex_learning.config import Settings
         from hermes_codex_learning.store import Store, digest

@@ -272,7 +272,9 @@ class Bridge:
         self.store.set("enterprise-policy-state","ready" if enterprise else "not_enabled")
         status = native_reads.status(self.api)
         from .scheduling import ordered_intents
-        for intent in ordered_intents(self.store, status["intents"]):
+        from . import learning_dispatch
+        intents = status["intents"] + learning_dispatch.recover_intents(self, status["intents"])
+        for intent in ordered_intents(self.store, intents):
             if self.drain.is_set():
                 break
             if intent["status"] != "queued":
@@ -280,6 +282,8 @@ class Bridge:
             required=scope_boundary(self.store,intent["handle"])
             if required and (not enterprise or required!=enterprise["id"]):
                 self.store.set("policy-withheld:"+intent["id"],"enterprise_boundary_not_active")
+                continue
+            if not learning_dispatch.begin(self, intent):
                 continue
             attempt_id = self.store.get("attempt:" + intent["id"])
             if not attempt_id:
@@ -362,6 +366,7 @@ class Bridge:
                     self.store.db.execute("DELETE FROM review_priority WHERE handle=? AND requested IS NOT NULL AND created<=?",
                                           (intent["handle"],started_at))
             self.last_publish = 0.0
+            learning_dispatch.record_result(self, intent, result, after_versions)
 
     def skill_versions(self, context: dict) -> dict:
         cache = self.store.get("skill-versions-v1", {})
@@ -458,6 +463,8 @@ class Bridge:
             **native_reads.status(self.api), "daemon": self.store.get("state"), "updated_at": time.time(),
         })
         self.last_publish = time.monotonic()
+        from .learning_dispatch import after_publish
+        after_publish(self)
 
     def cache_artifacts(self, context):
         previous=self.store.get("artifact-read-cache",{})
@@ -648,6 +655,8 @@ class Bridge:
                 self.ingest()
                 self.retry_completed_inputs()
                 self.recover_context()
+                from .learning_dispatch import prepare
+                prepare(self)
                 self.idle_reviews()
                 self.reviews()
                 if self.drain.is_set():
@@ -677,6 +686,16 @@ class Bridge:
             self.stop.wait(delay)
 
     def rpc(self, method: str, params: dict) -> dict:
+        from .learning_requests import METHODS, rpc as learning_rpc
+        if method in METHODS:
+            if "cwd" not in params:
+                raise ValueError("Learning requests require the current workspace cwd")
+            with StoreConnection(self.settings, read_only=method == "learning_request_status") as store:
+                result = learning_rpc(store, self.settings, self.request_project(params), method, params)
+                if method == "learning_request_status":
+                    result["worker"] = {"ready":self.ready.is_set(), "paused":not self.resume.is_set(),
+                                        "draining":self.drain.is_set(), "state":store.get("state")}
+                return result
         if method == "capabilities":
             return {"build":self.build,"native":self.native_capabilities}
         if method == "artifact_read":

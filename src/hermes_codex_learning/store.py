@@ -65,6 +65,12 @@ class Store:
             CREATE TABLE IF NOT EXISTS application_evidence(id TEXT PRIMARY KEY, payload TEXT, created REAL);
             CREATE TABLE IF NOT EXISTS withheld_versions(name TEXT, version TEXT, evidence TEXT, PRIMARY KEY(name,version));
             CREATE TABLE IF NOT EXISTS retired_events(source_key TEXT PRIMARY KEY, id TEXT, created REAL);
+            CREATE TABLE IF NOT EXISTS learning_requests(
+              id TEXT PRIMARY KEY, project TEXT NOT NULL, chat TEXT NOT NULL,
+              payload TEXT NOT NULL, created REAL NOT NULL, updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS learning_materials(
+              request_id TEXT NOT NULL, chunk_id TEXT NOT NULL, payload TEXT NOT NULL,
+              created REAL NOT NULL, PRIMARY KEY(request_id,chunk_id));
             CREATE INDEX IF NOT EXISTS events_pending ON events(delivered,created,id);
             CREATE INDEX IF NOT EXISTS events_chat_turn ON events(json_extract(payload,'$.session_id'),json_extract(payload,'$.turn_id'));
             CREATE INDEX IF NOT EXISTS turns_recovery ON turns(observed_revision,activity);

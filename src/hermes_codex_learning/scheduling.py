@@ -75,5 +75,5 @@ def ordered_intents(store, intents):
             store.set(key, now)
     def rank(intent):
         age = store.get("intent-seen:" + intent["id"], now)
-        return (0 if now - age >= 1800 else 1 if intent["handle"] in priorities else 2, age)
+        return (0 if now - age >= 1800 else 1 if intent["handle"] in priorities or intent.get("reason") == "user_request" else 2, age)
     return sorted(intents, key=rank)

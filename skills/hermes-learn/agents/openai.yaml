@@ -1,0 +1,4 @@
+interface:
+  display_name: "Hermes 资料学习"
+  short_description: "从指定文档、代码和笔记分批提炼并保存 Hermes 技能"
+  default_prompt: "Use $hermes-learn to learn a reusable skill from the sources I selected."

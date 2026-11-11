@@ -27,11 +27,14 @@ TOOLS = [
                      "required": ["name"], "additionalProperties": False}},
 ]
 
+from .learning_tools import TOOLS as LEARNING_TOOLS
+TOOLS.extend(LEARNING_TOOLS)
+
 for tool in TOOLS:
-    readonly=tool["name"] in {"context","skill_load","learning_status","update_status"}
+    readonly=tool["name"] in {"context","skill_load","learning_status","update_status","learning_request_status"}
     tool["annotations"]={"readOnlyHint":readonly,"destructiveHint":False,
                          "openWorldHint":tool["name"]=="update_check"}
-    if tool["name"]=="record_application":
+    if tool["name"] in {"record_application", *(item["name"] for item in LEARNING_TOOLS)}:
         tool["annotations"]["idempotentHint"]=True
 
 

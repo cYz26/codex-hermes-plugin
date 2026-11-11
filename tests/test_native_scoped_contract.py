@@ -9,6 +9,16 @@ from pathlib import Path
 
 class NativeScopedContractTests(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("HERMES_LEARNING_NATIVE_SOURCE"), "Runs in the verified native candidate gate")
+    def test_explicit_refine_and_material_batches_use_native_writes_and_publication(self):
+        root=Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            result=subprocess.run([sys.executable,"-I","-B",str(root/"probes/scoped_contract.py"),
+                "--source",os.environ["HERMES_LEARNING_NATIVE_SOURCE"],"--workspace",str(Path(temporary)/"active"),
+                "--explicit"],capture_output=True,text=True,timeout=180)
+            self.assertEqual(result.returncode,0,result.stdout[-6000:]+result.stderr[-3000:])
+            self.assertTrue(json.loads(result.stdout.strip().splitlines()[-1])["passed"])
+
+    @unittest.skipUnless(os.environ.get("HERMES_LEARNING_NATIVE_SOURCE"), "Runs in the verified native candidate gate")
     def test_enterprise_scope_shares_internally_and_revokes_on_model_change(self):
         root=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:

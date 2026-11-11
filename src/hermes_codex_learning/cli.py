@@ -131,6 +131,8 @@ def main() -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     from .operations import add_parsers
     add_parsers(commands)
+    from .learning_cli import add_parser as add_learning_parser
+    add_learning_parser(commands)
     commands.add_parser("hook")
     commands.add_parser("mcp")
     notices = commands.add_parser("notices", help="UI-only SSH delivery; not exposed through MCP")
@@ -291,6 +293,9 @@ def main() -> int:
     if args.command == "systemd":
         from .systemd import systemd
         return systemd(args)
+    if args.command == "learning":
+        from .learning_cli import execute
+        return execute(args)
     if args.command == "doctor":
         from .diagnostics import doctor
         return doctor(args)

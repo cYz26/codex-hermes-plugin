@@ -105,6 +105,8 @@ class SemanticGuard:
         if not isinstance(args, dict) or filtered != args:
             return denied
         if tool_name == "memory":
+            if scope.get("review_memory") is False:
+                return denied
             if args.get("target", "memory") != "memory":
                 return denied
             ops = args.get("operations") or [args]
@@ -122,6 +124,8 @@ class SemanticGuard:
             safe_path = path is None or self.resource_path(path)
             return None if set(args) <= {"name","file_path"} and args.get("name") in scope["readable"] and safe_path else denied
         if tool_name != "skill_manage":
+            return denied
+        if scope.get("review_skills") is False:
             return denied
         ops = args.get("operations")
         if set(args) != {"operations"} or not isinstance(ops, list) or not 1 <= len(ops) <= 5:
@@ -262,6 +266,7 @@ def install_semantic_policy(api, settings, ctx):
         from agent import background_review
         fork_original = background_review.build_cache_parity_fork
         with guard.scope(handle) as (prompt, entries):
+            guard.active[handle].update(review_memory=intent["memory"], review_skills=intent["skills"])
             parent = agent(handle, source)
             if isinstance(parent._memory_store, ScopedMemory):
                 parent._memory_store = parent._memory_store._native

@@ -1,0 +1,33 @@
+{
+  "version": "0.7.0",
+  "native_base": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "verification": {
+    "native_tests_passed": 343,
+    "bridge_tests_passed": 222,
+    "scripted_provider_explicit_and_materials": true,
+    "real_provider_refine": true,
+    "real_provider_materials": true,
+    "material_batches": 3,
+    "reference_index_passed": true,
+    "actual_codex_app_invocation": false,
+    "business_effectiveness": "not_inferred"
+  },
+  "real_provider": {
+    "model": "ark:gpt-6-1-sol",
+    "first_refine": "HTTP 429 token rate limit; preserved, no model usage",
+    "bounded_followup_refine": "completed",
+    "material_skill": "learned-nfkc-checks",
+    "material_skill_shared": false
+  },
+  "input_provenance": "explicit_synthetic_acceptance_fixtures_not_app_hooks",
+  "artifact_sha256": {
+    "bridge-tests.log": "d76a0d7c863b0e433e512f3ded2aaf100b652e902588a82b2220a87e8fb15899",
+    "learned-skill-snapshot/SKILL.md": "9c14fab809f03e5803b15ab16bf9585c6fe1d7c72b50256579028f85fb2a4022",
+    "learned-skill-snapshot/references/633a5a9b8dc39573.md": "b921fca3efa054b3d759dd77aee62662d93f6c588d077b3fad6cc9aa1b278cf0",
+    "learned-skill-snapshot/references/d2c0c8a912e22dcf.md": "7873b50a4b63756d42db9e195da40f98427e958b622d6aa35805765eb4247bb0",
+    "native-tests.log": "476cc1b3bf265fe47c853a76b238b9749f5c6cce623898261ea58809d1f7668e",
+    "offline-verification.json": "7b4461436cd4175cadafc17a5e11da19c1f014d3f0165a76d2b0b328ada16a25",
+    "real-provider-first-run.json": "8e8206860c6c473938e48e16e30555d51c8dc379f504eb77f80a28de7a75929e",
+    "real-provider-refine-after-429.json": "0a77350e297a518bd13f2fc1683345633c9e41a70ba7e710ff4a0e7c7351f015"
+  }
+}
