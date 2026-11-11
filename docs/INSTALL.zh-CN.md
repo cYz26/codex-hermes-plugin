@@ -1,6 +1,6 @@
 # 安装与更新
 
-需要 Python 3.11+、Codex CLI 或带 Codex 的桌面 App，以及与 [兼容清单](../patches/compatibility.json) 匹配的 Hermes 源码。Codex 插件负责采集和召回；macOS 学习服务负责后台复盘。两个部分分别安装。
+需要 Python 3.11+、Codex CLI 或带 Codex 的桌面 App，以及与 [兼容清单](../patches/compatibility.json) 匹配的 Hermes 源码。两种场景使用同一插件：在实际执行 Codex 任务的宿主安装插件与学习服务。macOS 本地宿主使用本页的 launchd 流程；Linux／SSH 宿主使用 [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md)，桌面 Mac 只需按 [SSH 通知](./SSH-NOTIFICATIONS.zh-CN.md) 安装接收器。
 
 ## Codex 插件
 
@@ -13,7 +13,7 @@ codex plugin add hermes-learning@hermes-learning-local --json
 
 已有本地来源时，更新仓库后只需再次执行第二条。Codex 插件目录中的名称为 **Hermes Learning**，图标由[插件清单](../.codex-plugin/plugin.json)统一引用。新开聊天加载更新后的插件。
 
-## 新建学习实例
+## 新建 macOS 本地学习实例
 
 从[兼容清单](../patches/compatibility.json)选定官方 commit。在独立检出中应用对应 Learning API v1 补丁；[v0.23.1 清单](../patches/v0.23.1/manifest.json)记录补丁和生效文件的校验值。从该检出用 Hermes 的 PM 创建依赖环境：
 
@@ -39,8 +39,9 @@ python3 -B -m pm.build_env --source . --out /absolute/learning/runtime --group d
 python3 -B scripts/bridge launchd --settings /absolute/learning/pilot/bridge.json --start
 ```
 
-可选：运行 `scripts/bridge install-notifier` 安装 **Hermes 学习** 通知 App，并在系统设置允许通知。
-已有通知 App 时，重新运行这条命令即可更新。首次迁移到带图标的发送方时，按 macOS 提示允许「Hermes 学习」发送通知。安装程序在获得授权后切换发送方，并保留历史回执的打开入口。
+可选：运行 `scripts/bridge install-notifier` 安装 **Hermes 学习** 通知 App。安装器使用[现有插件图标](./design/hermes-learning-icon/README.md)，并采用新的发送方标识 `com.cy.hermes-learning-receipts` 刷新应用注册信息。新通知的实际图标显示仍需在 Mac 上核对。
+
+已有通知 App 时，重新运行此命令即可迁移。首次迁移按 macOS 提示允许「Hermes 学习」发送通知；授权成功并等待运行中的通知 App 退出后才替换。旧发送方保留在 `~/Applications/.hermes-learning-legacy/Hermes 学习.app` 并重新注册，供历史通知打开回执。
 
 ## 更新现有学习服务
 

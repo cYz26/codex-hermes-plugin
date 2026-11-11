@@ -1,42 +1,44 @@
 # 文档索引
 
-当前实现为外围 **0.4.2** 与官方 **Hermes v0.23.0**＋Learning API v1 补丁。Linux／SSH 和本地 macOS 共用学习核心，以不同分支提供平台适配。真实验收记录按当时版本保留，不能把安装或离线测试改写成模型／App 验收。
+主分支的外围版本为 **0.4.2**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
 
-## 云端 Linux／SSH 分支
-
-| 文档 | 内容 |
-| --- | --- |
-| [云端实现与分工](./CODEX-CLOUD-SELF-EVOLUTION.zh-CN.md) | 组件归属、平台边界和部署选择 |
-| [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md) | 初始化、systemd、诊断、自动适配和回退 |
-| [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md) | Mac 接收器安装、持久投递、只读明细和验收 |
-| [当前分支验证](../evidence/releases/cloud-0.4.2.json) | 本次离线测试与补丁验证 |
-| [历史全局宿主报告](../ACCEPTANCE.linux-global.json) | 整理前 0.4.2／0.4.1 的验证摘要，机器标识与私有路径省略 |
-| [历史 Linux 试点](./LINUX-OPERATIONS.zh-CN.md) | 0.2.0 的运行记录及 [当时验收](../ACCEPTANCE.linux.json) |
-
-## 当前实现
+## 平台入口
 
 | 文档 | 内容 |
 | --- | --- |
-| [自进化实现整理](./SELF-EVOLUTION.zh-CN.md) | 执行与学习闭环、资料准入、项目归属、通用发布、适配和恢复 |
-| [全局流程学习](./WORKFLOW-METADATA.zh-CN.md) | 固定动作／状态投影、受限原生 review、版本凭证和验证 |
-| [工程入口](../README.md) | 运行边界、诊断和离线发布检查 |
-| [安装与更新](./INSTALL.zh-CN.md) | 原有 macOS 安装流程；0.3.2 的机器部署内容保留原范围 |
-| [主动更新与适配](./UPDATES.zh-CN.md) | 原有更新策略、验证、切换和回退；增量合同见当前实现整理 |
-| [兼容清单](../patches/compatibility.json) | 固定基线、原生测试集合与 [v0.23.0 补丁](../patches/v0.23.0/manifest.json) |
+| [安装与更新](./INSTALL.zh-CN.md) | 同一 Codex 插件的安装、宿主选择和 macOS 本地服务 |
+| [本地 macOS 运行](./LOCAL-OPERATIONS.zh-CN.md) | launchd、原生认证、通知 scope 和 sent／read 回执 |
+| [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md) | 初始化、systemd、诊断、自动适配与回退 |
+| [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md) | Mac 接收器、持久投递、图标诊断与授权恢复 |
+| [云端组件与分工](./CODEX-CLOUD-SELF-EVOLUTION.zh-CN.md) | 学习宿主、桌面接收器和资料边界 |
+
+## 共用实现
+
+| 文档 | 内容 |
+| --- | --- |
+| [工程入口](../README.md) | 两种场景、配置和离线检查 |
+| [自进化实现整理](./SELF-EVOLUTION.zh-CN.md) | 执行与学习闭环、资料准入、项目归属、发布和恢复 |
+| [全局流程学习](./WORKFLOW-METADATA.zh-CN.md) | 固定流程投影、受限 review 和版本凭证 |
+| [更新流程](./UPDATES.zh-CN.md) | 候选验证、v0.23.1 适配、切换与回退 |
+| [兼容清单](../patches/compatibility.json) | 固定基线、补丁和原生测试集合 |
 | [插件图标](./design/hermes-learning-icon/README.md) | 源稿与标识出处 |
 
-## 历史实现与验收
+## 历史分支与验收
 
 | 文档 | 保留范围 |
 | --- | --- |
-| [整体方案](./ARCHITECTURE.zh-CN.md) | 历史原生能力、认证、数据、触发与验收方案 |
+| [本地 0.4.2 基线](../evidence/releases/local-0.4.2.json) | 原本地分支的离线检查，macOS 实机项目单独记录 |
+| [云端 0.4.2 基线](../evidence/releases/cloud-0.4.2.json) | 原云端分支的离线检查与补丁验证 |
+| [历史全局宿主报告](../ACCEPTANCE.linux-global.json) | 整理前 0.4.2／0.4.1 的验证摘要 |
+| [历史 Linux 试点](./LINUX-OPERATIONS.zh-CN.md) | 0.2.0 的运行记录及 [当时验收](../ACCEPTANCE.linux.json) |
+| [整体方案](./ARCHITECTURE.zh-CN.md) | 历史原生能力、认证、触发与验收方案 |
 | [全局启用](./GLOBAL-ROLLOUT.zh-CN.md) | 原有宿主部署、信任和跨项目验证 |
 | [学习 profile 与 Hermes App](./PROFILE-DESKTOP.zh-CN.md) | 后台独立 profile 的定位与历史诊断 |
-| [真实 App 续验](./APP-VALIDATION.zh-CN.md) | 0.1.6 单项目闭环与当时的验证边界 |
+| [真实 App 续验](./APP-VALIDATION.zh-CN.md) | 0.1.6 单项目闭环与当时的验证范围 |
 | [0.2.2 验收](./RELEASE-0.2.2.zh-CN.md) | 当时的 Curator、通知、注入和用量对照 |
 | [历史机器可读验收](../ACCEPTANCE.json) | v0.22.7／0.2.2 的记录 |
-| [证据索引](../evidence/README.md) | 原版、补丁版、外围测试和模型证据 |
-| [当前方案摘要](../HERMES-CODEX-PLAN.md) | 原有方案分工 |
+| [证据索引](../evidence/README.md) | 原版、补丁版、外围测试与模型证据 |
+| [历史方案摘要](../HERMES-CODEX-PLAN.md) | 原有方案分工 |
 | [Learning API 合同](../HERMES-CODEX-EXTENSION-REVIEW.md) | v1 接口、持久化和故障语义 |
 | [历史实施](../IMPLEMENTATION.md) | 当时部署、测试和源码指针 |
 
@@ -44,4 +46,4 @@
 
 [最初研究](../HERMES-CODEX-RESEARCH.md)、[集成方式比较](../HERMES-CODEX-OPTIONS.md)、[原生能力差异](../HERMES-CODEX-NATIVE-PARITY.md) 与 [历史探针](../HERMES-CODEX-PROBE.json) 保留研究时的版本依据。
 
-历史设计另见 [v0.22.5 方案](./archive/HERMES-CODEX-PLAN.v0.22.5.md)、[扩展合同](./archive/HERMES-CODEX-EXTENSION-REVIEW.v0.22.5.md)、[v0.22.6 实施](./archive/IMPLEMENTATION.v0.22.6.md) 与 [获批方案](./archive/APPROVED-PLAN.v0.22.6.md)。原始证据摘要不改版本；私有完整运行记录与回退快照不进入 Git。
+历史设计另见 [v0.22.5 方案](./archive/HERMES-CODEX-PLAN.v0.22.5.md)、[扩展合同](./archive/HERMES-CODEX-EXTENSION-REVIEW.v0.22.5.md)、[v0.22.6 实施](./archive/IMPLEMENTATION.v0.22.6.md) 与 [获批方案](./archive/APPROVED-PLAN.v0.22.6.md)。原始证据不改版本；私有运行记录与回退快照不进入 Git。
