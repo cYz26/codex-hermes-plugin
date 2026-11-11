@@ -1,4 +1,5 @@
 """Only this perimeter plugin knows the Codex-specific bridge package."""
+from contextlib import ExitStack
 
 
 def register(ctx):
@@ -22,8 +23,10 @@ def register(ctx):
         from hermes_codex_learning.review_receipt import ReviewWrites
 
         review_writes = ReviewWrites()
-        registration = ctx.register_hook("post_tool_call", review_writes.record)
-        try:
+        with ExitStack() as registrations:
+            for hook, callback in (("pre_tool_call", review_writes.record_attempt),
+                                   ("post_tool_call", review_writes.record)):
+                registrations.callback(ctx.register_hook(hook, callback).dispose)
             settings = Settings.load(args.settings)
             api = ctx.learning(version=1)
             workflow_registration = None
@@ -44,8 +47,6 @@ def register(ctx):
                     semantic_registration.dispose()
                 if workflow_registration is not None:
                     workflow_registration.dispose()
-        finally:
-            registration.dispose()
 
     ctx.register_cli_command("learning-bridge", "Run the project-scoped durable learning bridge",
                              setup_fn=setup, handler_fn=serve)

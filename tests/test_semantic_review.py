@@ -20,6 +20,69 @@ class SemanticReviewTests(unittest.TestCase):
                 args={"operations":[{"action":"patch","name":"learned-local","content":"outside selected scope"}]}))
             self.assertIsNone(guard.pre_tool(session_id="h", tool_name="memory", args={"action":"add","content":"allowed"}))
 
+    def test_flat_and_batch_skill_calls_use_the_same_scope_and_path_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = SemanticGuard(None, SimpleNamespace(home=Path(directory)))
+            guard.active["h"] = {"owned": {"learned-local"}, "readable": {"learned-local"},
+                                 "existing": {"learned-local", "learned-private"}, "memory": []}
+            cases = [
+                ({"name": "learned-local", "action": "patch",
+                  "old_string": "old rule", "new_string": "new rule"}, True),
+                ({"name": "learned-new", "action": "create", "content": "candidate"}, True),
+                ({"name": "learned-local", "action": "write_file",
+                  "file_path": "references/check.md", "file_content": "check"}, True),
+                ({"name": "learned-private", "action": "patch", "content": "private"}, False),
+                ({"name": "learned-local", "action": "delete"}, False),
+                ({"name": "learned-local", "action": "write_file",
+                  "file_path": "../escape.py", "file_content": "print(1)"}, False),
+                ({"name": "learned-local", "action": "patch", "content": "rule", "category": "extra"}, False),
+            ]
+            for operation, allowed in cases:
+                for args in (operation, {"operations": [operation]}):
+                    with self.subTest(operation=operation, batch="operations" in args):
+                        result = guard.pre_tool(session_id="h", tool_name="skill_manage", args=args)
+                        if allowed:
+                            self.assertIsNone(result)
+                        else:
+                            self.assertEqual(result["action"], "block")
+
+    def test_refusals_explain_shape_scope_and_path_without_private_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = SemanticGuard(None, SimpleNamespace(home=Path(directory)))
+            guard.active["h"] = {"owned": {"learned-local"}, "readable": {"learned-local"},
+                                 "existing": {"learned-local", "learned-private"}, "memory": []}
+            cases = [
+                ({"operations": []}, "1–5"),
+                ({"operations": [{"action": "patch", "name": "learned-private", "content": "rule"}]},
+                 "可修改范围"),
+                ({"operations": [{"action": "write_file", "name": "learned-local",
+                                  "file_path": "../private.txt", "file_content": "rule"}]}, "相对路径"),
+                ({"operations": [{"action": "patch", "name": "learned-local",
+                                  "old_string": "", "new_string": "rule"}]}, "old_string"),
+                ({"operations": [{"action": "patch", "name": "learned-local",
+                                  "content": "rule", "category": "extra"}]}, "参数"),
+            ]
+            for args, explanation in cases:
+                with self.subTest(explanation=explanation):
+                    result = guard.pre_tool(session_id="h", tool_name="skill_manage", args=args)
+                    self.assertEqual(result["action"], "block")
+                    self.assertIn(explanation, result["message"])
+                    self.assertNotIn("learned-private", result["message"])
+                    self.assertNotIn("private.txt", result["message"])
+            self.assertNotIn("learned-private", guard.active["h"]["owned"])
+
+    def test_malformed_actions_are_refused_without_raising(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = SemanticGuard(None, SimpleNamespace(home=Path(directory)))
+            guard.active["h"] = {"owned": {"learned-local"}, "readable": {"learned-local"},
+                                 "existing": {"learned-local"}, "memory": []}
+            for tool, args in (("memory", {"action": []}),
+                               ("skill_manage", {"name": "learned-local", "action": []})):
+                with self.subTest(tool=tool):
+                    result = guard.pre_tool(session_id="h", tool_name=tool, args=args)
+                    self.assertEqual(result["action"], "block")
+                    self.assertIn("操作", result["message"])
+
     def test_public_review_can_revise_shared_skill_without_private_project_memory(self):
         from hermes_codex_learning.config import Settings
         from hermes_codex_learning.store import Store, digest

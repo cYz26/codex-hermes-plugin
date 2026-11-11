@@ -1,10 +1,12 @@
 import json
 import plistlib
+import runpy
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from hermes_codex_learning.notify import (LEGACY_APP_ID, APP_EXECUTABLE, legacy_notifier_app,
                                          macos_notification, message)
@@ -54,7 +56,8 @@ class ReviewReceiptTests(unittest.TestCase):
                       "result": {"results": native_ops}} for op in native_ops)
         with writes.capture("native-handle") as calls:
             def observe(tool, call_id, args, handle="native-handle"):
-                writes.record(session_id=handle, tool_name=tool, tool_call_id=call_id, args=args)
+                writes.record(session_id=handle, tool_name=tool, tool_call_id=call_id, args=args,
+                              result={"success": True})
 
             observe("memory", "m", {"operations": [{"action": "add", "content": "Use frozen inputs"}]})
             observe("memory", "m", {"action": "add", "content": "Another session"}, "other-handle")
@@ -72,6 +75,101 @@ class ReviewReceiptTests(unittest.TestCase):
         self.assertIn("匹配的原文\nRevised rule\n写入的内容\nUse fixed input hashes", receipt)
         for text in ("Another session", "Failed content", "Late write"):
             self.assertNotIn(text, receipt)
+
+    def test_refused_batch_attempts_keep_names_and_reasons_without_proposed_text(self):
+        writes = ReviewWrites()
+        operation = {"name": "learned-local", "action": "patch", "file_path": "references/check.md",
+                     "old_string": "UNAPPLIED_OLD_TEXT", "new_string": "UNAPPLIED_NEW_TEXT"}
+        reason = "技能不在本次复盘可修改范围内。"
+        facts = []
+        with writes.capture("native-handle") as calls:
+            for index in range(3):
+                call_id = f"refused-{index}"
+                self.assertIsNone(writes.record_attempt(
+                    session_id="native-handle", tool_name="skill_manage", tool_call_id=call_id,
+                    args={"operations": [operation]}))
+                writes.record(session_id="native-handle", tool_name="skill_manage", tool_call_id=call_id,
+                              args={"operations": [operation]}, status="blocked",
+                              result=json.dumps({"error": reason}))
+                writes.record_attempt(session_id="other-handle", tool_name="skill_manage", tool_call_id=call_id,
+                                      args={"action": "patch", "name": "OTHER_SESSION_SKILL"})
+                facts.append({"tool": "skill_manage", "call_id": call_id, "action": None, "name": None,
+                              "result": {"error": reason}})
+        receipt = receipt_text(self.event(refused=facts), calls, 0)
+        self.assertIn("修订 · 技能 learned-local · references/check.md（3 次尝试）", receipt)
+        self.assertEqual(receipt.count("原因：" + reason), 1)
+        for text in ("未命名技能", "UNAPPLIED_OLD_TEXT", "UNAPPLIED_NEW_TEXT", "OTHER_SESSION_SKILL"):
+            self.assertNotIn(text, receipt)
+            self.assertNotIn(text, json.dumps(list(calls.values())))
+
+    def test_legacy_refusal_reports_missing_name_and_available_error(self):
+        fact = {"tool": "skill_manage", "call_id": "legacy", "name": None,
+                "result": {"error": "Use only admitted project memory and listed skills."}}
+        receipt = receipt_text(self.event(refused=[fact]), {}, 0)
+        self.assertIn("技能操作（名称未记录）", receipt)
+        self.assertIn("原因：Use only admitted project memory and listed skills.", receipt)
+        self.assertNotIn("未命名技能", receipt)
+        self.assertNotIn("SKILL.md", receipt)
+
+    def test_malformed_action_in_native_fact_still_produces_a_refusal_receipt(self):
+        fact = {"tool": "skill_manage", "call_id": "malformed", "name": "learned-local", "action": ["patch"],
+                "result": {"error": "action 参数必须是字符串。"}}
+        receipt = receipt_text(self.event(refused=[fact]), {}, 0)
+        self.assertIn("操作 · 技能 learned-local · SKILL.md", receipt)
+        self.assertIn("原因：action 参数必须是字符串。", receipt)
+
+    def test_attempt_metadata_and_refusal_errors_filter_credentials(self):
+        token = ".".join(("eyJ" + "a" * 25, "b" * 25, "c" * 25))
+        writes = ReviewWrites()
+        with writes.capture("native-handle") as calls:
+            writes.record_attempt(session_id="native-handle", tool_name="skill_manage", tool_call_id="blocked",
+                                  args={"name": token, "action": "patch"})
+        fact = {"tool": "skill_manage", "call_id": "blocked", "result": {"error": "credential: " + token}}
+        receipt = receipt_text(self.event(refused=[fact]), calls, 0)
+        self.assertNotIn(token, json.dumps(list(calls.values())))
+        self.assertNotIn(token, receipt)
+        self.assertIn("[REDACTED TOKEN]", receipt)
+
+    def test_summary_distinguishes_successful_changes_from_refused_attempts(self):
+        event = self.event(applied_entities=["skill:learned-local"], refused=[{}, {}, {}])
+        self.assertEqual(event["message"], "Hermes 已学习：1 项变更生效；3 次操作尝试被拒绝")
+
+    def test_plugin_observes_blocked_calls_before_execution_and_disposes_hooks(self):
+        plugin = runpy.run_path(str(Path(__file__).resolve().parents[1] / "hermes-plugin/__init__.py"))
+        hooks, registrations = {}, []
+
+        def register_hook(name, callback):
+            hooks[name] = callback
+            registration = SimpleNamespace(dispose=Mock())
+            registrations.append(registration)
+            return registration
+
+        api = SimpleNamespace(close=Mock())
+        ctx = SimpleNamespace(register_system_prompt_section=Mock(), register_cli_command=Mock(),
+                              register_hook=register_hook, learning=Mock(return_value=api))
+        plugin["register"](ctx)
+        serve = ctx.register_cli_command.call_args.kwargs["handler_fn"]
+
+        def run(settings, native_api, writes):
+            self.assertIn("pre_tool_call", hooks)
+            with writes.capture("native-handle") as calls:
+                self.assertIsNone(hooks["pre_tool_call"](
+                    session_id="native-handle", tool_name="skill_manage", tool_call_id="blocked",
+                    args={"name": "learned-local", "action": "patch", "content": "UNAPPLIED_CONTENT"}))
+            fact = {"tool": "skill_manage", "call_id": "blocked", "result": {"error": "scope refusal"}}
+            return receipt_text(self.event(refused=[fact]), calls, 0)
+
+        with patch("hermes_codex_learning.config.Settings.load", return_value=SimpleNamespace()), \
+             patch("hermes_codex_learning.daemon.run", side_effect=run), \
+             patch("hermes_codex_learning.review_input.install_review_policy"), \
+             patch("hermes_codex_learning.workflow_review.install_workflow_policy", return_value=None), \
+             patch("hermes_codex_learning.semantic_review.install_semantic_policy", return_value=None):
+            receipt = serve(SimpleNamespace(settings="synthetic-settings"))
+        self.assertIn("修订 · 技能 learned-local · SKILL.md", receipt)
+        self.assertIn("原因：scope refusal", receipt)
+        self.assertNotIn("UNAPPLIED_CONTENT", receipt)
+        for registration in registrations:
+            registration.dispose.assert_called_once_with()
 
     def test_same_summary_has_separate_receipts_and_retries_keep_the_original(self):
         with tempfile.TemporaryDirectory() as directory, patch("hermes_codex_learning.notify.subprocess.run") as run:

@@ -46,9 +46,11 @@ def _message(event: dict) -> str:
         parts = ([f"Hermes 已学习：{len(applied)} 项变更生效"] if applied else [])
         if staged:
             parts.append(f"{len(staged)} 项修改等待原生批准，尚未生效")
+        if event.get("refused"):
+            parts.append(f"{len(event['refused'])} 次操作尝试被拒绝")
         return "；".join(parts)
     if event.get("refused"):
-        return f"Hermes 完成复盘，{len(event['refused'])} 项操作被原生规则拒绝"
+        return f"Hermes 完成复盘，{len(event['refused'])} 次操作尝试被拒绝"
     return "Hermes 已完成复盘，本轮没有新增经验"
 
 

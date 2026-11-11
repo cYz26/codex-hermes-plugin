@@ -17,8 +17,16 @@ General procedures may declare learning_scope: global_candidate; private project
 remain project-specific. Scripts are candidates until independent isolated verification.
 Use skill_view before revising a skill; patch supports old_string/new_string or full
 content. Write resources using write_file with relative paths. Do not set a category.
+skill_manage accepts a single operation or an operations-only array of 1–5 operations;
+each operation must include its own action and name.
 Only the memory and skill names supplied below are available. Do not infer hidden context.
 """
+
+
+def _denied(message, *, position=None):
+    if position is not None:
+        message = f"第 {position} 项操作：" + message
+    return {"action": "block", "message": message}
 
 
 class ScopedMemory:
@@ -99,66 +107,83 @@ class SemanticGuard:
         scope = self.active.get(session_id)
         if scope is None:
             return None
-        denied = {"action":"block", "message":"Use only admitted project memory and listed skills. No external tools or private resources."}
+        if not isinstance(args, dict):
+            return _denied("调用参数必须是对象。")
         from .enterprise import MODE, scrub
         filtered=scrub(args) if getattr(self.settings,"data_policy",{}).get("mode")==MODE else redact(args)
-        if not isinstance(args, dict) or filtered != args:
-            return denied
+        if filtered != args:
+            return _denied("参数包含受保护信息；请移除凭据或禁止学习的内容。")
         if tool_name == "memory":
             if scope.get("review_memory") is False:
-                return denied
+                return _denied("本次复盘未选择项目记忆写入；请遵守所选学习范围。")
             if args.get("target", "memory") != "memory":
-                return denied
+                return _denied("后台复盘只能修改项目记忆（target=memory）。")
             ops = args.get("operations") or [args]
             if not isinstance(ops, list) or not 1 <= len(ops) <= 5:
-                return denied
-            for op in ops:
-                if not isinstance(op, dict) or op.get("action") not in {"add", "patch", "remove"}:
-                    return denied
-                if op["action"] != "add" and (not op.get("old_text") or
-                        not any(op["old_text"] in entry for entry in scope["memory"])):
-                    return denied
+                return _denied("记忆批量调用必须包含 1–5 项 operations。")
+            for position, op in enumerate(ops, 1):
+                if (not isinstance(op, dict) or not isinstance(op.get("action"), str)
+                        or op.get("action") not in {"add", "patch", "remove"}):
+                    return _denied("记忆操作只支持 add、patch 或 remove。", position=position)
+                old = op.get("old_text")
+                if op["action"] != "add" and (not isinstance(old, str) or not old
+                        or not any(old in entry for entry in scope["memory"])):
+                    return _denied("old_text 必须匹配本次复盘已准入的项目记忆。", position=position)
             return None
         if tool_name == "skill_view":
+            if set(args) - {"name", "file_path"}:
+                return _denied("技能读取参数只支持 name 和可选的 file_path。")
+            name = args.get("name")
+            if not isinstance(name, str) or name not in scope["readable"]:
+                return _denied("技能不在本次复盘可读取范围内；请只读取已列出的技能。")
             path = args.get("file_path")
-            safe_path = path is None or self.resource_path(path)
-            return None if set(args) <= {"name","file_path"} and args.get("name") in scope["readable"] and safe_path else denied
+            if path is not None and not self.resource_path(path):
+                return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。")
+            return None
         if tool_name != "skill_manage":
-            return denied
+            return _denied("后台复盘只能使用 memory、skill_view 和 skill_manage；外部工具不可用。")
         if scope.get("review_skills") is False:
-            return denied
-        ops = args.get("operations")
-        if set(args) != {"operations"} or not isinstance(ops, list) or not 1 <= len(ops) <= 5:
-            return denied
+            return _denied("本次复盘未选择技能写入；请遵守所选学习范围。")
+        ops = args.get("operations") if "operations" in args else [args]
+        if (("operations" in args and set(args) != {"operations"})
+                or not isinstance(ops, list) or not 1 <= len(ops) <= 5):
+            return _denied("技能批量调用只支持包含 1–5 项的 operations；每项须提供 action 和 name。")
         owned = set(scope["owned"])
-        for op in ops:
+        for position, op in enumerate(ops, 1):
             if not isinstance(op, dict):
-                return denied
+                return _denied("技能操作参数必须是对象。", position=position)
             name, action = op.get("name"), op.get("action")
             if not isinstance(name, str) or not re.fullmatch(r"learned-[a-z0-9][a-z0-9-]{0,70}", name):
-                return denied
+                return _denied("技能名称须为 learned-<topic>，只使用小写字母、数字和连字符。", position=position)
             if action == "create":
                 if name in scope["existing"] or (self.settings.home / "skills" / name).exists():
-                    return denied
+                    return _denied("技能已存在；请先用 skill_view 读取，并通过 patch 修订。", position=position)
                 owned.add(name)
-            elif action not in {"patch", "edit", "write_file"} or name not in owned:
-                return denied
+            elif not isinstance(action, str) or action not in {"patch", "edit", "write_file"}:
+                return _denied("技能操作只支持 create、patch、edit 或 write_file。", position=position)
+            elif name not in owned:
+                return _denied("技能不在本次复盘可修改范围内；请只修改已准入的技能。", position=position)
             if action == "write_file":
-                if (not self.resource_path(op.get("file_path", ""))
-                        or set(op) - {"name","action","file_path","file_content"}):
-                    return denied
+                if not self.resource_path(op.get("file_path", "")):
+                    return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。", position=position)
+                if (set(op) - {"name", "action", "file_path", "file_content"}
+                        or not isinstance(op.get("file_content"), str)):
+                    return _denied("写入参数只支持 name、action、file_path 和字符串 file_content。", position=position)
             elif action == "patch" and "old_string" in op:
-                if (set(op) - {"name","action","old_string","new_string","file_path","replace_all"}
-                        or not isinstance(op["old_string"],str) or not op["old_string"]
-                        or not isinstance(op.get("new_string"),str)
-                        or len(op["old_string"])+len(op["new_string"])>65536
-                        or type(op.get("replace_all",False)) is not bool
-                        or (op.get("file_path") is not None and not self.resource_path(op["file_path"]))):
-                    return denied
+                if (set(op) - {"name", "action", "old_string", "new_string", "file_path", "replace_all"}
+                        or type(op.get("replace_all", False)) is not bool):
+                    return _denied("修订参数只支持 name、action、old_string、new_string、file_path 和布尔 replace_all。", position=position)
+                if (not isinstance(op["old_string"], str) or not op["old_string"]
+                        or not isinstance(op.get("new_string"), str)):
+                    return _denied("修订须提供非空 old_string 和字符串 new_string。", position=position)
+                if len(op["old_string"]) + len(op["new_string"]) > 65536:
+                    return _denied("单项修订内容超过 65,536 字符；请缩小每次修订范围。", position=position)
+                if op.get("file_path") is not None and not self.resource_path(op["file_path"]):
+                    return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。", position=position)
             elif set(op) - {"name","action","content"} or not isinstance(op.get("content"), str):
-                return denied
+                return _denied("全文写入参数只支持 name、action 和字符串 content。", position=position)
             if len(str(op.get("content") or op.get("file_content") or "")) > 65536:
-                return denied
+                return _denied("单项写入内容超过 65,536 字符；请缩小每次写入范围。", position=position)
         scope["owned"] = owned
         scope["readable"].update(owned)
         return None

@@ -1,14 +1,15 @@
-"""Keep the text of applied review writes tied to their native tool-call IDs."""
+"""Tie review receipts to native outcomes and matching operation identities."""
 from __future__ import annotations
 
+import json
 from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
 
+from .enterprise import scrub
 from .review_input import BUDGET_EXHAUSTED, is_pending_tool_reply
-from .store import redact
 
 _ACTIONS = {
     "add": "新增", "patch": "修订", "replace": "替换", "remove": "删除",
@@ -17,11 +18,12 @@ _ACTIONS = {
 }
 _FIELDS = ("action", "target", "name", "file_path", "old_text", "new_text",
            "content", "old_string", "new_string", "file_content")
+_IDENTITY_FIELDS = ("action", "target", "name", "file_path")
 _REVIEW_END = {"completed": "复盘完成", "failed": "复盘失败", "interrupted": "复盘中断"}
 
 
-def _write_fields(args):
-    return {key: redact(args[key]) for key in _FIELDS if isinstance(args.get(key), str)}
+def _write_fields(args, fields=_FIELDS):
+    return {key: scrub(args[key]) for key in fields if isinstance(args.get(key), str)}
 
 
 class ReviewWrites:
@@ -44,31 +46,75 @@ class ReviewWrites:
                 self.handle = None
                 self.calls = {}
 
-    def record(self, *, session_id, tool_name, tool_call_id, args, **_):
+    def record_attempt(self, *, session_id, tool_name, tool_call_id, args, **_):
+        """Keep operation identities even when a pre-tool guard blocks execution."""
+        self._record(session_id, tool_name, tool_call_id, args, _IDENTITY_FIELDS)
+
+    def record(self, *, session_id, tool_name, tool_call_id, args, result=None, status=None, **_):
+        try:
+            outcome = json.loads(result) if isinstance(result, str) else result
+        except (ValueError, TypeError):
+            outcome = None
+        applied = (status not in ("blocked", "error", "cancelled") and isinstance(outcome, dict)
+                   and outcome.get("success") is True and not outcome.get("staged"))
+        self._record(session_id, tool_name, tool_call_id, args, _FIELDS if applied else _IDENTITY_FIELDS)
+
+    def _record(self, session_id, tool_name, tool_call_id, args, fields):
         if tool_name not in {"memory", "skill_manage"} or not tool_call_id or not isinstance(args, dict):
             return
         with self.lock:
             if self.handle is None or session_id != self.handle:
                 return
-            call = _write_fields(args)
+            call = _write_fields(args, fields)
             operations = args.get("operations")
             if isinstance(operations, list) and all(isinstance(op, dict) for op in operations):
-                call["operations"] = [_write_fields(op) for op in operations]
+                call["operations"] = [_write_fields(op, fields) for op in operations]
             self.calls[tool_name, tool_call_id] = call
 
 
 def _label(fact, args):
-    op = fact.get("operation") or fact
+    operation = fact.get("operation")
+    op = _write_fields(operation if isinstance(operation, dict) else fact, _IDENTITY_FIELDS)
+    args = _write_fields(args, _IDENTITY_FIELDS)
     action = op.get("action") or args.get("action")
-    verb = _ACTIONS.get(action, action or "变更")
+    verb = _ACTIONS.get(action, action or "操作")
     if fact.get("tool") == "memory":
         target = op.get("target") or args.get("target") or fact.get("result", {}).get("target")
         name = "用户档案" if target == "user" else "记忆"
     else:
-        skill = op.get("name") or args.get("name") or "未命名技能"
-        resource = op.get("file_path") or args.get("file_path") or "SKILL.md"
-        name = f"技能 {skill} · {resource}"
+        skill = op.get("name") or args.get("name")
+        resource = op.get("file_path") or args.get("file_path")
+        name = f"技能 {skill}" if skill else "技能操作（名称未记录）"
+        if skill or resource:
+            name += f" · {resource or 'SKILL.md'}"
     return f"{verb} · {name}"
+
+
+def _pending_lines(facts, calls, *, refused=False):
+    entries = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            entries.append(((str(fact),), ""))
+            continue
+        call = calls.get((fact.get("tool"), fact.get("call_id")), {})
+        operations = call.get("operations")
+        if not fact.get("operation") and operations:
+            labels = tuple(_label({**fact, "operation": op}, call) for op in operations)
+        else:
+            labels = (_label(fact, call),)
+        result = fact.get("result") or {}
+        reason = (result.get("error") or result.get("message")) if refused else ""
+        if refused and (not isinstance(reason, str) or not reason):
+            reason = "原始记录未提供拒绝原因。"
+        entries.append((labels, reason))
+    groups = Counter(entries).items() if refused else ((entry, 1) for entry in entries)
+    lines = []
+    for (labels, reason), count in groups:
+        suffix = f"（{count} 次尝试）" if count > 1 else ""
+        lines.append("• " + "；".join(labels) + suffix)
+        if reason:
+            lines.append("  原因：" + reason)
+    return lines
 
 
 def _text_changes(op, *, memory=False):
@@ -135,7 +181,7 @@ def receipt_text(event, calls, created, *, started_at=None):
     for key, heading in (("staged", "等待批准"), ("refused", "被 Hermes 拒绝"), ("uncertain", "结果待确认")):
         facts = event.get(key, [])
         if facts:
-            lines.extend((heading, *[f"• {_label(fact, {})}" if isinstance(fact, dict) else f"• {fact}" for fact in facts], ""))
+            lines.extend((heading, *_pending_lines(facts, calls, refused=key == "refused"), ""))
     error = str(event.get("error") or "")
     if event.get("failure_reason") == BUDGET_EXHAUSTED:
         error = "本次后台复盘达到输入预算，执行记录已保留。"
@@ -145,4 +191,4 @@ def receipt_text(event, calls, created, *, started_at=None):
         error = error.partition(" Send `continue`")[0]
     if error:
         lines.extend(("复盘错误", error, ""))
-    return redact("\n".join(lines)).rstrip() + "\n"
+    return scrub("\n".join(lines)).rstrip() + "\n"
