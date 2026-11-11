@@ -7,6 +7,19 @@ from hermes_codex_learning.host_evidence import read_turn
 
 
 class IncrementalHostTests(unittest.TestCase):
+    def test_changed_file_boundary_cannot_reuse_old_terminal_facts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);path=root/'session.jsonl'
+            meta={'type':'session_meta','payload':{'id':'chat','cwd':directory,'cli_version':'0.167.0'}}
+            def write(code):
+                item={'type':'event_msg','payload':{'type':'item_completed','turn_id':'turn',
+                      'item':{'type':'CommandExecution','id':'cmd','status':'completed','exit_code':code}}}
+                path.write_text(json.dumps(meta)+'\n'+json.dumps(item)+'\n')
+            write(0)
+            before=read_turn(path,'chat','turn',directory,sessions_root=root,include_task=False)
+            write(1)
+            after=read_turn(path,'chat','turn',directory,sessions_root=root,include_task=False,cursor=before['cursor'])
+            self.assertEqual(after['commands']['cmd']['exit_code'],1)
     def test_large_history_and_partial_append_preserve_only_current_turn_facts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

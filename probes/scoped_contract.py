@@ -34,6 +34,38 @@ def main():
     rounds, references = {}, []
     marker = "SYNTHETIC_FOREIGN_MEMORY_MUST_NOT_ENTER_REVIEW"
     body = "---\nname: learned-nfkc-checks\ndescription: Normalize synthetic header identifiers.\nlearning_scope: global_candidate\n---\nApplicability: Unicode header validation.\nLimits: only the observed CSV contract.\nVerification: test full-width and ASCII duplicate identifiers.\n"
+    def supported_write(tool_name, arguments, request):
+        if tool_name not in {"memory","skill_manage"}:
+            return arguments
+        import re
+        sources=[]
+        for message in request.get("messages",[]):
+            content=message.get("content") or ""
+            if not isinstance(content,str):
+                continue
+            for match in re.finditer(r"\[Evidence (\{[^\n]+\})\]\n",content):
+                label=json.loads(match[1])
+                if label.get("scope")=="own":
+                    sources.append((label,content[match.end():]))
+        basis=[]
+        for label,content in sources:
+            if label.get("kind") == "material":
+                quote=next((text for text in ("Synthetic source rule one","Synthetic source rule two","fixture://sources/one","fixture://sources/two") if text in content),content[:80])
+            elif label.get("kind") == "request":
+                quote="normalize CSV headers to NFKC"
+            elif label.get("kind") == "result":
+                quote="Verified synthetic full-width and ASCII matching."
+            else:
+                continue
+            if quote in content:
+                basis.append({"ref":label["ref"],"quote":quote})
+        material=any(label.get("kind")=="material" for label,_ in sources)
+        proof={"classification":"project_fact" if tool_name=="memory" else "procedure","basis":basis[:6],
+               "rationale":"The admitted synthetic source rule belongs in the named skill's reference index and must preserve its source scope." if material else
+                           "CSV header normalization to NFKC and full-width matching are the supported synthetic project convention and reusable procedure."}
+        if "operations" in arguments:
+            return {"operations":[{**operation,"evidence":proof} for operation in arguments["operations"]]}
+        return {**arguments,"evidence":proof}
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):
             pass
@@ -66,7 +98,7 @@ def main():
                     operations.append({"action":"patch", "name":"learned-nfkc-checks", "content":content})
                     operations = [("skill_manage", {"operations":operations})]
                 calls = [{"index":i,"id":phase+"-"+str(turn)+"-"+str(i),"type":"function",
-                          "function":{"name":name,"arguments":json.dumps(arguments)}} for i,(name,arguments) in enumerate(operations)]
+                          "function":{"name":name,"arguments":json.dumps(supported_write(name,arguments,request))}} for i,(name,arguments) in enumerate(operations)]
                 delta, finish = {"role":"assistant","tool_calls":calls}, "tool_calls"
             elif len(requests) == 1:
                 operations = [
@@ -75,7 +107,7 @@ def main():
                     ("skill_manage",{"operations":[{"action":"create","name":"learned-nfkc-checks","content":body}]}),
                 ]
                 calls = [{"index":i,"id":"fixture-"+str(i),"type":"function",
-                          "function":{"name":name,"arguments":json.dumps(arguments)}} for i,(name,arguments) in enumerate(operations)]
+                          "function":{"name":name,"arguments":json.dumps(supported_write(name,arguments,request))}} for i,(name,arguments) in enumerate(operations)]
                 delta, finish = {"role":"assistant","tool_calls":calls}, "tool_calls"
             else:
                 delta, finish = {"role":"assistant","content":"Saved the supported synthetic lesson."}, "stop"
@@ -142,7 +174,7 @@ def main():
         audit = ctx.register_hook("pre_api_request", observe_request)
     api = ctx.learning(version=1)
     guard = install_semantic_policy(api,settings,ctx)
-    install_review_policy(api)
+    install_review_policy(api,settings)
     bridge = Bridge(settings,api)
     try:
         bridge.store.set("knowledge-index-v1",reconcile({},api.read(kind="context"),bootstrap_project="/unrelated"))

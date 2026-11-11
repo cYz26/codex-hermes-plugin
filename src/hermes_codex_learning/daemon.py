@@ -61,39 +61,54 @@ class Bridge:
     def ingest(self) -> None:
         from .delivery import drain_deliveries
         drain_deliveries(self.store, self.usage)
-        for row in self.store.pending():
-            payload = json.loads(row["payload"])
-            excluded = exclude_internal(self.store, payload)
-            if not excluded:
-                register_delegation(self.store, row["id"], payload, settings=self.settings)
-            data = None if excluded else merge_event(self.store, row)
-            if data:
-                self.observe_turn(data, row["id"])
-            if not excluded and payload.get("hook_event_name") in {"UserPromptSubmit", "PostToolUse", "Stop", "Interrupt"}:
-                missing = [key for key in ("session_id", "turn_id") if not payload.get(key)]
-                if missing:
-                    gaps = self.store.get("coverage_gaps", [])
-                    self.store.set("coverage_gaps", (gaps + [{"id": row["id"], "event": payload["hook_event_name"], "missing": missing}])[-100:])
-            if not excluded and payload.get("hook_event_name") == "SessionEnd" and payload.get("session_id"):
-                source = {"host": payload["bridge_host"], "project": payload["bridge_project"], "chat": payload["session_id"]}
-                closing = self.store.get("closing", {})
-                handles = self.store.get("chat-handles:" + digest(source), [])
-                if not handles:
-                    for existing in self.store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'scope:%'").fetchall():
-                        handle = existing["key"][len("scope:"):]
-                        local = self.store.get("workflow-local-source:" + handle, json.loads(existing["value"]))
-                        if all(local.get(key) == value for key,value in source.items()):
-                            handles.append(handle)
-                # Do not create a new native scope merely to close a chat.
-                for handle in handles:
-                    closing[row["id"] + ":" + handle] = handle
-                self.store.set("closing", closing)
-            with self.store.db:
-                self.store.db.execute("UPDATE events SET delivered=?,error=NULL WHERE id=?", (time.time(), row["id"]))
+        self.store.set("loop-progress",{**self.store.get("loop-progress",{}),"phase":"consuming","updated_at":time.time()})
+        started, consumed = time.monotonic(), 0
+        while consumed < 1000 and time.monotonic()-started < 2:
+            rows = self.store.pending()
+            if not rows:
+                break
+            for row in rows:
+                self.consume_event(row)
+                consumed += 1
+                if consumed >= 1000 or time.monotonic()-started >= 2:
+                    break
         from .feedback import reconcile as reconcile_feedback
         reconcile_feedback(self.store)
 
+    def consume_event(self, row) -> None:
+        payload = json.loads(row["payload"])
+        excluded = exclude_internal(self.store, payload)
+        if not excluded:
+            register_delegation(self.store, row["id"], payload, settings=self.settings)
+        data = None if excluded else merge_event(self.store, row)
+        if data:
+            self.observe_turn(data, row["id"])
+        if not excluded and payload.get("hook_event_name") in {"UserPromptSubmit", "PostToolUse", "Stop", "Interrupt"}:
+            missing = [key for key in ("session_id", "turn_id") if not payload.get(key)]
+            if missing:
+                gaps = self.store.get("coverage_gaps", [])
+                self.store.set("coverage_gaps", (gaps + [{"id": row["id"], "event": payload["hook_event_name"], "missing": missing}])[-100:])
+        if not excluded and payload.get("hook_event_name") == "SessionEnd" and payload.get("session_id"):
+            source = {"host": payload["bridge_host"], "project": payload["bridge_project"], "chat": payload["session_id"]}
+            closing = self.store.get("closing", {})
+            handles = self.store.get("chat-handles:" + digest(source), [])
+            if not handles:
+                for existing in self.store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'scope:%'").fetchall():
+                    handle = existing["key"][len("scope:"):]
+                    local = self.store.get("workflow-local-source:" + handle, json.loads(existing["value"]))
+                    if all(local.get(key) == value for key,value in source.items()):
+                        handles.append(handle)
+            # Do not create a new native scope merely to close a chat.
+            for handle in handles:
+                closing[row["id"] + ":" + handle] = handle
+            self.store.set("closing", closing)
+        with self.store.db:
+            self.store.db.execute("UPDATE events SET delivered=?,error=NULL WHERE id=?", (time.time(), row["id"]))
+        self.store.set("loop-progress",{"phase":"consuming","updated_at":time.time(),
+            "last_event":row["id"],"chat":payload.get("session_id"),"turn":payload.get("turn_id"),"captured_at":row["created"]})
+
     def observe_turn(self, data: dict, event_id: str) -> None:
+        key = digest([data["source"]["chat"],data["source"]["turn"]])
         if data.get('_evidence_mode') == 'workflow-v1':
             self.observe_workflow(data, event_id)
             return
@@ -107,6 +122,7 @@ class Bridge:
             from .policy import admit
             assessment = admit(observation(enriched), self.settings.data_policy, data["source"]["project"])
             if not assessment["allowed"]:
+                self.store.set("turn-admission:"+key,{"state":"withheld","reason":assessment.get("reason"),"at":time.time()})
                 return
             if self.settings.data_policy.get("mode")=="trusted_enterprise":
                 from .enterprise import scrub
@@ -114,8 +130,15 @@ class Bridge:
         else:
             assessment = {"allowed":True, "basis":"legacy_configuration"}
         if not enriched["user"]:
+            self.store.set("turn-admission:"+key,{"state":"awaiting_input","reason":"request_body_unavailable","at":time.time()})
             return
+        if (enriched["status"] == "incomplete" and enriched.get("_ended_by") == "Stop" and self.store.db.execute(
+                "SELECT 1 FROM learning_signals WHERE chat=? AND turn=? AND kind IN ('user_followup','user_correction')",
+                (enriched["source"]["chat"],enriched["source"]["turn"])).fetchone()):
+            enriched={**enriched,"status":"completed","learning_basis":"dialogue_with_unresolved_execution",
+                      "coverage":sorted(set(enriched.get("coverage",[])) | {"execution_results_unresolved"})}
         if enriched["status"] not in {"completed", "interrupted"}:
+            self.store.set("turn-admission:"+key,{"state":"awaiting_terminal_evidence","at":time.time()})
             if enriched != data:
                 key = digest([enriched["source"]["chat"], enriched["source"]["turn"]])
                 with self.store.db:
@@ -131,7 +154,14 @@ class Bridge:
             self.store.set("enterprise-scope:"+handle,assessment["boundary_id"])
         self.bind_chat_handle(enriched["source"], handle)
         self.store.set("assessment:" + handle, {key:value for key,value in assessment.items() if key != "payload"})
-        self.api.observe(handle, assessment.get("payload", observation(enriched)), event_id=event_id)
+        admitted = assessment.get("payload", observation(enriched))
+        if enriched.get("learning_basis"):
+            admitted = {**admitted,"status":enriched["status"],"learning_basis":enriched["learning_basis"],"coverage":enriched["coverage"]}
+        receipt = self.api.observe(handle, admitted, event_id=event_id)
+        self.store.set("turn-admission:"+key,{"state":"admitted","at":time.time(),"basis":assessment.get("basis"),
+                                            "learning_basis":enriched.get("learning_basis","terminal_execution")})
+        if isinstance(receipt,dict):
+            self.store.set("observation-receipt:"+key,{"handle":handle,"revision":receipt.get("revision"),"event":event_id,"at":time.time()})
         if self.settings.proactive:
             from .scheduling import enqueue
             enqueue(self.store, enriched, handle)
@@ -153,7 +183,11 @@ class Bridge:
         self.store.set('scope:' + handle, {**value['source'], 'evidence_mode': 'workflow-v1'})
         self.store.set('workflow-local-source:' + handle, data['source'])
         self.bind_chat_handle(data['source'], handle)
-        self.api.observe(handle, value, event_id=event_id)
+        receipt = self.api.observe(handle, value, event_id=event_id)
+        key = digest([data['source']['chat'], data['source']['turn']])
+        self.store.set("turn-admission:"+key,{"state":"workflow_only","body_retained":False,"at":time.time()})
+        if isinstance(receipt,dict):
+            self.store.set("observation-receipt:"+key,{"handle":handle,"revision":receipt.get("revision"),"event":event_id,"at":time.time()})
         if self.settings.proactive:
             from .scheduling import enqueue
             enqueue(self.store, data, handle)
@@ -198,9 +232,10 @@ class Bridge:
         if now - self.store.get("last_input_retry", 0) < 30:
             return
         self.store.set("last_input_retry", now)
-        rows = self.store.db.execute("SELECT payload FROM turns WHERE observed_revision IS NULL "
-                                     "AND json_extract(payload,'$.status') IN ('completed','interrupted','incomplete') "
-                                     "ORDER BY activity DESC LIMIT 8").fetchall()
+        rows = self.store.db.execute("SELECT t.id,t.payload FROM turns t LEFT JOIN meta m ON m.key='input-retry:'||t.id "
+                                     "WHERE observed_revision IS NULL AND json_extract(t.payload,'$.status') IN ('completed','interrupted','incomplete') "
+                                     "AND COALESCE(json_extract(m.value,'$.retry_at'),0)<=? "
+                                     "ORDER BY COALESCE(json_extract(m.value,'$.last_attempt'),0),activity,t.id LIMIT 8",(now,)).fetchall()
         for row in rows:
             data = json.loads(row["payload"])
             event = self.store.db.execute("SELECT id FROM events WHERE json_extract(payload,'$.session_id')=? "
@@ -209,6 +244,11 @@ class Bridge:
                                           "ORDER BY created DESC LIMIT 1", (data["source"]["chat"], data["source"]["turn"])).fetchone()
             if event:
                 self.observe_turn(data, event["id"])
+            observed = self.store.db.execute("SELECT observed_revision FROM turns WHERE id=?",(row["id"],)).fetchone()[0]
+            previous = self.store.get("input-retry:"+row["id"],{}) or {}
+            attempts = previous.get("attempts",0)+1
+            self.store.set("input-retry:"+row["id"],None if observed else {"last_attempt":now,"attempts":attempts,
+                "retry_at":now+min(900,30*2**min(attempts-1,5)),"reason":self.store.get("turn-admission:"+row["id"],{}).get("reason","terminal_input_unavailable")})
 
     def usage(self, payload: dict) -> None:
         if not payload.get("tool_name", "").endswith("skill_load"):
@@ -288,6 +328,8 @@ class Bridge:
         from .scheduling import ordered_intents
         from . import learning_dispatch
         intents = status["intents"] + learning_dispatch.recover_intents(self, status["intents"])
+        self.store.set("review-queue",{"updated_at":time.time(),"intents":[{key:intent[key] for key in
+                       ("id","handle","revision","status") if key in intent} for intent in intents]})
         for intent in ordered_intents(self.store, intents):
             if self.drain.is_set():
                 break
@@ -319,12 +361,19 @@ class Bridge:
             self.emit({"id": attempt_id + ":start", "kind": "review.started", **provenance,
                        "retry_index": intent.get("retry_index", 0)})
             self.store.set("state", "reviewing")
+            self.store.set("loop-progress",{**self.store.get("loop-progress",{}),"phase":"reviewing","updated_at":started_at,"handle":intent["handle"],"intent":intent["id"]})
+            self.store.set("review-progress:"+intent["handle"],{"state":"running","intent":intent["id"],"revision":intent.get("revision"),"started_at":started_at})
             with self.review_writes.capture(intent["handle"]) as calls, \
                     capture_review_summary(self.api, intent["handle"]) as summary:
                 result = self.api.run_review(intent["handle"], intent["id"], attempt_id=attempt_id)
             finished_at = time.time()
             after_context = self.api.read(kind="context")
             after_versions = self.skill_versions(after_context)
+            self.store.set("review-progress:"+intent["handle"],{"state":result["run_status"],"intent":intent["id"],
+                "revision":intent.get("revision"),"started_at":started_at,"finished_at":finished_at,
+                "input":self.store.get("review-input:"+intent["id"],{}),"versions":{name:version for name,version in after_versions.items() if before_versions.get(name) != version},
+                "candidates":result.get("learning_candidates",self.store.get("review-candidates:"+intent["id"],[])),
+                "staged_count":len(result.get("staged",[])),"applied_count":len(result.get("applied",[]))})
             if source.get('evidence_mode') == 'workflow-v1':
                 from .knowledge import changed_skills
                 attestations = self.store.get('workflow-skill-attestations', {})
@@ -352,6 +401,11 @@ class Bridge:
                             previous_publication = self.store.get("publications-v1",{}).get(name,{})
                             proofs[name] = {**proof, "version":after_versions[name], "catalog_version":catalog_versions.get(name),
                                             "prior_published_version":previous_publication.get("artifact",{}).get("version")}
+                            if "learning_candidates" in result:
+                                supported = [item for item in result["learning_candidates"] if item.get("state") == "accepted"
+                                             and item.get("tool") == "skill_manage" and item.get("name") == name]
+                                proofs[name].update(evidence_contract=1,review_handle=intent["handle"],learning_evidence={"state":"passed" if supported else "missing",
+                                    "claims":supported,"review_input":intent["id"]})
                     self.store.set("semantic-skill-attestations", proofs)
                     if any(item.get("tool") == "memory" for item in result.get("applied", [])):
                         memory_proofs = self.store.get("semantic-memory-attestations", {})
@@ -380,11 +434,25 @@ class Bridge:
                 self.emit(event)
             self.store.set("state", "publishing")
             if result["run_status"] in {"completed","failed","interrupted","unknown","superseded"}:
-                with self.store.db:
-                    self.store.db.execute("DELETE FROM review_priority WHERE handle=? AND requested IS NOT NULL AND created<=?",
-                                          (intent["handle"],started_at))
+                self.clear_reviewed_priority(intent,started_at)
             self.last_publish = 0.0
             learning_dispatch.record_result(self, intent, result, after_versions)
+            # A long native review must not monopolize a whole batch of intents
+            # while newer hook receipts wait in the persistent capture outbox.
+            if result["run_status"] not in {"deferred","superseded"}:
+                break
+
+    def clear_reviewed_priority(self, intent, started_at):
+        """A review of revision N cannot consume a newer turn's priority signal."""
+        rows=self.store.db.execute("SELECT id FROM review_priority WHERE handle=? AND requested IS NOT NULL AND created<=?",
+                                   (intent["handle"],started_at)).fetchall()
+        for row in rows:
+            receipt=self.store.get("observation-receipt:"+row["id"],{})
+            revision=receipt.get("revision")
+            if type(revision) is int and revision > intent.get("revision",-1):
+                continue
+            with self.store.db:
+                self.store.db.execute("DELETE FROM review_priority WHERE id=?",(row["id"],))
 
     def skill_versions(self, context: dict) -> dict:
         cache = self.store.get("skill-versions-v1", {})
@@ -554,17 +622,22 @@ class Bridge:
                                 and attestation.get('version') == value['version']):
                             assessment = {'allowed': True, 'basis': 'native_workflow_review_without_task_content'}
                         semantic = self.store.get("semantic-skill-attestations", {}).get(name, {})
+                        evidence_ok = semantic.get("evidence_contract") != 1 or semantic.get("learning_evidence",{}).get("state") == "passed"
+                        if semantic.get("version") == value["version"] and not evidence_ok:
+                            assessment = {"allowed":False,"reason":"task_learning_evidence_missing"}
                         previous = publications.get(name,{})
                         public_revision = (previous.get("artifact",{}).get("version") == semantic.get("prior_published_version")
                                            and bool(semantic.get("prior_published_version"))
                                            and set(origins) <= set(previous.get("sources",[])) | {semantic.get("project")})
-                        if (semantic.get("version") == value["version"] and (origins == [semantic.get("project")] or public_revision)
+                        if (evidence_ok and semantic.get("version") == value["version"] and (origins == [semantic.get("project")] or public_revision)
                                 and semantic.get("classification") in {"public", "synthetic"}):
                             assessment = {"allowed":True, "basis":"scoped_assessed_native_review"}
                         if not assessment["allowed"]:
                             decision = assessment
                         elif enterprise:
                             decision={**decision,"audience":"enterprise","boundary_id":enterprise["id"]}
+                        if decision["allowed"] and semantic.get("evidence_contract") == 1:
+                            decision={**decision,"task_relevance":{"state":"passed","proof_hash":digest(semantic.get("learning_evidence"))}}
                     if self.settings.quality_checks and decision["allowed"]:
                         from .quality import proof_valid, verify
                         key = "quality:" + digest([name, value["version"]])
@@ -683,7 +756,15 @@ class Bridge:
                 from .learning_dispatch import prepare
                 prepare(self)
                 self.idle_reviews()
-                self.reviews()
+                if self.store.db.execute("SELECT 1 FROM events WHERE delivered IS NULL LIMIT 1").fetchone():
+                    drain_started = self.store.get("backlog-drain-start") or time.time()
+                    self.store.set("backlog-drain-start",drain_started)
+                    if time.time()-drain_started >= 30:
+                        self.reviews()
+                        self.store.set("backlog-drain-start",time.time())
+                else:
+                    self.store.set("backlog-drain-start",None)
+                    self.reviews()
                 if self.drain.is_set():
                     break
                 closing = self.store.get("closing", {})
@@ -696,6 +777,7 @@ class Bridge:
                 self.publish()
                 if self.store.get("state") != "idle":
                     self.store.set("state", "idle")
+                self.store.set("loop-progress",{**self.store.get("loop-progress",{}),"phase":"idle","updated_at":time.time()})
                 self.notifications()
                 if self.store.get("retention-request") or (self.settings.retention_enabled and
                         time.time() - self.store.get("retention:last", {}).get("at", 0) >= 86400):
@@ -766,7 +848,11 @@ class Bridge:
             with StoreConnection(self.settings, read_only=True) as store:
                 snapshot = self.startup_status if not self.resume.is_set() else (
                     json.loads(status.read_text()) if status.exists() else None)
+                from .progress import summarize
+                progress = summarize(store,project=self.request_project(params) if "cwd" in params else None,
+                    chat=params.get("chat"),turn=params.get("turn"),limit=params.get("limit",20),after_cursor=params.get("after_cursor",0))
                 return {"snapshot": snapshot,
+                        "progress":progress,
                         "review_retries": ReviewRetryQueue(self.settings, store).summary(),
                         "build": self.build,
                         "plugin_root": str(Path(__file__).resolve().parents[2]),

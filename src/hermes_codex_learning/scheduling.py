@@ -14,6 +14,16 @@ def annotate(payload: dict, store) -> dict:
     payload = dict(payload)
     chat, turn = payload.get("session_id"), payload.get("turn_id")
     if chat and turn and payload.get("hook_event_name") == "UserPromptSubmit":
+        previous = store.db.execute("SELECT 1 FROM events WHERE json_extract(payload,'$.session_id')=? "
+                                    "AND json_extract(payload,'$.turn_id')<>? "
+                                    "AND json_extract(payload,'$.hook_event_name')='UserPromptSubmit' LIMIT 1", (chat,turn)).fetchone()
+        relation = payload.get("bridge_host_context", {}).get("relation", {})
+        if previous or relation.get("status") == "verified":
+            # Every addition is a candidate. The native review decides whether it
+            # changes an approach; wording only affects queue priority.
+            with store.db:
+                store.db.execute("INSERT OR IGNORE INTO learning_signals VALUES (?,?,?,?)",
+                                 (chat, turn, "user_followup", time.time()))
         if CORRECTION.search(str(payload.get("prompt", ""))[:65536]):
             with store.db:
                 store.db.execute("INSERT OR IGNORE INTO learning_signals VALUES (?,?,?,?)",
@@ -41,8 +51,11 @@ def enqueue(store, data: dict, handle: str):
             signals.add("same_test_recovered")
     if not signals:
         return
-    # High-value candidates still wait for real terminal execution facts.
-    if data["status"] != "completed" or any(tool["status"] in {"running", "unknown"} for tool in data["tools"].values()):
+    # Dialogue lessons do not assert that unresolved tools succeeded. Execution
+    # recovery still requires the real matching test result.
+    dialogue = bool(signals & {"user_followup", "user_correction"})
+    if data["status"] != "completed" or (not dialogue and any(
+            tool["status"] in {"running", "unknown"} for tool in data["tools"].values())):
         return
     identity, revision = digest([source["chat"], source["turn"]]), digest(data)
     with store.db:
@@ -60,6 +73,17 @@ def flush(store, api):
             continue
         seen.add(row["handle"])
         api.maintenance(handle=row["handle"], idle_flush=True)
+        targets=[store.get("observation-receipt:"+item[0],{}).get("revision") for item in store.db.execute(
+            "SELECT id FROM review_priority WHERE handle=? AND requested IS NULL",(row["handle"],))]
+        known=[revision for revision in targets if type(revision) is int]
+        if known and callable(getattr(api,"read",None)):
+            from .native_reads import status
+            intents=status(api).get("intents",[])
+            if not any(intent.get("handle")==row["handle"] and intent.get("status") in {"queued","running"}
+                       and intent.get("revision",-1)>=max(known) for intent in intents):
+                # Native idle flush may defer while an older revision is queued.
+                # Keep the feedback pending so it is retried after that review.
+                continue
         with store.db:
             store.db.execute("UPDATE review_priority SET requested=? WHERE handle=? AND requested IS NULL",
                              (time.time(), row["handle"]))

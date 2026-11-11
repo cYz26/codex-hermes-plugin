@@ -75,6 +75,11 @@ def merge_event(store: Store, row: dict) -> dict | None:
                    "executor": "Codex App"},
         "user": "", "assistant": "", "tools": {}, "status": "running", "coverage": [],
     }
+    provenance = data.setdefault("evidence_provenance", {})
+    captured_at = row["created"] if "created" in row.keys() else time.time()
+    provenance.setdefault("first_captured_at", captured_at)
+    if event.get("bridge_host_context"):
+        data["host_context"] = event["bridge_host_context"]
     if event.get('bridge_evidence_mode') == 'workflow-v1':
         if data.get('_evidence_mode') != 'semantic-v2':
             data['_evidence_mode'] = 'workflow-v1'
@@ -84,8 +89,12 @@ def merge_event(store: Store, row: dict) -> dict | None:
         data['_evidence_mode'] = 'semantic-v2'
     if name == "UserPromptSubmit":
         data["user"] = event.get("prompt", "")
-        data["status"] = "running"
-        data["_ended_by"] = None
+        provenance.update(request_event=row["id"], request_at=captured_at,
+                          body_retained=event.get("bridge_admission", {}).get("body_retained") is not False)
+        # A real request has a distinct turn id. A late receipt for this same
+        # request cannot erase an already received Stop/Interrupt.
+        if not data.get("_ended_by"):
+            data["status"] = "running"
     elif name == "PreToolUse":
         data["status"] = "running"
         tool_id = event.get("tool_use_id")
@@ -130,6 +139,7 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 data["coverage"] = sorted(set(data["coverage"]) | {gap + ":" + target_id})
     elif name == "Stop":
         data["assistant"] = event.get("last_assistant_message", "")
+        provenance.update(terminal_event=row["id"], terminal_at=captured_at)
         if data.get("_ended_by") != "Interrupt" and data["status"] != "interrupted":
             data["_ended_by"] = "Stop"
     elif name == "Interrupt":

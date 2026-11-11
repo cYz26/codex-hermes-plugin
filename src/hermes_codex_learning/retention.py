@@ -53,6 +53,30 @@ def run(settings, store, api, *, dry_run=True):
             store.db.execute("DELETE FROM learning_signals WHERE chat=? AND turn=?", (source["chat"],data["source"]["turn"]))
             store.db.execute("DELETE FROM review_priority WHERE id=?", (row["id"],))
             store.db.execute("DELETE FROM meta WHERE key=?", ("transcript-cursor:"+digest([source["chat"],data["source"]["turn"]]),))
+            for mode in (True,False):
+                store.db.execute("DELETE FROM meta WHERE key=?",("transcript-cursor:"+digest([source["chat"],data["source"]["turn"],mode]),))
+            for prefix in ("observation-receipt:","turn-admission:","input-retry:","capture-refusal:","recall-offer:"):
+                store.db.execute("DELETE FROM meta WHERE key=?",(prefix+row["id"],))
+            for handle in handles:
+                progress=store.get("review-progress:"+handle,{})
+                prior_inputs=store.db.execute("SELECT key FROM meta WHERE key LIKE 'review-input:%' AND json_extract(value,'$.handle')=?",(handle,)).fetchall()
+                for item in prior_inputs:
+                    intent_id=item[0][len("review-input:"):]
+                    for prefix in ("review-input:","review-candidates:"):
+                        store.db.execute("DELETE FROM meta WHERE key=?",(prefix+intent_id,))
+                if progress.get("intent"):
+                    for prefix in ("review-input:","review-candidates:"):
+                        store.db.execute("DELETE FROM meta WHERE key=?",(prefix+progress["intent"],))
+                store.db.execute("DELETE FROM meta WHERE key=?",("review-progress:"+handle,))
+        proofs=store.get("semantic-skill-attestations",{})
+        changed=False
+        for proof in proofs.values():
+            evidence=proof.get("learning_evidence",{})
+            if proof.get("review_handle") in handles and evidence.get("claims"):
+                proof["learning_evidence"]={"state":evidence.get("state"),"proof_hash":digest(evidence),
+                                            "retired_source_quotes":True,"review_input":evidence.get("review_input")}
+                changed=True
+        if changed:store.set("semantic-skill-attestations",proofs)
         result["retired_turns"] += 1
     queue = NoticeQueue(settings.state)
     try:

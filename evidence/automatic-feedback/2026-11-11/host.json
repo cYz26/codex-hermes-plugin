@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "scope": "Actual host session relationship metadata and independent CLI hook availability; not new-code Desktop execution.",
+  "session_metadata": {
+    "cli_version": "0.167.0",
+    "relationship_status": "verified",
+    "kind": "sidechat",
+    "child_id_sha256": "6183d401c4f2b3b910d29f30caf5c38ebbb3a8c24db7fc6a563f5722ffec7234",
+    "parent_id_sha256": "2c4bac724f94c93020719b2b3a41e352b113155f9da14e1dc49287cc5ddd5678",
+    "source_project_sha256": "8248ef68c83245a5c1d7925301e75c933fee9ff16c81c593b5d59717f1bd1dbc",
+    "same_project_headers_verified": true,
+    "headers_owned_by_current_user": true,
+    "forked_from_ordinal_exclusive": 527,
+    "history_base_end_ordinal_exclusive": 527,
+    "history_base_end_byte_offset": 2658609,
+    "attached_thread": true,
+    "child_header_sha256": "d6314e846681bf4d30aa45a9e554842579d95dd4b07e75d2dd93a8eada6d9fc7",
+    "parent_header_sha256": "1f77d9840ce2d7b8b035598ef1362f957abcfab7948df5e9db7b17c87bd169ec",
+    "task_bodies_read": false
+  },
+  "installed_hooks": {
+    "source_package": "0.8.0",
+    "ready": true,
+    "trusted_enabled_count": 7,
+    "trust_changed": false,
+    "hooks_executed": false,
+    "events": [
+      "preToolUse",
+      "postToolUse",
+      "sessionStart",
+      "sessionEnd",
+      "userPromptSubmit",
+      "stop",
+      "interrupt"
+    ],
+    "original_record_sha256": "a3aa4af3767ee0acd311416811e4575efdba3220292ef4791018c7f19fe3885e"
+  },
+  "limitations": [
+    "Historical first-round task bodies were not retained and have not been reconstructed.",
+    "The new code was not installed or exercised by Desktop.",
+    "Host relationship metadata does not prove parent context was learned or applied."
+  ],
+  "redactions": [
+    "Absolute project/transcript paths and chat identities are represented by hashes."
+  ],
+  "active_runtime_at_delivery": {
+    "source": "Read-only MCP learning_status after local implementation commit",
+    "version": "0.8.0",
+    "build_digest": "a2b847dbacfcc593acb3fdd4115a261c91b99547f2a7b8b4810ea05cb68ac4e2",
+    "task_installed_or_activated_new_code": false
+  }
+}
