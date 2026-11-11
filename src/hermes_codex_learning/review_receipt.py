@@ -215,4 +215,10 @@ def receipt_text(event, calls, created, *, started_at=None):
         error = error.partition(" Send `continue`")[0]
     if error:
         lines.extend(("复盘错误", error, ""))
+    if event.get("retry"):
+        from .review_retries import retry_text
+        recovery = event["retry"]
+        lines.extend(("复盘恢复", retry_text(recovery), ""))
+        if recovery.get("last_attempt"):
+            lines.extend(("尝试记录", recovery["last_attempt"], ""))
     return scrub("\n".join(lines)).rstrip() + "\n"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,10 +37,22 @@ class Settings:
     proactive: bool = False
     quality_checks: bool = False
     retention_enabled: bool = False
+    review_retry_enabled: bool = True
+    review_retry_limit: int = 3
+    review_retry_delay: float = 300
+    review_retry_max_delay: float = 3600
 
     def __post_init__(self):
-        if any(not isinstance(value, bool) for value in (self.proactive,self.quality_checks,self.retention_enabled)):
+        if any(not isinstance(value, bool) for value in (self.proactive,self.quality_checks,self.retention_enabled,
+                                                       self.review_retry_enabled)):
             raise ValueError("Learning and retention switches must be booleans")
+        if isinstance(self.review_retry_limit, bool) or not isinstance(self.review_retry_limit, int) or not 1 <= self.review_retry_limit <= 10:
+            raise ValueError("Review retries must be bounded between one and ten")
+        for value in (self.review_retry_delay, self.review_retry_max_delay):
+            if isinstance(value, bool) or not isinstance(value, (int,float)) or not math.isfinite(value) or not 1 <= value <= 86400:
+                raise ValueError("Review retry delays must be finite values between one second and one day")
+        if self.review_retry_max_delay < self.review_retry_delay:
+            raise ValueError("Maximum retry delay must cover the initial delay")
         if self.capture_scope not in {"project", "global"}:
             raise ValueError("capture_scope must be project or global")
         if any(not Path(path).is_absolute() for path in self.excluded_projects):
@@ -151,4 +164,8 @@ class Settings:
             proactive=data.get("learning", {}).get("proactive", False),
             quality_checks=data.get("learning", {}).get("quality_checks", False),
             retention_enabled=data.get("retention", {}).get("enabled", False),
+            review_retry_enabled=data.get("learning", {}).get("retries", {}).get("enabled", True),
+            review_retry_limit=data.get("learning", {}).get("retries", {}).get("max_retries", 3),
+            review_retry_delay=data.get("learning", {}).get("retries", {}).get("initial_delay_seconds", 300),
+            review_retry_max_delay=data.get("learning", {}).get("retries", {}).get("max_delay_seconds", 3600),
         )

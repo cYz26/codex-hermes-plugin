@@ -19,6 +19,7 @@ from .normalize import merge_event, observation
 from .notify import macos_notification, message, should_notify
 from .review_receipt import ReviewWrites, receipt_text
 from .review_summary import capture_review_summary
+from .review_retries import ReviewRetryQueue
 from .store import Store, atomic_json, digest, dumps
 from . import native_reads
 
@@ -28,6 +29,7 @@ class Bridge:
         self.settings, self.api = settings, api
         self.review_writes = review_writes or ReviewWrites()
         self.store = Store(settings.state)
+        self.retry_queue = ReviewRetryQueue(settings, self.store)
         from .read_receipts import initialize
         initialize(settings.state)
         self.stop = threading.Event()
@@ -271,6 +273,17 @@ class Bridge:
             self.store.set("enterprise-policy-state","boundary_changed")
             return
         self.store.set("enterprise-policy-state","ready" if enterprise else "not_enabled")
+        retry_available = callable(getattr(self.api, "retry_review", None))
+        if retry_available and not self.drain.is_set():
+            def local_source(handle, source):
+                return self.store.get("workflow-local-source:" + handle, self.store.get("scope:" + handle, source))
+            for retry in self.retry_queue.sync(self.api, source_for=local_source):
+                if retry["state"] in {"waiting", "exhausted", "blocked"}:
+                    self.emit({"id": "retry-scheduled:" + digest([retry["root_intent"], retry["retry_index"], retry["state"], retry["reason"]]),
+                               "kind": "review.retry_scheduled", "project": retry.get("project"),
+                               "source_chat": retry.get("chat"), "run_status": retry.get("outcome_status"),
+                               "error": retry.get("error"), "retry": retry})
+            self.retry_queue.process(self.api)
         status = native_reads.status(self.api)
         from .scheduling import ordered_intents
         from . import learning_dispatch
@@ -303,7 +316,8 @@ class Bridge:
             if self.settings.capture_scope == "global" or enterprise:
                 self.update_knowledge(before_context)
             started_at = time.time()
-            self.emit({"id": attempt_id + ":start", "kind": "review.started", **provenance})
+            self.emit({"id": attempt_id + ":start", "kind": "review.started", **provenance,
+                       "retry_index": intent.get("retry_index", 0)})
             self.store.set("state", "reviewing")
             with self.review_writes.capture(intent["handle"]) as calls, \
                     capture_review_summary(self.api, intent["handle"]) as summary:
@@ -358,6 +372,8 @@ class Bridge:
                     applied_entities += ["memory:" + key for key, _, _ in memory_entries(after_context) if key not in previous_entries]
                 event = {**result, "id": attempt_id + ":result", "kind": "review.finished", **provenance,
                          "applied_entities": sorted(set(applied_entities)), "review_summary": summary["text"]}
+                if retry_available:
+                    event["retry"] = self.retry_queue.record(intent, {**result, "id": attempt_id}, local)
                 if should_notify(event):
                     event["receipt"] = receipt_text({**event, "message": message(event)}, calls, finished_at,
                                                     started_at=started_at)
@@ -463,6 +479,7 @@ class Bridge:
         atomic_json(self.settings.state / "context.json", context)
         atomic_json(self.settings.state / "status.json", {
             **native_reads.status(self.api), "daemon": self.store.get("state"), "updated_at": time.time(),
+            "review_retries": self.retry_queue.summary(),
         })
         self.last_publish = time.monotonic()
         from .learning_dispatch import after_publish
@@ -700,6 +717,12 @@ class Bridge:
                 return result
         if method == "capabilities":
             return {"build":self.build,"native":self.native_capabilities}
+        if method == "review_retry":
+            if not self.resume.is_set() or self.drain.is_set():
+                raise RuntimeError("Learning runtime is paused; retry after the update")
+            with StoreConnection(self.settings) as store:
+                return ReviewRetryQueue(self.settings, store).request(params.get("attempt_id"),
+                                                                     dry_run=params.get("dry_run", True))
         if method == "artifact_read":
             return native_reads.skill(self.api,name=params["name"])
         if method == "retention":
@@ -734,6 +757,7 @@ class Bridge:
                 snapshot = self.startup_status if not self.resume.is_set() else (
                     json.loads(status.read_text()) if status.exists() else None)
                 return {"snapshot": snapshot,
+                        "review_retries": ReviewRetryQueue(self.settings, store).summary(),
                         "build": self.build,
                         "coverage": {
                             "pending_events":store.db.execute("SELECT COUNT(*) FROM events WHERE delivered IS NULL").fetchone()[0],

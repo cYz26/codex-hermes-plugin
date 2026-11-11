@@ -71,6 +71,18 @@ class NativeReviewGuardTests(unittest.TestCase):
                 self.assertEqual(seen, [None])
                 self.assertTrue(restored)
 
+    def test_recovery_checks_prior_writes_in_the_same_unattended_fork(self):
+        for tag in ("v0.23.0", "v0.23.1"):
+            with self.subTest(tag=tag):
+                result, seen, restored = self.exercise(tag=tag, intent={"memory":True, "skills":True,
+                    "recovery":{"applied":[{"name":"learned-existing"}], "staged":[{"pending_id":"pending-write"}]}})
+                self.assertEqual(result["run_status"], "completed")
+                self.assertIn("learned-existing", self.fork_details["prompt"])
+                self.assertIn("pending-write", self.fork_details["prompt"])
+                self.assertFalse(self.fork_details["attended"])
+                self.assertEqual(seen, [None])
+                self.assertTrue(restored)
+
     def test_manual_focus_runs_when_automatic_reviews_are_disabled_without_elevating_writes(self):
         for tag in ("v0.23.0", "v0.23.1"):
             with self.subTest(tag=tag):

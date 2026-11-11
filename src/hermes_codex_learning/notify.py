@@ -14,15 +14,20 @@ from .macos_bundle import (APP_NAME, APP_ID, APP_EXECUTABLE, LEGACY_APP_ID,
 
 
 def should_notify(event: dict) -> bool:
-    if event["kind"] in {"update.notice", "publication.applied", "publication.pending"}:
+    if event["kind"] in {"update.notice", "publication.applied", "publication.pending", "review.retry_scheduled"}:
         return True
     return event["kind"] == "review.finished" and bool(
         event.get("applied_entities", event.get("applied")) or event.get("staged") or event.get("run_status") != "completed"
+        or (event.get("retry") or {}).get("retry_index")
     )
 
 
 def message(event: dict) -> str:
     text = _message(event)
+    from .review_retries import retry_text
+    recovery = retry_text(event.get("retry"))
+    if recovery:
+        text += "；" + recovery
     if event.get("kind") == "review.finished":
         summary = summary_text(event.get("review_summary"))
         if summary:
@@ -38,7 +43,9 @@ def _message(event: dict) -> str:
     if kind == "publication.pending":
         return "Hermes 有 1 项通用候选待验证，尚未共享：" + event["name"]
     if kind == "review.started":
-        return "Hermes 正在整理本轮经验"
+        return f"Hermes 正在第 {event['retry_index']} 次重试复盘" if event.get("retry_index") else "Hermes 正在整理本轮经验"
+    if kind == "review.retry_scheduled":
+        return "Hermes 已保留上次复盘记录"
     if kind == "skill.loaded":
         return f"本轮已加载 Hermes 技能：{event.get('name', '')}"
     from .notices import entities

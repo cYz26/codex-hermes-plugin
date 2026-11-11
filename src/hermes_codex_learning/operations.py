@@ -11,6 +11,10 @@ from .store import Store, atomic_json, digest
 
 
 def add_parsers(commands):
+    retry = commands.add_parser("review-retry", help="Preview or request a bounded retry of a discovered review attempt")
+    retry.add_argument("--settings")
+    retry.add_argument("--attempt", required=True)
+    retry.add_argument("--apply", action="store_true")
     enterprise=commands.add_parser("enterprise-config",help="Bind operator-authorized enterprise learning to this host and model configuration")
     enterprise.add_argument("--settings")
     enterprise.add_argument("--apply",action="store_true")
@@ -48,6 +52,10 @@ def add_parsers(commands):
 
 
 def execute(args):
+    if args.command == "review-retry":
+        from .ipc import request
+        return request(Settings.load(args.settings), "review_retry",
+                       {"attempt_id": args.attempt, "dry_run": not args.apply}, timeout=5)
     if args.command=="enterprise-config":
         from .enterprise import make_boundary
         from .updates import exclusive, Updater

@@ -74,6 +74,8 @@ class NoticeQueue:
         payload = {"id": event["id"], "scope": scope, "summary": event["message"], "status": status,
                    "applied_entities": sorted(set(applied)), "pending_entities": staged,
                    "receipt": str(path), "stage": "queued", "visibility": "unknown"}
+        if event.get("retry"):
+            payload["retry"] = event["retry"]
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO notices VALUES (?,?,?,?)", (event["id"], scope, dumps(payload), time.time()))
             self.db.execute("INSERT OR IGNORE INTO notice_order(id) VALUES (?)", (event["id"],))

@@ -71,6 +71,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS learning_materials(
               request_id TEXT NOT NULL, chunk_id TEXT NOT NULL, payload TEXT NOT NULL,
               created REAL NOT NULL, PRIMARY KEY(request_id,chunk_id));
+            CREATE TABLE IF NOT EXISTS review_retries(id TEXT PRIMARY KEY, handle TEXT NOT NULL,
+              state TEXT NOT NULL, due REAL, payload TEXT NOT NULL, updated REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS review_retries_due ON review_retries(state,due);
             CREATE INDEX IF NOT EXISTS events_pending ON events(delivered,created,id);
             CREATE INDEX IF NOT EXISTS events_chat_turn ON events(json_extract(payload,'$.session_id'),json_extract(payload,'$.turn_id'));
             CREATE INDEX IF NOT EXISTS turns_recovery ON turns(observed_revision,activity);

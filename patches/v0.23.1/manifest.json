@@ -2,21 +2,22 @@
   "upstream": "https://github.com/NousResearch/hermes-agent.git",
   "tag": "v0.23.1",
   "base_commit": "3b421578588243f920886e6fe79a6faa87ea026e",
-  "patch_sha256": "60d1efddca0c30a98b1af8dfedbd241a54fc3d4a34dc6b77a813efe6ec90e843",
+  "patch_sha256": "9abca6a0bcca3fcdb947c58e3ffe7b8e9206f6adc136836ff1588ee22b672cfa",
   "replay_matches_working_source": true,
   "files": {
     "agent/background_review.py": "54a74cd344af918c86f3c99f7b9642bab100e97be99e596a4e873814e34d79b2",
     "agent/codex_runtime.py": "3fc26a08e43138012b3750458b6dcf652070bcd1bc95d129790bd4826af8a051",
-    "agent/learning_api.py": "2eb900dcc86dc9f8968b263918ab256726f7af0b82c3f7fa94277107eabf6b3d",
-    "agent/learning_artifacts.py": "0dcb0544489e99979fc053ccbb5872ee98043200b7849bbbbd21944e7327fda9",
+    "agent/learning_api.py": "cd9116605c809a08fa22f1f56fa5b79f3ad2be307203c32aad959b87437e7023",
+    "agent/learning_artifacts.py": "93bcfd8b690f597bf240e59796282aa9903181f0a4009790a8f57c381750a5e6",
     "agent/learning_policy.py": "261d9e0ea1d5e09dc36687b931f8a8982fd95a911c5d32c11a7d674c8d6e67be",
     "agent/learning_results.py": "ad4443d06b67ae0b89123c7f60ebdc6d1f4c89e8b50e1c198e4178be9d907d03",
-    "agent/learning_runtime.py": "4d7daa7916e9c49394e3296257b0f2e10368d290be29ed73c2b24d6ba3356fe4",
-    "agent/learning_service.py": "eaea839cb928ec59ec959236a53b8bb6aad24ccf2e85fe87955b4af2c5ef513e",
+    "agent/learning_runtime.py": "550e47e7930df51b0922916fbe294bef0f942888ae587b992e0c01bc62ab839a",
+    "agent/learning_service.py": "3b3433be808ef6faad93bd960ec9b76282326b4386e23ac12296c4e67b2b8141",
     "hermes_cli/plugin_isolation.py": "20967d678786f49f69a25ca0367862462e7b021404b84a1d86b18f16e752e61e",
     "hermes_cli/plugins_capability_ctx.py": "aef315e73dd95d8887808e428856a148e91ad38732bf5c96db6a81f774dad86e",
-    "tests/agent/test_learning_native_loop.py": "e65c52eca553dce9a230f36857ba0a672599e5f6caa445a093016bc113749d8a",
-    "tests/agent/test_learning_service.py": "186bff89315de8577e45f506a3a9391cc299b5a0b61776aca9a981e822ccab73",
+    "tests/agent/test_learning_cloud_contracts.py": "666b7e48bcef66318a10723d32a0efbc889344eeb09b7bf6f974b7f0a990c7bd",
+    "tests/agent/test_learning_native_loop.py": "0532508a72e212c2faff776d609caebfd12acc8dc460a0c5a9340e7f4ff589e8",
+    "tests/agent/test_learning_service.py": "cc0f133d9cece322da9f242245f89a235db329ae731724cd99dc22740c2114e6",
     "tests/hermes_cli/test_learning_profile_auth.py": "fc9af1e77755047303d0805f7c6ef751e529740a4226cfbc712618b34995ce6e",
     "tests/hermes_cli/test_plugin_learning_api.py": "9a04aee873b35384e9bd7ee3e7b6073c14af195767f099db3b936bdd2202aed0"
   },
@@ -24,9 +25,22 @@
   "source_committed": false,
   "patch_file": "../v0.23.0/native-learning-api-v1.patch",
   "mechanism_review": {
-    "classification": "compatible",
-    "reviewed_from": "v0.23.0",
-    "reason": "Review forks inherit a conversation ID for plugin hooks. Curator emits a completion hook and scopes checkpoint providers when enabled. The shared Learning API v1 adapter also retains the non-interactive direct-review secret-capture guard used by v0.23.0. Native triggers, memory and skill storage and the upstream session schema are unchanged by this guard.",
-    "source_tree": "c69ce0f0fb52a2650efcbb79cc97d35474a9be9a"
+    "classification": "adapted",
+    "reason": "Integrate the user-requested explicit learning API and bounded automatic review recovery. Explicit request snapshots, focus, attended writes and cancellation remain bound to their requests and are excluded from automatic retries. Schema 2 preserves existing receipts and prevents recovery-unaware owners from executing successor intents.",
+    "agreed_plan": "docs/REVIEW-RETRIES.zh-CN.md",
+    "approved_on": "2026-11-11",
+    "source_tree": "afa43cdfb52ba89487157200819671955a0059f1",
+    "reviewed_from": "v0.23.0"
+  },
+  "additional_native_tests": [
+    "tests/agent/test_learning_cloud_contracts.py"
+  ],
+  "native_updater": {
+    "protocol": "resolve_source_target-v1",
+    "files": {
+      "hermes_cli/source_releases.py": "e391150fdb57da5846e8f8c029c31bff05bbef90be2ef5f23703a8b6120f4c72",
+      "hermes_cli/update_cmd.py": "aa6bc72e20eadfa96868550e1fa9c0a990e8366da146d277390b887cc7b304cd",
+      "hermes_cli/update_lock.py": "2e02db3e627de248b88d912c1f9421a40a738899ebdef9d93998ce8d09e01a8d"
+    }
   }
 }
