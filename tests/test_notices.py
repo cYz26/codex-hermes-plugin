@@ -5,6 +5,7 @@ from pathlib import Path
 from hermes_codex_learning.capture import hook
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.notices import NoticeQueue, entities
+from hermes_codex_learning.notify import message
 from hermes_codex_learning.store import atomic_json
 
 
@@ -58,6 +59,21 @@ class NoticeTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual((settings.state / "context.json").read_bytes(), cached)
         self.assertNotIn("PRIVATE-NOTICE-BODY", str(after))
+
+    def test_review_explanation_reaches_ssh_details_without_changing_the_receipt_schema(self):
+        event = {**self.event(), "review_summary": "本轮依据回归结果补充了接口检查步骤。"}
+        event.pop("receipt")
+        event["message"] = message(event)
+        self.queue.publish(event)
+
+        item = self.queue.sync("desktop")["items"][0]
+        detail = self.queue.detail(item["id"], item["scope"])
+
+        self.assertIn(event["review_summary"], item["summary"])
+        self.assertIn("复盘简述\n" + event["review_summary"], item["text"])
+        self.assertIn("后续任务验证：尚未确认", item["text"])
+        self.assertEqual(set(detail), {"id", "scope", "summary", "text"})
+        self.assertEqual(item["status"], "applied")
 
     def test_success_without_changes_is_silent(self):
         event = self.event()

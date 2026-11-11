@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .review_input import BUDGET_EXHAUSTED
 from .review_receipt import receipt_text
+from .review_summary import summary_text
 from .store import atomic_json, digest
 from .macos_bundle import (APP_NAME, APP_ID, APP_EXECUTABLE, LEGACY_APP_ID,
                            bundle_identifier, legacy_notifier_app, notifier_app)
@@ -22,6 +23,11 @@ def should_notify(event: dict) -> bool:
 
 def message(event: dict) -> str:
     text = _message(event)
+    if event.get("kind") == "review.finished":
+        summary = summary_text(event.get("review_summary"))
+        if summary:
+            preview = " ".join(summary.split())
+            text += "\n" + (preview if len(preview) <= 100 else preview[:99].rstrip() + "…")
     return f"[{Path(event['project']).name}] {text}" if event.get("project") else text
 
 

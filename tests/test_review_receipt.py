@@ -95,7 +95,12 @@ class ReviewReceiptTests(unittest.TestCase):
                                       args={"action": "patch", "name": "OTHER_SESSION_SKILL"})
                 facts.append({"tool": "skill_manage", "call_id": call_id, "action": None, "name": None,
                               "result": {"error": reason}})
-        receipt = receipt_text(self.event(refused=facts), calls, 0)
+        summary = "本次校验拒绝了范围外的技能修订，现有记录不足以证明变更生效。"
+        receipt = receipt_text(self.event(refused=facts, review_summary=summary), calls, 0)
+        self.assertIn("复盘简述\n" + summary, receipt)
+        self.assertIn("写入：0 项变更已生效", receipt)
+        self.assertIn("被拒绝：3 次调用", receipt)
+        self.assertLess(receipt.index("状态简述"), receipt.index("原因："))
         self.assertIn("修订 · 技能 learned-local · references/check.md（3 次尝试）", receipt)
         self.assertEqual(receipt.count("原因：" + reason), 1)
         for text in ("未命名技能", "UNAPPLIED_OLD_TEXT", "UNAPPLIED_NEW_TEXT", "OTHER_SESSION_SKILL"):
@@ -170,6 +175,65 @@ class ReviewReceiptTests(unittest.TestCase):
         self.assertNotIn("UNAPPLIED_CONTENT", receipt)
         for registration in registrations:
             registration.dispose.assert_called_once_with()
+
+    def test_review_summary_and_actual_status_precede_the_changes(self):
+        summary = "参数变更导致旧测试失配。依据回归结果，修改接口时应先检查调用方与 mock；适用于接口维护。"
+        fact = {"tool": "skill_manage", "call_id": "skill", "name": "interface-checks", "action": "patch"}
+        calls = {("skill_manage", "skill"): {"action": "patch", "name": "interface-checks",
+                  "old_string": "旧规则", "new_string": "新规则"}}
+        event = self.event(review_summary=summary, applied=[fact])
+
+        receipt = receipt_text(event, calls, 0)
+
+        self.assertIn("复盘简述\n" + summary, receipt)
+        self.assertIn("状态简述", receipt)
+        self.assertIn("复盘：完成", receipt)
+        self.assertIn("写入：1 项变更已生效", receipt)
+        self.assertIn("技能共享：尚未确认", receipt)
+        self.assertIn("后续任务验证：尚未确认", receipt)
+        self.assertLess(receipt.index("复盘简述"), receipt.index("匹配的原文"))
+        self.assertLess(receipt.index("状态简述"), receipt.index("匹配的原文"))
+        self.assertIn("匹配的原文\n旧规则\n写入的内容\n新规则", receipt)
+
+    def test_partial_review_reports_applied_pending_refused_and_uncertain_results(self):
+        applied = {"tool": "skill_manage", "name": "written", "action": "create"}
+        staged = {"tool": "memory", "action": "patch", "result": {"target": "memory"}}
+        event = self.event(run_status="failed", review_summary=None, applied=[applied], staged=[staged],
+                           refused=[{"tool": "skill_manage", "name": "locked"}], uncertain=["unknown write"])
+
+        receipt = receipt_text(event, {}, 0)
+
+        self.assertIn("本次复盘未生成简述。", receipt)
+        self.assertIn("复盘：失败", receipt)
+        self.assertIn("写入：1 项变更已生效", receipt)
+        self.assertIn("待批准：1 组修改", receipt)
+        self.assertIn("被拒绝：1 次调用", receipt)
+        self.assertIn("结果待确认：1 项", receipt)
+        self.assertIn("后续任务验证：尚未确认", receipt)
+        self.assertNotIn("复盘：完成", receipt)
+
+    def test_old_results_and_malformed_summaries_remain_readable(self):
+        for fields in ({}, {"review_summary": {}}, {"review_summary": "   "}):
+            with self.subTest(fields=fields):
+                receipt = receipt_text(self.event(**fields), {}, 0)
+                self.assertIn("复盘简述", receipt)
+                self.assertIn("复盘：完成", receipt)
+                self.assertIn("此记录未包含" if not fields else "本次复盘未生成", receipt)
+
+    def test_banner_includes_a_short_explanation_after_the_actual_status(self):
+        summary = "核对调用方与回归证据。" * 30
+        event = self.event(review_summary=summary, applied=[{"tool": "skill_manage", "name": "checks"}])
+        status, preview = event["message"].split("\n", 1)
+        self.assertIn("1 项变更生效", status)
+        self.assertTrue(preview.startswith("核对调用方与回归证据。"))
+        self.assertLessEqual(len(preview), 100)
+
+    def test_a_publication_receipt_does_not_claim_an_unknown_review_status(self):
+        event = {"kind": "publication.applied", "name": "shared-checks"}
+        receipt = receipt_text({**event, "message": message(event)}, {}, 0)
+        self.assertIn("已发布 1 项通用技能", receipt)
+        self.assertNotIn("复盘简述", receipt)
+        self.assertNotIn("复盘：结果待确认", receipt)
 
     def test_same_summary_has_separate_receipts_and_retries_keep_the_original(self):
         with tempfile.TemporaryDirectory() as directory, patch("hermes_codex_learning.notify.subprocess.run") as run:

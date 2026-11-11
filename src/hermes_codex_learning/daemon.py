@@ -18,6 +18,7 @@ from .knowledge import context_view, memory_entries, reconcile
 from .normalize import merge_event, observation
 from .notify import macos_notification, message, should_notify
 from .review_receipt import ReviewWrites, receipt_text
+from .review_summary import capture_review_summary
 from .store import Store, atomic_json, digest, dumps
 from . import native_reads
 
@@ -304,7 +305,8 @@ class Bridge:
             started_at = time.time()
             self.emit({"id": attempt_id + ":start", "kind": "review.started", **provenance})
             self.store.set("state", "reviewing")
-            with self.review_writes.capture(intent["handle"]) as calls:
+            with self.review_writes.capture(intent["handle"]) as calls, \
+                    capture_review_summary(self.api, intent["handle"]) as summary:
                 result = self.api.run_review(intent["handle"], intent["id"], attempt_id=attempt_id)
             finished_at = time.time()
             after_context = self.api.read(kind="context")
@@ -355,7 +357,7 @@ class Bridge:
                     previous_entries = {key for key, _, _ in memory_entries(before_context)}
                     applied_entities += ["memory:" + key for key, _, _ in memory_entries(after_context) if key not in previous_entries]
                 event = {**result, "id": attempt_id + ":result", "kind": "review.finished", **provenance,
-                         "applied_entities": sorted(set(applied_entities))}
+                         "applied_entities": sorted(set(applied_entities)), "review_summary": summary["text"]}
                 if should_notify(event):
                     event["receipt"] = receipt_text({**event, "message": message(event)}, calls, finished_at,
                                                     started_at=started_at)

@@ -108,7 +108,7 @@ def bound_review_history(messages: list[dict], limit: int = MAX_HISTORY_BYTES) -
 
 
 def install_review_policy(api) -> None:
-    """Adapt the v1 runtime instance from the pinned Learning API patch."""
+    """Bound replay and collect the final explanation from the pinned v1 runtime."""
     from agent.background_review import _review_input_token_budget, load_background_review_settings
     from agent.learning_runtime import NativeLearningRuntime
 
@@ -146,3 +146,5 @@ def install_review_policy(api) -> None:
         return outcome
 
     runtime.review = review
+    from .review_summary import install_summary_capture
+    install_summary_capture(runtime)

@@ -10,6 +10,7 @@ from threading import Lock
 
 from .enterprise import scrub
 from .review_input import BUDGET_EXHAUSTED, is_pending_tool_reply
+from .review_summary import summary_text
 
 _ACTIONS = {
     "add": "新增", "patch": "修订", "replace": "替换", "remove": "删除",
@@ -154,14 +155,37 @@ def _local_time(timestamp):
     return datetime.fromtimestamp(timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
+def _status_lines(event):
+    from .notices import entities
+
+    applied = event.get("applied_entities", entities(event.get("applied", [])))
+    status = _REVIEW_END.get(event.get("run_status"), "结果待确认").removeprefix("复盘")
+    lines = [f"复盘：{status}", f"写入：{len(applied)} 项变更已生效"]
+    for key, label, unit in (("staged", "待批准", "组修改"),
+                             ("refused", "被拒绝", "次调用"), ("uncertain", "结果待确认", "项")):
+        if event.get(key):
+            lines.append(f"{label}：{len(event[key])} {unit}")
+    if any(fact.get("tool") == "skill_manage" for key in ("applied", "staged", "uncertain")
+           for fact in event.get(key, []) if isinstance(fact, dict)):
+        lines.append("技能共享：尚未确认，检查结果另行通知")
+    lines.append("后续任务验证：尚未确认")
+    return lines
+
+
 def receipt_text(event, calls, created, *, started_at=None):
     project = Path(event["project"]).name if event.get("project") else "未标注项目"
     when = _local_time(created)
     heading = project if started_at is not None else f"{project}  ·  {when}"
     lines = [heading, event["message"], ""]
+    if event.get("kind", "review.finished") == "review.finished":
+        summary = summary_text(event.get("review_summary"))
+        missing = "本次复盘未生成简述。" if "review_summary" in event else "此记录未包含复盘简述。"
+        lines.extend(("复盘简述", summary or missing, "", "状态简述", *_status_lines(event), ""))
     if started_at is not None:
         end_status = _REVIEW_END.get(event.get("run_status"), "结果待确认")
         lines.extend(("复盘过程", f"{_local_time(started_at)}  开始复盘", f"{when}  {end_status}", ""))
+    if event.get("applied"):
+        lines.extend(("修改明细", ""))
     positions = Counter()
     for fact in event.get("applied", []):
         key = (fact.get("tool"), fact.get("call_id"))

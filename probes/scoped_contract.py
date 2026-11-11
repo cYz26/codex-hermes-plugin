@@ -176,6 +176,10 @@ def main():
                 bridge.publish()
             learned = bridge.rpc("learning_request_status", {"cwd":str(project),"request_id":"explicit-materials"})
         context = bridge.rpc("context",{"cwd":str(project),"query":"header normalization"})
+        reviews = [json.loads(row[0]) for row in bridge.store.db.execute("SELECT payload FROM notices")
+                   if json.loads(row[0]).get("kind") == "review.finished"]
+        summary = "Saved the supported synthetic lesson."
+        receipt = reviews[0].get("receipt", "") if len(reviews) == 1 else ""
         result = {
             "scope":"native real provider with synthetic fixture; not App" if args.live_settings else "native scripted provider; not real model or App",
             "requests":len(requests),
@@ -185,6 +189,14 @@ def main():
             "foreign_memory_preserved":marker in (home/"memories/MEMORY.md").read_text(),
             "foreign_memory_not_recalled":marker not in json.dumps(context),
             "skill_created":(home/"skills/learned-nfkc-checks/SKILL.md").is_file(),
+            "review_summary_reused":len(reviews) == 1 and reviews[0].get("review_summary") == summary,
+            "review_summary_precedes_changes":("复盘简述\n" + summary in receipt
+                and "修改明细" in receipt and receipt.index("复盘简述") < receipt.index("修改明细")),
+            "review_status_separate":"复盘：完成" in receipt and "后续任务验证：尚未确认" in receipt,
+            "summary_prompt_in_same_review":"2–3 sentences" in json.dumps(requests,ensure_ascii=False),
+            "no_extra_summary_requests":len(requests) == 2,
+            "review_summary_not_in_business_recall":summary not in json.dumps(context),
+            "review_summary_not_in_native_status":summary not in json.dumps(api.read(kind="status")),
         }
         if args.explicit:
             result.update(explicit_refine_completed=refine["state"]=="completed",
