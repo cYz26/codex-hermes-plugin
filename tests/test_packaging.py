@@ -89,11 +89,14 @@ class PackagingTests(unittest.TestCase):
             self.assertEqual(replies[0]["result"]["serverInfo"]["version"], __version__)
             self.assertEqual({tool["name"] for tool in replies[1]["result"]["tools"]},
                              {"learning_status", "context", "skill_load", "update_status", "update_check", "record_application",
-                              "request_learning", "add_learning_material", "start_learning", "learning_request_status", "cancel_learning"})
+                              "request_learning", "add_learning_material", "start_learning", "learning_request_status", "cancel_learning","pending_reviews"})
             tools = {tool["name"]:tool for tool in replies[1]["result"]["tools"]}
             self.assertTrue(tools["learning_request_status"]["annotations"]["readOnlyHint"])
             self.assertFalse(tools["request_learning"]["annotations"]["readOnlyHint"])
             self.assertIn("chat_id", tools["request_learning"]["inputSchema"]["required"])
+            pending = next(tool for tool in replies[1]["result"]["tools"] if tool["name"] == "pending_reviews")
+            self.assertTrue(pending["annotations"]["readOnlyHint"])
+            self.assertEqual(pending["inputSchema"]["required"], ["cwd"])
 
 
 if __name__ == "__main__":

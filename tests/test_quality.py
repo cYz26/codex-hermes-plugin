@@ -4,9 +4,59 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 class QualityTests(unittest.TestCase):
+    def test_new_verifier_rechecks_a_withheld_candidate_with_an_unchanged_catalog(self):
+        from hermes_codex_learning.config import Settings
+        from hermes_codex_learning.daemon import Bridge
+        from hermes_codex_learning.store import digest
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "project"
+            project.mkdir()
+            settings = Settings(root / "home", project, root / "source", Path("/usr/bin/python3"),
+                                quality_checks=True, checked_publication=True,
+                                data_policy={"synthetic_roots": [str(project)]})
+            artifact = settings.home / "learning/artifacts/example"
+            artifact.mkdir(parents=True)
+            content = "---\nname: learned-example\nlearning_scope: global_candidate\n---\nWhen to Use: notifications.\nLimits: no native GUI claim.\nVerification: fixtures.\n"
+            (artifact / "SKILL.md").write_text(content)
+            files = {"SKILL.md": hashlib.sha256(content.encode()).hexdigest()}
+            value = {"name": "learned-example", "content": content, "resource_dir": str(artifact),
+                     "files": files, "version": digest(files)}
+            api = SimpleNamespace(read=lambda **kwargs: value)
+            bridge = Bridge(settings, api)
+            context = {"version": "unchanged", "memories": {}, "skills": [{"name": "learned-example"}],
+                       "bridge_provenance": {"skills": {"learned-example": {"projects": [str(project)]}}}}
+            try:
+                with patch("hermes_codex_learning.quality.verifier_hash", return_value="old-verifier"), \
+                     patch("hermes_codex_learning.quality.verify", return_value={"state": "failed", "reason": "missing_applicability_limits_or_verification"}):
+                    self.assertEqual(bridge.publish_checked(context)["publications"], {})
+                with patch("hermes_codex_learning.quality.verifier_hash", return_value="new-verifier"):
+                    self.assertIn("learned-example", bridge.publish_checked(context)["publications"])
+            finally:
+                bridge.store.close()
+
+    def test_when_to_use_section_satisfies_applicability_contract(self):
+        from hermes_codex_learning.quality import verify
+        content = (
+            "---\nname: learned-native-notifications\n---\n"
+            "## When to Use\nRepair native notification senders.\n"
+            "## Limitations\nOffline tests do not establish GUI acceptance.\n"
+            "## Verification and reporting\nCheck the actual sender and a fresh visible notification.\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "SKILL.md").write_text(content)
+            value = {"version": "v1", "resource_dir": directory, "content": content,
+                     "files": {"SKILL.md": hashlib.sha256(content.encode()).hexdigest()}}
+            proof = verify(value)
+            self.assertEqual(proof["state"], "passed", proof)
+            self.assertEqual(proof["kind"], "content_contract")
+
     @unittest.skipUnless(shutil.which("bwrap"), "Linux sandbox is unavailable")
     def test_script_contract_runs_in_isolation_and_proof_binds_version(self):
         from hermes_codex_learning.quality import verify, proof_valid

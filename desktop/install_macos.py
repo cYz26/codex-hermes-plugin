@@ -40,6 +40,9 @@ state.mkdir(parents=True, exist_ok=True)
 installation = install_notification_app(root, app)
 shutil.copy2(root / "desktop/receive.py", state / "receive.py")
 (state / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2))
+sys.path.insert(0, str(root / "desktop"))
+from setup_reviews import install_assets
+review_assets = install_assets(state / "config.json", root)
 plist.parent.mkdir(parents=True, exist_ok=True)
 if plist.exists():
     shutil.copy2(plist, state / "previous-launch-agent.plist")
@@ -53,4 +56,5 @@ plist.write_bytes(plistlib.dumps({"Label": label, "ProgramArguments": [sys.execu
     "--config", str(state / "config.json")], "RunAtLoad": True, "KeepAlive": True,
     "ThrottleInterval": 10, "StandardErrorPath": str(state / "receiver-error.log")}))
 subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)], check=True)
-print(json.dumps({"installed": True, "visibility": "requires_user_verification", "config": str(state / "config.json"), "notification_app": installation}, ensure_ascii=False))
+print(json.dumps({"installed": True, "visibility": "requires_user_verification", "config": str(state / "config.json"),
+                  "notification_app": installation, "review_assets": review_assets}, ensure_ascii=False))

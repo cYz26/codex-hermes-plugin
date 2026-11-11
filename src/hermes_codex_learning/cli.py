@@ -129,6 +129,8 @@ def install_notifier() -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Codex–Hermes learning bridge")
     commands = parser.add_subparsers(dest="command", required=True)
+    from .approvals import add_parsers as approval_parsers
+    approval_parsers(commands)
     from .operations import add_parsers
     add_parsers(commands)
     from .learning_cli import add_parser as add_learning_parser
@@ -203,6 +205,15 @@ def main() -> int:
     auth_status = commands.add_parser("auth-status")
     auth_status.add_argument("--settings")
     args = parser.parse_args()
+    if args.command == "approvals":
+        from .approvals import execute
+        try:
+            result = execute(args)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 2 if result.get("state") == "failed" else 0
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            print(json.dumps({"state": "failed", "error_type": type(exc).__name__, "error": str(exc)}, ensure_ascii=False))
+            return 2
     if args.command == "install-notifier" and sys.platform != "darwin":
         parser.error("install-notifier requires macOS; use the SSH desktop receiver for Linux learning")
     if args.command == "launchd" and sys.platform != "darwin":

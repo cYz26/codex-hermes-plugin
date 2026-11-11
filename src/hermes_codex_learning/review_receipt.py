@@ -56,9 +56,9 @@ class ReviewWrites:
             outcome = json.loads(result) if isinstance(result, str) else result
         except (ValueError, TypeError):
             outcome = None
-        applied = (status not in ("blocked", "error", "cancelled") and isinstance(outcome, dict)
-                   and outcome.get("success") is True and not outcome.get("staged"))
-        self._record(session_id, tool_name, tool_call_id, args, _FIELDS if applied else _IDENTITY_FIELDS)
+        recorded_write = (status not in ("blocked", "error", "cancelled") and isinstance(outcome, dict)
+                          and outcome.get("success") is True)
+        self._record(session_id, tool_name, tool_call_id, args, _FIELDS if recorded_write else _IDENTITY_FIELDS)
 
     def _record(self, session_id, tool_name, tool_call_id, args, fields):
         if tool_name not in {"memory", "skill_manage"} or not tool_call_id or not isinstance(args, dict):
@@ -114,11 +114,11 @@ def _pending_lines(facts, calls, *, refused=False):
         suffix = f"（{count} 次尝试）" if count > 1 else ""
         lines.append("• " + "；".join(labels) + suffix)
         if reason:
-            lines.append("  原因：" + reason)
+            lines.append("  拒绝原因：" + reason)
     return lines
 
 
-def _text_changes(op, *, memory=False):
+def _text_changes(op, *, memory=False, proposed=False):
     action = op.get("action")
     if memory:
         old = op.get("old_text") if action in {"patch", "replace", "remove"} else None
@@ -131,7 +131,7 @@ def _text_changes(op, *, memory=False):
     if old:
         lines.extend(("匹配的原文", old))
     if new is not None:
-        lines.extend(("写入的内容", new or "（空文本）"))
+        lines.extend(("拟写入的内容" if proposed else "写入的内容", new or "（空文本）"))
     return lines
 
 
@@ -172,6 +172,28 @@ def _status_lines(event):
     return lines
 
 
+def _unapplied_details(fact, calls, kind):
+    if not isinstance(fact, dict):
+        return [f"• {fact}"]
+    call = calls.get((fact.get("tool"), fact.get("call_id")), {})
+    operations = call.get("operations") or [call or fact.get("operation") or fact]
+    result = fact.get("result", {})
+    lines = []
+    for operation in operations:
+        label_fact = {**fact, "operation": operation}
+        lines.append("• " + _label(label_fact, operation))
+        if kind == "staged":
+            lines.extend(_text_changes(operation, memory=fact.get("tool") == "memory", proposed=True))
+    if kind == "staged" and result.get("pending_id"):
+        lines.append("待审编号：" + str(result["pending_id"]))
+    reason = result.get("error") or result.get("message")
+    if kind == "refused":
+        lines.append("拒绝原因：" + str(reason or "原生结果未提供具体原因"))
+    elif kind == "uncertain" and reason:
+        lines.append("原生结果：" + str(reason))
+    return lines
+
+
 def receipt_text(event, calls, created, *, started_at=None):
     project = Path(event["project"]).name if event.get("project") else "未标注项目"
     when = _local_time(created)
@@ -205,7 +227,16 @@ def receipt_text(event, calls, created, *, started_at=None):
     for key, heading in (("staged", "等待批准"), ("refused", "被 Hermes 拒绝"), ("uncertain", "结果待确认")):
         facts = event.get(key, [])
         if facts:
-            lines.extend((heading, *_pending_lines(facts, calls, refused=key == "refused"), ""))
+            lines.append(heading)
+            if key == "refused":
+                lines.extend(_pending_lines(facts, calls, refused=True))
+                lines.append("")
+            else:
+                if key == "staged":
+                    lines.append("这些提案尚未生效；请在审批页核对差异后批准或丢弃。")
+                for fact in facts:
+                    lines.extend(_unapplied_details(fact, calls, key))
+                    lines.append("")
     error = str(event.get("error") or "")
     if event.get("failure_reason") == BUDGET_EXHAUSTED:
         error = "本次后台复盘达到输入预算，执行记录已保留。"

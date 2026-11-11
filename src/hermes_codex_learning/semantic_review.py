@@ -20,13 +20,18 @@ content. Write resources using write_file with relative paths. Do not set a cate
 skill_manage accepts a single operation or an operations-only array of 1–5 operations;
 each operation must include its own action and name.
 Only the memory and skill names supplied below are available. Do not infer hidden context.
+Memory revisions can remain pending for human review. Do not resubmit an identical
+pending revision; continue with other supported findings instead.
 """
 
 
-def _denied(message, *, position=None):
+def _denied(message, *, position=None, reason=None):
     if position is not None:
         message = f"第 {position} 项操作：" + message
-    return {"action": "block", "message": message}
+    result = {"action": "block", "message": message}
+    if reason:
+        result["reason"] = reason
+    return result
 
 
 class ScopedMemory:
@@ -129,6 +134,10 @@ class SemanticGuard:
                 if op["action"] != "add" and (not isinstance(old, str) or not old
                         or not any(old in entry for entry in scope["memory"])):
                     return _denied("old_text 必须匹配本次复盘已准入的项目记忆。", position=position)
+            duplicate = self.pending_match(scope, ops)
+            if duplicate:
+                return _denied(f"相同记忆修改已在等待批准：{duplicate}，不再创建重复提案。",
+                               reason="review_already_pending")
             return None
         if tool_name == "skill_view":
             if set(args) - {"name", "file_path"}:
@@ -138,7 +147,8 @@ class SemanticGuard:
                 return _denied("技能不在本次复盘可读取范围内；请只读取已列出的技能。")
             path = args.get("file_path")
             if path is not None and not self.resource_path(path):
-                return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。")
+                return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。",
+                               reason="review_resource_path")
             return None
         if tool_name != "skill_manage":
             return _denied("后台复盘只能使用 memory、skill_view 和 skill_manage；外部工具不可用。")
@@ -165,7 +175,8 @@ class SemanticGuard:
                 return _denied("技能不在本次复盘可修改范围内；请只修改已准入的技能。", position=position)
             if action == "write_file":
                 if not self.resource_path(op.get("file_path", "")):
-                    return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。", position=position)
+                    return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。",
+                                   position=position, reason="review_resource_path")
                 if (set(op) - {"name", "action", "file_path", "file_content"}
                         or not isinstance(op.get("file_content"), str)):
                     return _denied("写入参数只支持 name、action、file_path 和字符串 file_content。", position=position)
@@ -179,7 +190,8 @@ class SemanticGuard:
                 if len(op["old_string"]) + len(op["new_string"]) > 65536:
                     return _denied("单项修订内容超过 65,536 字符；请缩小每次修订范围。", position=position)
                 if op.get("file_path") is not None and not self.resource_path(op["file_path"]):
-                    return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。", position=position)
+                    return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。",
+                                   position=position, reason="review_resource_path")
             elif set(op) - {"name","action","content"} or not isinstance(op.get("content"), str):
                 return _denied("全文写入参数只支持 name、action 和字符串 content。", position=position)
             if len(str(op.get("content") or op.get("file_content") or "")) > 65536:
@@ -187,6 +199,23 @@ class SemanticGuard:
         scope["owned"] = owned
         scope["readable"].update(owned)
         return None
+
+    @staticmethod
+    def pending_match(scope, operations):
+        if not scope.get("pending"):
+            return None
+        from .approvals import change_fingerprint, inspect_record
+        pinned = []
+        for op in operations:
+            if op["action"] == "add":
+                pinned.append(op)
+                continue
+            matches = [entry for entry in scope["memory"] if op.get("old_text", "") in entry]
+            if len(matches) != 1:
+                return None
+            pinned.append({**op, "matched_entry": matches[0]})
+        item = inspect_record({"payload": {"action": "batch", "target": "memory", "operations": pinned}}, scope["memory"])
+        return scope["pending"].get(change_fingerprint(item["changes"])) if item["state"] == "pending" else None
 
     @staticmethod
     def resource_path(value):
@@ -207,6 +236,14 @@ class SemanticGuard:
             memory_proofs = store.get("semantic-memory-attestations", {})
             skills = store.get("semantic-skill-attestations", {})
             publications = store.get("publications-v1", {})
+            pending = []
+            if project:
+                try:
+                    from .approvals import PendingReviews
+                    pending = PendingReviews(self.settings, store).list(project)["proposals"]
+                except (OSError, ValueError, RuntimeError):
+                    # A missing old native client does not broaden review authority.
+                    pass
         finally:
             store.close()
         classification = assessment.get("classification") or (
@@ -238,6 +275,9 @@ class SemanticGuard:
         if public_review or enterprise_review:
             owned |= {name for name in shared if name.startswith("learned-")}
         scope = {"owned":owned, "readable":owned | shared, "existing":set(versions), "memory":entries}
+        from .approvals import change_fingerprint
+        scope["pending"] = {change_fingerprint(item["operations"]): item["duplicate_of"] or item["id"]
+                            for item in pending if item["state"] in {"pending", "duplicate"}}
         self.active[handle] = scope
         try:
             audience = "\nThis review is for the approved enterprise deployment. Generic skills may be reused inside this enterprise library; they are not public material. Never retain credentials, raw chat logs or unrelated personal details.\n" if enterprise_review else ""

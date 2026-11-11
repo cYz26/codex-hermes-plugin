@@ -32,6 +32,34 @@ class ReviewReceiptTests(unittest.TestCase):
         event = {"id": identity, "kind": "review.finished", "run_status": "completed", **fields}
         return {**event, "message": message(event)}
 
+    def test_staged_memory_receipt_shows_the_review_identifier_and_proposed_change(self):
+        writes = ReviewWrites()
+        with writes.capture("native-handle") as calls:
+            writes.record(session_id="native-handle", tool_name="memory", tool_call_id="staged-call",
+                          args={"operations":[{"action":"patch", "old_text":"previous project rule",
+                                                "content":"proposed project rule"}]},
+                          result={"success":True, "staged":True, "pending_id":"11111111"})
+        event = self.event(staged=[{"tool": "memory", "call_id": "staged-call", "result": {
+            "staged": True, "pending_id": "11111111", "message": "Background consolidation needs approval"}}])
+        text = receipt_text(event, calls, 0)
+        self.assertIn("修订 · 记忆", text)
+        self.assertIn("待审编号：11111111", text)
+        self.assertIn("previous project rule", text)
+        self.assertIn("拟写入的内容\nproposed project rule", text)
+        self.assertIn("尚未生效", text)
+
+    def test_refused_batch_receipt_names_operations_and_shows_the_native_reason(self):
+        calls = {("skill_manage", "refused-call"): {"operations": [
+            {"action": "patch", "name": "learned-checks", "file_path": "references/check.md"},
+            {"action": "write_file", "name": "learned-checks", "file_path": "scripts/check.py"}]}}
+        event = self.event(refused=[{"tool": "skill_manage", "call_id": "refused-call", "result": {
+            "error": "[review_resource_path] Resource is outside the permitted package"}}])
+        text = receipt_text(event, calls, 0)
+        self.assertIn("修订 · 技能 learned-checks · references/check.md", text)
+        self.assertIn("写入文件 · 技能 learned-checks · scripts/check.py", text)
+        self.assertIn("拒绝原因：[review_resource_path] Resource is outside the permitted package", text)
+        self.assertNotIn("未命名技能", text)
+
     def test_background_failure_receipt_does_not_tell_the_user_to_continue_a_chat(self):
         upstream_error = (
             "⚠️ No reply: the turn stopped while a tool result was still pending and the model produced "

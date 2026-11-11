@@ -240,6 +240,9 @@ class MacOSNotificationRefreshTests(unittest.TestCase):
             app = directory / "Hermes 学习.app"
             original = MacOSBundleTests.installed(app, LEGACY_APP_ID)
             refresh.__file__ = str(directory / "package/desktop/refresh_macos_notification.py")
+            source = directory / "package/macos/HermesLearningNotifier.swift"
+            source.parent.mkdir(parents=True)
+            source.write_text("// Synthetic native compiler boundary\n")
             allowed = False
             decisions, settings, posts = [], [], []
 

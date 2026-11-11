@@ -67,9 +67,16 @@ def verify(value):
     if not manifest_matches(value):
         return {**proof, "reason":"artifact_changed"}
     content = value.get("content") or ""
-    if not all(re.search(pattern, content, re.I) for pattern in
-               (r"applicab|适用", r"limit|constraint|限制|边界", r"verif|test|验证|测试")):
-        return {**proof, "reason":"missing_applicability_limits_or_verification"}
+    patterns = {
+        "applicability": r"applicab|适用|何时使用|使用场景|\bwhen\s+to\s+(?:use|apply)\b|\buse\s+(?:this\s+skill\s+)?when\b",
+        "limits": r"limit|constraint|限制|边界",
+        "verification": r"verif|test|验证|测试",
+    }
+    checks = {name: bool(re.search(pattern, content, re.I)) for name, pattern in patterns.items()}
+    proof["checks"] = checks
+    if not all(checks.values()):
+        return {**proof, "reason":"missing_applicability_limits_or_verification",
+                "missing_sections": [name for name, present in checks.items() if not present]}
     executable = [name for name in value["files"] if Path(name).suffix in {".py", ".sh"}]
     if not executable:
         return {**proof, "state":"passed", "cases":["applicability", "limits", "verification"],
