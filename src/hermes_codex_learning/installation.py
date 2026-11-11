@@ -27,7 +27,7 @@ def files(root):
         paths = list(root.rglob("*"))
     for path in sorted(set(paths)):
         relative = path.relative_to(root)
-        if any(part in SKIP for part in relative.parts) or relative.parts[:2] == ("evidence","private"):
+        if any(part in SKIP or part.endswith(".egg-info") for part in relative.parts) or relative.parts[:2] == ("evidence","private"):
             continue
         if path.name == "BUILD.json" or path.name == ".env" or path.name.startswith(".env."):
             continue

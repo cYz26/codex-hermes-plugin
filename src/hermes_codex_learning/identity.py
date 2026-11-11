@@ -15,8 +15,10 @@ def build_identity(root: Path = ROOT) -> dict:
     files = {}
     for name in ("src", "scripts", "hooks", "hermes-plugin", "patches", "skills", "desktop", "macos", "fixtures", "assets", "tests", "probes"):
         for path in sorted((root / name).rglob("*")):
-            if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
-                files[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+            relative = path.relative_to(root)
+            if (path.is_file() and "__pycache__" not in relative.parts and path.suffix != ".pyc"
+                    and not any(part.endswith(".egg-info") for part in relative.parts)):
+                files[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
     for name in ("pyproject.toml", ".mcp.json", ".codex-plugin/plugin.json"):
         path = root / name
         if path.is_file():

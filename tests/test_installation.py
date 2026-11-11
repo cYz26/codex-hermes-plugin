@@ -42,3 +42,24 @@ class InstallationTests(unittest.TestCase):
             (target/"src/code.py").write_text("changed")
             with self.assertRaises(ValueError):
                 verify_bundle(target)
+
+    def test_generated_install_metadata_does_not_change_or_enter_the_bundle(self):
+        from hermes_codex_learning.identity import build_identity
+        from hermes_codex_learning.installation import build_bundle
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            code = source / "src/code.py"
+            code.parent.mkdir(parents=True)
+            code.write_text("print('fixture')\n")
+            expected = build_identity(source)
+            metadata = source / "src/fixture.egg-info/PKG-INFO"
+            metadata.parent.mkdir()
+            metadata.write_text("Metadata-Version: 2.4\nVersion: 0.4.2\n")
+            self.assertEqual(build_identity(source), expected)
+            record = build_bundle(source, root / "bundle")
+            self.assertEqual(record["build"], expected)
+            self.assertNotIn("src/fixture.egg-info/PKG-INFO", record["files"])
+            self.assertFalse((root / "bundle/src/fixture.egg-info").exists())
+            code.write_text("print('changed')\n")
+            self.assertNotEqual(build_identity(source), expected)
