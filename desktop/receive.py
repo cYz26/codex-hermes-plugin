@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
 import re
 import shlex
 import sqlite3
@@ -16,6 +17,23 @@ from pathlib import Path
 
 def identity(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def notifier_binary(configured: str) -> str:
+    binary = Path(configured)
+    if binary.is_file() or len(binary.parents) < 3:
+        return configured
+    app = binary.parents[2]
+    if app.suffix != ".app" or app.exists():
+        return configured
+    legacy = app.parent / ".hermes-learning-legacy" / app.name
+    try:
+        with (legacy / "Contents/Info.plist").open("rb") as info:
+            if plistlib.load(info).get("CFBundleIdentifier") == "com.cy.hermes-learning-notifier":
+                return str(legacy / "Contents/MacOS" / binary.name)
+    except FileNotFoundError:
+        pass
+    return configured
 
 
 class Receiver:
@@ -73,7 +91,7 @@ class Receiver:
             temporary.replace(path)
             with self.db:
                 self.db.execute("INSERT INTO batches VALUES (?,?,?,?,?)", (identifier, scope, json.dumps(ids), str(path), "dispatching"))
-            result = subprocess.run([self.config["notifier"], "--post", str(path)], capture_output=True, timeout=15)
+            result = subprocess.run([notifier_binary(self.config["notifier"]), "--post", str(path)], capture_output=True, timeout=15)
             if result.returncode:
                 # A definite rejection is retryable; an interrupted dispatch is
                 # retained as unknown instead of blindly posting duplicates.

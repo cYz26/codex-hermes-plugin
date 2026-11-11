@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import plistlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,15 @@ spec.loader.exec_module(receiver)
 
 
 class DesktopReceiverTests(unittest.TestCase):
+    def test_delivery_resolves_legacy_app_while_canonical_app_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary) / "Hermes 学习.app"
+            configured = str(app / "Contents/MacOS/HermesLearningNotifier")
+            legacy = app.parent / ".hermes-learning-legacy" / app.name
+            (legacy / "Contents/MacOS").mkdir(parents=True)
+            (legacy / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.cy.hermes-learning-notifier"}))
+            self.assertEqual(receiver.notifier_binary(configured), str(legacy / "Contents/MacOS/HermesLearningNotifier"))
+
     def test_reconnect_deduplicates_and_batches_only_within_a_workspace(self):
         with tempfile.TemporaryDirectory() as directory:
             client = receiver.Receiver({"state": directory, "host": "devbox", "bridge": "/bridge",

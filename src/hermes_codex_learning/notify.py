@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import plistlib
 import subprocess
 import time
 from pathlib import Path
@@ -7,14 +8,8 @@ from pathlib import Path
 from .review_input import BUDGET_EXHAUSTED
 from .review_receipt import receipt_text
 from .store import atomic_json, digest
-
-APP_NAME = "Hermes 学习"
-APP_ID = "com.cy.hermes-learning-notifier"
-APP_EXECUTABLE = "HermesLearningNotifier"
-
-
-def notifier_app() -> Path:
-    return Path.home() / "Applications" / f"{APP_NAME}.app"
+from .macos_bundle import (APP_NAME, APP_ID, APP_EXECUTABLE, LEGACY_APP_ID,
+                           bundle_identifier, legacy_notifier_app, notifier_app)
 
 
 def should_notify(event: dict) -> bool:
@@ -71,9 +66,15 @@ def macos_notification(state: Path, event: dict) -> dict:
     record = {"dispatched": False, "visibility": "unknown", "transport": APP_ID}
     try:
         record["receipt_path"] = str(path)
-        binary = notifier_app() / "Contents" / "MacOS" / APP_EXECUTABLE
+        app = notifier_app()
+        if not app.exists():
+            legacy = legacy_notifier_app(app)
+            if bundle_identifier(legacy) == LEGACY_APP_ID:
+                app = legacy
+        record["transport"] = bundle_identifier(app) or APP_ID
+        binary = app / "Contents" / "MacOS" / APP_EXECUTABLE
         result = subprocess.run([str(binary), "--post", str(path)], capture_output=True, text=True, timeout=10)
         return {**record, "dispatched": result.returncode == 0,
                 "error": (result.stderr.strip() or f"Notifier exited with {result.returncode}") if result.returncode else None}
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, plistlib.InvalidFileException, subprocess.TimeoutExpired) as exc:
         return {**record, "error": str(exc)}
