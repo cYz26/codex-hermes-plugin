@@ -1,0 +1,57 @@
+{
+  "version": "0.8.0",
+  "verified_at": "2026-11-11T18:17:56.545039+08:00",
+  "tested_code_commit": "ea2cff5e6abfa9e6644abb60b2a58dab7cb9fe0f",
+  "merged_main_baseline": "66c9fb2e31fbc1542ee32170f65999d36ff26ed4",
+  "changes": [
+    "completed semantic/enterprise learning core",
+    "explicit refinement and material learning",
+    "review explanation and status summaries",
+    "blocked operation details and valid single calls",
+    "bounded automatic review retries",
+    "project-scoped pending memory approvals and Mac review entry"
+  ],
+  "verification": {
+    "v0.23.0": {
+      "base_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+      "native_test_files": 20,
+      "native_tests_passed": 348,
+      "patch_sha256": "9abca6a0bcca3fcdb947c58e3ffe7b8e9206f6adc136836ff1588ee22b672cfa",
+      "native_log_sha256": "323e0f7eb199f84ede1c40d83a9b67631971333e76e7287f536e2279abce693a"
+    },
+    "v0.23.1": {
+      "base_commit": "3b421578588243f920886e6fe79a6faa87ea026e",
+      "native_test_files": 20,
+      "native_tests_passed": 348,
+      "patch_sha256": "9abca6a0bcca3fcdb947c58e3ffe7b8e9206f6adc136836ff1588ee22b672cfa",
+      "native_log_sha256": "9d97f59f737824da771b1b8f5b3f7a4b3f5337c9396d9597415c555365024b3f"
+    },
+    "release-0.8.0-all-check.log": {
+      "tests_passed": 289,
+      "log_sha256": "896a24465715412e646cadc40b6ddb3ab0a41ca7c7592a257ad7744675a526f5"
+    },
+    "bridge-0.23.1-all-check.log": {
+      "tests_passed": 289,
+      "log_sha256": "492c340a7fec92fdc662a7cae48e0f157858090502555397b94c3fe3b8944b67"
+    },
+    "managed_candidate": {
+      "native_tests_passed": 348,
+      "site_test_files": 46,
+      "site_tests_passed": 664,
+      "bridge_tests_passed": 289,
+      "registered_worker_mcp": "passed",
+      "dependency_mode": "official_shared",
+      "real_provider": false,
+      "site_log_sha256": "0fa695075f47d8bfb015850f97d8a6911bf3a24864356639fca86edc62bfa39d"
+    }
+  },
+  "boundaries": {
+    "real_provider_for_this_release": false,
+    "actual_codex_app_learning_for_this_release": false,
+    "macos_compile_signature_ui": false,
+    "native_journal_schema": 2,
+    "post_commit_rollback_requires_schema_2_runtime": true,
+    "business_effectiveness": "not_inferred"
+  },
+  "historical_provider_evidence": "evidence/active-learning/0.7.0.json"
+}
