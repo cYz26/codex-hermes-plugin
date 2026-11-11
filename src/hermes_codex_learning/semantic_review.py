@@ -18,6 +18,8 @@ remain project-specific. Scripts are candidates until independent isolated verif
 Use skill_view before revising a skill; patch supports old_string/new_string or full
 content. Write resources using write_file with relative paths. Do not set a category.
 Only the memory and skill names supplied below are available. Do not infer hidden context.
+Memory revisions can remain pending for human review. Do not resubmit an identical
+pending revision; continue with other supported findings instead.
 """
 
 
@@ -100,49 +102,59 @@ class SemanticGuard:
         if scope is None:
             return None
         denied = {"action":"block", "message":"Use only admitted project memory and listed skills. No external tools or private resources."}
+        def refuse(reason, detail):
+            return {**denied, "reason": reason, "message": denied["message"] + f" [{reason}] {detail[:1000]}"}
         from .enterprise import MODE, scrub
         filtered=scrub(args) if getattr(self.settings,"data_policy",{}).get("mode")==MODE else redact(args)
         if not isinstance(args, dict) or filtered != args:
-            return denied
+            return refuse("review_restricted_content", "请求含受限内容或参数格式不正确")
         if tool_name == "memory":
             if args.get("target", "memory") != "memory":
-                return denied
+                return refuse("review_memory_target", "后台复盘只可修改项目记忆，不可修改用户档案")
             ops = args.get("operations") or [args]
             if not isinstance(ops, list) or not 1 <= len(ops) <= 5:
-                return denied
+                return refuse("review_batch_shape", "记忆请求必须包含 1 到 5 项操作")
             for op in ops:
                 if not isinstance(op, dict) or op.get("action") not in {"add", "patch", "remove"}:
-                    return denied
-                if op["action"] != "add" and (not op.get("old_text") or
+                    return refuse("review_memory_action", "记忆请求只支持 add、patch 和 remove")
+                if op["action"] != "add" and (not isinstance(op.get("old_text"), str) or not op.get("old_text") or
                         not any(op["old_text"] in entry for entry in scope["memory"])):
-                    return denied
+                    return refuse("review_memory_scope", "修改目标不在本轮获准的项目记忆中")
+            duplicate = self.pending_match(scope, ops)
+            if duplicate:
+                return refuse("review_already_pending", f"相同记忆修改已在等待批准：{duplicate}，不再创建重复提案")
             return None
         if tool_name == "skill_view":
             path = args.get("file_path")
             safe_path = path is None or self.resource_path(path)
-            return None if set(args) <= {"name","file_path"} and args.get("name") in scope["readable"] and safe_path else denied
+            if set(args) - {"name", "file_path"}:
+                return refuse("review_argument_shape", "skill_view 只接受 name 和 file_path")
+            if args.get("name") not in scope["readable"]:
+                return refuse("review_skill_scope", f"技能不在本轮允许读取的列表中：{args.get('name')}")
+            return None if safe_path else refuse("review_resource_path", f"资源路径必须位于技能包内：{path}")
         if tool_name != "skill_manage":
-            return denied
+            return refuse("review_tool_scope", f"后台复盘不允许调用这个工具：{tool_name}")
         ops = args.get("operations")
         if set(args) != {"operations"} or not isinstance(ops, list) or not 1 <= len(ops) <= 5:
-            return denied
+            return refuse("review_batch_shape", "skill_manage 必须只传 operations，且包含 1 到 5 项操作")
         owned = set(scope["owned"])
         for op in ops:
             if not isinstance(op, dict):
-                return denied
+                return refuse("review_argument_shape", "每项技能操作必须是结构化对象")
             name, action = op.get("name"), op.get("action")
             if not isinstance(name, str) or not re.fullmatch(r"learned-[a-z0-9][a-z0-9-]{0,70}", name):
-                return denied
+                return refuse("review_skill_name", f"学习技能名称必须使用 learned- 前缀：{name}")
             if action == "create":
                 if name in scope["existing"] or (self.settings.home / "skills" / name).exists():
-                    return denied
+                    return refuse("review_existing_skill", f"技能已存在，请先读取再修订：{name}")
                 owned.add(name)
             elif action not in {"patch", "edit", "write_file"} or name not in owned:
-                return denied
+                return refuse("review_skill_scope", f"本轮未获准对技能执行 {action}：{name}")
             if action == "write_file":
-                if (not self.resource_path(op.get("file_path", ""))
-                        or set(op) - {"name","action","file_path","file_content"}):
-                    return denied
+                if not self.resource_path(op.get("file_path", "")):
+                    return refuse("review_resource_path", f"资源路径必须位于技能包内：{op.get('file_path')}")
+                if set(op) - {"name","action","file_path","file_content"}:
+                    return refuse("review_argument_shape", "write_file 只接受 name、action、file_path 和 file_content")
             elif action == "patch" and "old_string" in op:
                 if (set(op) - {"name","action","old_string","new_string","file_path","replace_all"}
                         or not isinstance(op["old_string"],str) or not op["old_string"]
@@ -150,14 +162,31 @@ class SemanticGuard:
                         or len(op["old_string"])+len(op["new_string"])>65536
                         or type(op.get("replace_all",False)) is not bool
                         or (op.get("file_path") is not None and not self.resource_path(op["file_path"]))):
-                    return denied
+                    return refuse("review_patch_shape", f"修订参数不符合技能补丁接口：{name}")
             elif set(op) - {"name","action","content"} or not isinstance(op.get("content"), str):
-                return denied
+                return refuse("review_argument_shape", f"此操作只接受 name、action 和字符串 content：{name}")
             if len(str(op.get("content") or op.get("file_content") or "")) > 65536:
-                return denied
+                return refuse("review_content_size", f"技能单次写入内容超过 64 KiB：{name}")
         scope["owned"] = owned
         scope["readable"].update(owned)
         return None
+
+    @staticmethod
+    def pending_match(scope, operations):
+        if not scope.get("pending"):
+            return None
+        from .approvals import change_fingerprint, inspect_record
+        pinned = []
+        for op in operations:
+            if op["action"] == "add":
+                pinned.append(op)
+                continue
+            matches = [entry for entry in scope["memory"] if op.get("old_text", "") in entry]
+            if len(matches) != 1:
+                return None
+            pinned.append({**op, "matched_entry": matches[0]})
+        item = inspect_record({"payload": {"action": "batch", "target": "memory", "operations": pinned}}, scope["memory"])
+        return scope["pending"].get(change_fingerprint(item["changes"])) if item["state"] == "pending" else None
 
     @staticmethod
     def resource_path(value):
@@ -178,6 +207,14 @@ class SemanticGuard:
             memory_proofs = store.get("semantic-memory-attestations", {})
             skills = store.get("semantic-skill-attestations", {})
             publications = store.get("publications-v1", {})
+            pending = []
+            if project:
+                try:
+                    from .approvals import PendingReviews
+                    pending = PendingReviews(self.settings, store).list(project)["proposals"]
+                except (OSError, ValueError, RuntimeError):
+                    # A missing old native client does not broaden review authority.
+                    pass
         finally:
             store.close()
         classification = assessment.get("classification") or (
@@ -209,6 +246,9 @@ class SemanticGuard:
         if public_review or enterprise_review:
             owned |= {name for name in shared if name.startswith("learned-")}
         scope = {"owned":owned, "readable":owned | shared, "existing":set(versions), "memory":entries}
+        from .approvals import change_fingerprint
+        scope["pending"] = {change_fingerprint(item["operations"]): item["duplicate_of"] or item["id"]
+                            for item in pending if item["state"] in {"pending", "duplicate"}}
         self.active[handle] = scope
         try:
             audience = "\nThis review is for the approved enterprise deployment. Generic skills may be reused inside this enterprise library; they are not public material. Never retain credentials, raw chat logs or unrelated personal details.\n" if enterprise_review else ""

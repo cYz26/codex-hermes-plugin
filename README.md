@@ -2,7 +2,9 @@
 
 本分支 `codex/cloud-dev-self-evolution` 提供云端 Linux／SSH 开发机实现，见 [运行与升级](./docs/LINUX-GLOBAL-UPDATES.zh-CN.md) 和 [SSH 桌面通知](./docs/SSH-NOTIFICATIONS.zh-CN.md)。本地 macOS 的独立分支见 [本地分支](https://github.com/cYz26/codex-hermes-plugin/tree/codex/local-learning-improvements)。
 
-Codex 执行任务，独立 Hermes 从执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。当前外围版本为 **0.6.1**，学习核心为官方 **Hermes v0.23.0**（`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`）加 Learning API v1 补丁。
+Codex 执行任务，独立 Hermes 从执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。当前外围版本为 **0.6.2**，学习核心为官方 **Hermes v0.23.0**（`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`）加 Learning API v1 补丁。
+
+0.6.2 补齐[待审记忆处理](./docs/PENDING-REVIEWS.zh-CN.md)：查看差异、逐条批准或丢弃、重复／过期提案清理、处理记录与原生隔离自检。Mac 通知窗口可打开当前项目的审批页。候选技能识别 `When to Use` 等适用场景说明，验证器更新后会重查旧候选；回执保留具体操作、资源路径和拒绝原因。
 
 0.6.1 整合云端学习与 SSH 通知修复：保留 0.6.0 企业正文学习、主动复盘和技能应用证据，同时使用带图标的新通知发送方、保留历史回执，并提供通知授权恢复入口。构建摘要和发布清单排除 Python 生成的安装元数据，避免源码与安装包出现误报差异。
 

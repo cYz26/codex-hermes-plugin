@@ -22,6 +22,7 @@ def register(ctx):
         from hermes_codex_learning.review_receipt import ReviewWrites
 
         review_writes = ReviewWrites()
+        pre_registration = ctx.register_hook("pre_tool_call", review_writes.record)
         registration = ctx.register_hook("post_tool_call", review_writes.record)
         try:
             settings = Settings.load(args.settings)
@@ -46,6 +47,7 @@ def register(ctx):
                     workflow_registration.dispose()
         finally:
             registration.dispose()
+            pre_registration.dispose()
 
     ctx.register_cli_command("learning-bridge", "Run the project-scoped durable learning bridge",
                              setup_fn=setup, handler_fn=serve)

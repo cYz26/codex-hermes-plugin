@@ -7,6 +7,9 @@ from .ipc import request
 from . import __version__
 
 TOOLS = [
+    {"name": "pending_reviews", "description": "Inspect project-scoped pending memory proposals and their diffs. Does not approve, reject or run a review.",
+     "inputSchema": {"type": "object", "properties": {"cwd": {"type": "string"}, "id": {"type": "string"}},
+                     "required": ["cwd"], "additionalProperties": False}},
     {"name":"record_application", "description":"Record a delivered skill's application claim and host test references. Does not run reviews; a passing test does not prove causation.",
      "inputSchema":{"type":"object","properties":{"delivery_token":{"type":"string"},"cwd":{"type":"string"},
         "stage":{"type":"string","enum":["applied","verified","failed"]},
@@ -28,7 +31,7 @@ TOOLS = [
 ]
 
 for tool in TOOLS:
-    readonly=tool["name"] in {"context","skill_load","learning_status","update_status"}
+    readonly=tool["name"] in {"context","skill_load","learning_status","update_status","pending_reviews"}
     tool["annotations"]={"readOnlyHint":readonly,"destructiveHint":False,
                          "openWorldHint":tool["name"]=="update_check"}
     if tool["name"]=="record_application":

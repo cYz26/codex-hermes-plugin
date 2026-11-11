@@ -1,5 +1,6 @@
 import AppKit
 import UserNotifications
+import Darwin
 
 private struct Receipt: Decodable {
     let summary: String
@@ -16,6 +17,8 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
     private let openAction = "view-learning-receipt"
     private let category = "learning-receipt"
     private var window: NSWindow?
+    private var reviewScope: String?
+    private var reviewProcesses: [Process] = []
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         center.delegate = self
@@ -51,6 +54,8 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                     }
                 }
             }
+        } else if arguments.count == 2 && arguments[0] == "--show-receipt" {
+            showReceipt(URL(fileURLWithPath: arguments[1]))
         } else if arguments.count == 2 && arguments[0] == "--post" {
             post(URL(fileURLWithPath: arguments[1]))
         } else if arguments.count == 2 && arguments[0] == "--prepare-upgrade" {
@@ -127,10 +132,13 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
 
     private func showReceipt(_ url: URL) {
         let frame = NSRect(x: 0, y: 0, width: 660, height: 510)
-        let scroll = NSScrollView(frame: frame)
+        let content = NSView(frame: frame)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 50, width: frame.width, height: frame.height - 50))
+        scroll.autoresizingMask = [.width, .height]
         scroll.hasVerticalScroller = true
         let text = NSTextView(frame: scroll.bounds)
         let receipt = try? Receipt(at: url)
+        reviewScope = receipt?.scope
         text.string = receipt.map { "范围：\($0.scope ?? "本机")\n\n\($0.text)" }
             ?? "这条通知对应的本地回执已无法读取。"
         text.font = .systemFont(ofSize: 14)
@@ -141,18 +149,74 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         text.autoresizingMask = .width
         text.textContainer?.widthTracksTextView = true
         scroll.documentView = text
+        content.addSubview(scroll)
+        let review = NSButton(title: "查看当前待审", target: self, action: #selector(openReviews))
+        review.frame = NSRect(x: 22, y: 12, width: 145, height: 28)
+        review.bezelStyle = .rounded
+        review.isEnabled = reviewScope?.hasPrefix("/") == true
+        content.addSubview(review)
+        let note = NSTextField(labelWithString: "回执记录生成时的结果；当前状态以审批页为准")
+        note.frame = NSRect(x: 182, y: 14, width: frame.width - 200, height: 22)
+        note.font = .systemFont(ofSize: 11)
+        note.textColor = .secondaryLabelColor
+        note.autoresizingMask = .width
+        content.addSubview(note)
 
         let viewer = window ?? NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable, .miniaturizable],
                                         backing: .buffered, defer: false)
         viewer.isReleasedWhenClosed = false
         viewer.title = "Hermes 学习明细"
-        viewer.contentView = scroll
+        viewer.contentView = content
         if window == nil { viewer.center() }
         window = viewer
         NSApp.activate(ignoringOtherApps: true)
         viewer.makeKeyAndOrderFront(nil)
         if receipt != nil {
             try? Data("opened".utf8).write(to: URL(fileURLWithPath: url.path + ".read"), options: .atomic)
+        }
+    }
+
+    @objc private func openReviews() {
+        guard let scope = reviewScope, scope.hasPrefix("/") else { return }
+        let helper = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/HermesLearningSSH/review.command")
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: helper.path),
+              (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+              attributes[.type] as? FileAttributeType == .typeRegular,
+              let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue,
+              permissions & 0o022 == 0, permissions & 0o100 != 0 else {
+            let alert = NSAlert()
+            alert.messageText = "审批入口尚未安装"
+            alert.informativeText = "请先运行 Mac 验收包中的安装入口。"
+            alert.runModal()
+            return
+        }
+        let process = Process()
+        process.executableURL = helper
+        process.arguments = [scope]
+        process.standardOutput = FileHandle.nullDevice
+        let errors = Pipe()
+        process.standardError = errors
+        process.terminationHandler = { task in
+            DispatchQueue.main.async {
+                self.reviewProcesses.removeAll { $0 === task }
+                if task.terminationStatus != 0 {
+                    let alert = NSAlert()
+                    alert.messageText = "无法打开审批页"
+                    let detail = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                    alert.informativeText = String(detail.prefix(1200))
+                    alert.runModal()
+                }
+            }
+        }
+        do {
+            try process.run()
+            reviewProcesses.append(process)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法启动审批入口"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
         }
     }
 

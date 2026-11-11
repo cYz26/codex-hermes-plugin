@@ -35,7 +35,10 @@ class PackagingTests(unittest.TestCase):
             replies = [json.loads(line) for line in result.stdout.splitlines()]
             self.assertEqual(replies[0]["result"]["serverInfo"]["version"], __version__)
             self.assertEqual({tool["name"] for tool in replies[1]["result"]["tools"]},
-                             {"learning_status", "context", "skill_load", "update_status", "update_check", "record_application"})
+                             {"learning_status", "context", "skill_load", "update_status", "update_check", "record_application", "pending_reviews"})
+            pending = next(tool for tool in replies[1]["result"]["tools"] if tool["name"] == "pending_reviews")
+            self.assertTrue(pending["annotations"]["readOnlyHint"])
+            self.assertEqual(pending["inputSchema"]["required"], ["cwd"])
 
 
 if __name__ == "__main__":

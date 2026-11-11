@@ -435,6 +435,9 @@ class Bridge:
             for attempt in self.api.read(kind="status").get("attempts", []):
                 index = reconcile(index, context, project=str(self.settings.project.resolve()), result=attempt)
         updated = reconcile(index, context, bootstrap_project=str(self.settings.project.resolve()), **kwargs)
+        for key, origin in self.store.get("approved-memory-origins", {}).items():
+            if key in updated.get("memory", {}) and updated["memory"][key].get("project") in {None, origin["project"]}:
+                updated["memory"][key] = {"project": origin["project"]}
         if persist and updated != stored_index:
             self.store.set("knowledge-index-v1", updated)
         return {**context, "bridge_provenance": updated}
@@ -486,10 +489,12 @@ class Bridge:
         aliases = self.store.get("publication-aliases", {})
         present = {item["name"] for item in context.get("skills", [])}
         publications = {name: item for name, item in publications.items() if name in present}
+        from .quality import verifier_hash
         publication_key = digest([context.get('version'), context.get('bridge_provenance'),
                                   self.store.get('workflow-skill-attestations', {}),
                                   self.store.get('semantic-skill-attestations', {}), self.settings.data_policy,
                                   enterprise["id"] if enterprise else None,
+                                  self.settings.quality_checks, verifier_hash() if self.settings.quality_checks else None,
                                   [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]])
         if self.store.get("publication-context-version") != publication_key:
             index = context.get("bridge_provenance", {})
@@ -542,7 +547,8 @@ class Bridge:
                             proof = verify(value)
                             self.store.set(key, proof)
                         if proof["state"] != "passed":
-                            decision = {"allowed":False,"reason":proof.get("reason", "quality_verification_failed")}
+                            decision = {"allowed":False,"reason":proof.get("reason", "quality_verification_failed"),
+                                        "missing_sections": proof.get("missing_sections", [])}
                         else:
                             decision = {**decision, "validation":proof}
                     if self.store.db.execute("SELECT 1 FROM withheld_versions WHERE name=? AND version=?",
@@ -677,6 +683,10 @@ class Bridge:
             self.stop.wait(delay)
 
     def rpc(self, method: str, params: dict) -> dict:
+        if method == "pending_reviews":
+            from .approvals import PendingReviews
+            with StoreConnection(self.settings, read_only=True) as store:
+                return PendingReviews(self.settings, store).list(params.get("cwd"), params.get("id"))
         if method == "capabilities":
             return {"build":self.build,"native":self.native_capabilities}
         if method == "artifact_read":
@@ -714,6 +724,9 @@ class Bridge:
                     json.loads(status.read_text()) if status.exists() else None)
                 return {"snapshot": snapshot,
                         "build": self.build,
+                        "plugin_root": str(Path(__file__).resolve().parents[2]),
+                        "approval_capabilities": {"preview": True, "revision_checked_decisions": True,
+                                                  "native_memory_only": True, "automatic_approval": False},
                         "coverage": {
                             "pending_events":store.db.execute("SELECT COUNT(*) FROM events WHERE delivered IS NULL").fetchone()[0],
                             "incomplete_turns":store.db.execute("SELECT COUNT(*) FROM turns WHERE json_extract(payload,'$.status')='incomplete'").fetchone()[0],

@@ -65,13 +65,15 @@ def _label(fact, args):
         target = op.get("target") or args.get("target") or fact.get("result", {}).get("target")
         name = "用户档案" if target == "user" else "记忆"
     else:
-        skill = op.get("name") or args.get("name") or "未命名技能"
-        resource = op.get("file_path") or args.get("file_path") or "SKILL.md"
-        name = f"技能 {skill} · {resource}"
+        skill = op.get("name") or args.get("name")
+        resource = op.get("file_path") or args.get("file_path")
+        name = f"技能 {skill} · {resource or 'SKILL.md'}" if skill else "技能操作（目标未记录）"
+        if not skill and resource:
+            name += f" · {resource}"
     return f"{verb} · {name}"
 
 
-def _text_changes(op, *, memory=False):
+def _text_changes(op, *, memory=False, proposed=False):
     action = op.get("action")
     if memory:
         old = op.get("old_text") if action in {"patch", "replace", "remove"} else None
@@ -84,7 +86,7 @@ def _text_changes(op, *, memory=False):
     if old:
         lines.extend(("匹配的原文", old))
     if new is not None:
-        lines.extend(("写入的内容", new or "（空文本）"))
+        lines.extend(("拟写入的内容" if proposed else "写入的内容", new or "（空文本）"))
     return lines
 
 
@@ -106,6 +108,28 @@ def _skill_args(fact, call, index):
 
 def _local_time(timestamp):
     return datetime.fromtimestamp(timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+
+def _unapplied_details(fact, calls, kind):
+    if not isinstance(fact, dict):
+        return [f"• {fact}"]
+    call = calls.get((fact.get("tool"), fact.get("call_id")), {})
+    operations = call.get("operations") or [call or fact.get("operation") or fact]
+    result = fact.get("result", {})
+    lines = []
+    for operation in operations:
+        label_fact = {**fact, "operation": operation}
+        lines.append("• " + _label(label_fact, operation))
+        if kind == "staged":
+            lines.extend(_text_changes(operation, memory=fact.get("tool") == "memory", proposed=True))
+    if kind == "staged" and result.get("pending_id"):
+        lines.append("待审编号：" + str(result["pending_id"]))
+    reason = result.get("error") or result.get("message")
+    if kind == "refused":
+        lines.append("拒绝原因：" + str(reason or "原生结果未提供具体原因"))
+    elif kind == "uncertain" and reason:
+        lines.append("原生结果：" + str(reason))
+    return lines
 
 
 def receipt_text(event, calls, created, *, started_at=None):
@@ -135,7 +159,12 @@ def receipt_text(event, calls, created, *, started_at=None):
     for key, heading in (("staged", "等待批准"), ("refused", "被 Hermes 拒绝"), ("uncertain", "结果待确认")):
         facts = event.get(key, [])
         if facts:
-            lines.extend((heading, *[f"• {_label(fact, {})}" if isinstance(fact, dict) else f"• {fact}" for fact in facts], ""))
+            lines.append(heading)
+            if key == "staged":
+                lines.append("这些提案尚未生效；请在审批页核对差异后批准或丢弃。")
+            for fact in facts:
+                lines.extend(_unapplied_details(fact, calls, key))
+                lines.append("")
     error = str(event.get("error") or "")
     if event.get("failure_reason") == BUDGET_EXHAUSTED:
         error = "本次后台复盘达到输入预算，执行记录已保留。"

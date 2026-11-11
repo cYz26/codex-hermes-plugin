@@ -5,9 +5,35 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from hermes_codex_learning.semantic_review import ScopedMemory, SemanticGuard, restrict
+from hermes_codex_learning.store import digest
 
 
 class SemanticReviewTests(unittest.TestCase):
+    def test_an_identical_memory_revision_is_not_staged_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = SemanticGuard(None, SimpleNamespace(home=Path(directory)))
+            guard.active["h"] = {"owned": set(), "readable": set(), "existing": set(), "memory": ["own old rule"],
+                                 "pending": {digest([{"action": "patch", "before": "own old rule", "after": "own new rule"}]): "11111111"}}
+            result = guard.pre_tool(session_id="h", tool_name="memory", args={"operations": [
+                {"action": "patch", "old_text": "own old rule", "content": "own new rule"}]})
+            self.assertIsNotNone(result)
+            self.assertEqual(result["reason"], "review_already_pending")
+            self.assertIn("11111111", result["message"])
+            self.assertIsNone(guard.pre_tool(session_id="h", tool_name="memory", args={"operations": [
+                {"action": "patch", "old_text": "own old rule", "content": "own newer rule"}]}))
+
+    def test_resource_refusal_reports_a_specific_reason_without_granting_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            guard = SemanticGuard(None, SimpleNamespace(home=Path(directory)))
+            guard.active["h"] = {"owned": {"learned-local"}, "readable": {"learned-local"},
+                                 "existing": {"learned-local"}, "memory": ["own fact"]}
+            result = guard.pre_tool(session_id="h", tool_name="skill_manage", args={"operations": [
+                {"name": "learned-local", "action": "write_file", "file_path": "../escape.py", "file_content": "print(1)"}]})
+            self.assertEqual(result["action"], "block")
+            self.assertEqual(result.get("reason"), "review_resource_path")
+            self.assertIn("../escape.py", result["message"])
+            self.assertEqual(guard.active["h"]["owned"], {"learned-local"})
+
     def test_public_review_can_revise_shared_skill_without_private_project_memory(self):
         from hermes_codex_learning.config import Settings
         from hermes_codex_learning.store import Store, digest
