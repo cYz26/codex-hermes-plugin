@@ -13,8 +13,7 @@
 ## 在运行 Codex Desktop 的 Mac 上安装
 
 ```sh
-git clone --single-branch --branch codex/cloud-dev-self-evolution \
-  https://github.com/cYz26/codex-hermes-plugin.git
+git clone git@github.com:cYz26/codex-hermes-plugin.git
 cd codex-hermes-plugin
 python3 desktop/install_macos.py --host YOUR_SSH_HOST \
   --bridge /ABS/installed-plugin/scripts/bridge \
@@ -50,6 +49,6 @@ cat ~/Library/Application\ Support/HermesLearningSSH/status.json
 
 ## 验收范围
 
-接收器离线测试验证同工作区合并、跨 scope 分开和重连去重；当前结果见 [云端分支验证](../evidence/releases/cloud-0.4.2.json)。真实验收需要在 Mac 看见横幅、点击只读明细，并核对断线补收、重启去重、无变化静默和工作区隔离。
+接收器离线测试验证同工作区合并、跨 scope 分开和重连去重；原云端分支的检查见 [0.4.2 基线记录](../evidence/releases/cloud-0.4.2.json)。真实验收需要在 Mac 看见横幅、点击只读明细，并核对断线补收、重启去重、无变化静默和工作区隔离。
 
 本次仓库整理没有重新安装 Mac 组件或重做桌面可见性验收。整理前的宿主报告另见 [历史报告](../ACCEPTANCE.linux-global.json)；Linux 后端测试、`notify-send`、发送回执或旧 macOS 截图不能替代新部署的桌面验收。

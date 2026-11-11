@@ -1,6 +1,6 @@
 # 云端开发机中的 Codex 与 Hermes 协作
 
-`codex/cloud-dev-self-evolution` 提供 Linux／SSH 开发机实现。Codex Desktop 是入口，任务执行、hooks、学习桥接与原生 Hermes worker 位于同一开发机用户环境；用户电脑只接收独立桌面通知。外围为 0.4.2，核心固定为 Hermes v0.23.0 加 Learning API v1。
+主分支提供 Linux／SSH 开发机实现。Codex Desktop 是入口，任务执行、hooks、学习桥接与原生 Hermes worker 位于同一开发机用户环境；桌面电脑运行独立通知接收器。外围为 0.4.2，固定原生版本及 Learning API v1 补丁见 [兼容清单](../patches/compatibility.json)。
 
 ## 组件与归属
 
@@ -25,12 +25,12 @@
 
 ## 平台选择与操作入口
 
-本分支使用 systemd 用户服务托管 Linux 学习监督进程。Mac 接收器通过用户已有 SSH host 配置查询通知，不修改 Codex 的 provider、模型或 SSH 配置。无需把 SSH 开发机伪装成本地 macOS，也无需启动另一个企业问答 Agent 来承担主任务。
+Linux 宿主使用 systemd 用户服务托管学习监督进程。Mac 接收器通过用户已有 SSH host 配置查询通知，接收器与本地学习服务使用不同的 LaunchAgent 标签和状态目录。
 
-通用闭环和更新合同见 [自进化实现整理](./SELF-EVOLUTION.zh-CN.md)；实际初始化、systemd、适配和回退见 [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md)；Mac 组件见 [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md)。本地 macOS 改进使用 [独立本地分支](https://github.com/cYz26/codex-hermes-plugin/tree/codex/local-learning-improvements)。
+通用闭环和更新合同见 [自进化实现整理](./SELF-EVOLUTION.zh-CN.md)；实际初始化、systemd、适配和回退见 [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md)；Mac 组件见 [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md)。同一 checkout 也提供 [本地 macOS 学习](./LOCAL-OPERATIONS.zh-CN.md)。
 
 ## 验证范围
 
-[当前分支验证](../evidence/releases/cloud-0.4.2.json) 记录本次可重复的离线检查。整理前的模型、App A→B→C、桌面可见性和适配演练保留为 [历史宿主报告](../ACCEPTANCE.linux-global.json)，原始报告的摘要用于来源关联，机器路径和聊天标识省略；本次提交不重新执行这些在线验收。
+[原云端分支验证](../evidence/releases/cloud-0.4.2.json) 记录原 0.4.2 分支的离线检查。整理前的模型、App A→B→C、桌面可见性和适配演练保留为 [历史宿主报告](../ACCEPTANCE.linux-global.json)，原始报告的摘要用于来源关联，机器路径和聊天标识省略；本次提交不重新执行这些在线验收。
 
 新宿主部署应分别验证真实 hooks、原生自动复盘、后续聊天加载／应用对应版本、修订后的再次验证，以及桌面断连补收与点击。安装成功、模型合成探针、MCP 版本交付或系统接受通知，都不能单独证明完整协作闭环。

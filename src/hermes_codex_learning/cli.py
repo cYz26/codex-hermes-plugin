@@ -197,6 +197,12 @@ def main() -> int:
     auth_status = commands.add_parser("auth-status")
     auth_status.add_argument("--settings")
     args = parser.parse_args()
+    if args.command == "install-notifier" and sys.platform != "darwin":
+        parser.error("install-notifier requires macOS; use the SSH desktop receiver for Linux learning")
+    if args.command == "launchd" and sys.platform != "darwin":
+        parser.error("Writing or starting a launchd service requires macOS")
+    if args.command == "systemd" and args.start and not args.dry_run and sys.platform != "linux":
+        parser.error("Starting a systemd service requires Linux")
     if args.command == "notices":
         from .notices import NoticeQueue
         queue = NoticeQueue(Settings.load(args.settings).state)

@@ -11,9 +11,9 @@ from unittest.mock import patch
 
 
 class NativeReviewGuardTests(unittest.TestCase):
-    def exercise(self, *, fail=False):
+    def exercise(self, *, tag="v0.23.0", fail=False):
         root = Path(__file__).resolve().parents[1]
-        manifest_path = root / "patches/v0.23.0/manifest.json"
+        manifest_path = root / "patches" / tag / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
         text = (manifest_path.parent / manifest.get("patch_file", "native-learning-api-v1.patch")).read_text()
         section = re.search(r"(?ms)^diff --git a/agent/learning_runtime.py.*?(?=^diff --git|\Z)", text).group()
@@ -55,13 +55,17 @@ class NativeReviewGuardTests(unittest.TestCase):
         return result, seen, capture.get() is interactive
 
     def test_unattended_direct_review_never_uses_interactive_secret_capture(self):
-        result, seen, restored = self.exercise()
-        self.assertEqual(result["run_status"], "completed")
-        self.assertEqual(seen, [None])
-        self.assertTrue(restored)
+        for tag in ("v0.23.0", "v0.23.1"):
+            with self.subTest(tag=tag):
+                result, seen, restored = self.exercise(tag=tag)
+                self.assertEqual(result["run_status"], "completed")
+                self.assertEqual(seen, [None])
+                self.assertTrue(restored)
 
     def test_capture_context_is_restored_when_review_fails(self):
-        result, seen, restored = self.exercise(fail=True)
-        self.assertEqual(result["run_status"], "failed")
-        self.assertEqual(seen, [None])
-        self.assertTrue(restored)
+        for tag in ("v0.23.0", "v0.23.1"):
+            with self.subTest(tag=tag):
+                result, seen, restored = self.exercise(tag=tag, fail=True)
+                self.assertEqual(result["run_status"], "failed")
+                self.assertEqual(seen, [None])
+                self.assertTrue(restored)

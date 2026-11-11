@@ -1,6 +1,6 @@
 # Codex 与 Hermes 自进化实现（0.4.2）
 
-Codex 完成用户任务；同机、独立数据目录中的 Hermes 从执行证据学习，再通过 Codex hooks 和 MCP 提供项目记忆与经过检查的通用技能。核心固定为官方 Hermes v0.23.0（`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`）加 Learning API v1 补丁，外围版本为 0.4.2。
+Codex 完成用户任务；同机、独立数据目录中的 Hermes 从执行证据学习，再通过 Codex hooks 和 MCP 提供项目记忆与经过检查的通用技能。外围版本为 0.4.2，Linux／SSH 与本地 macOS 共用学习核心。原生版本及 Learning API v1 补丁按 [兼容清单](../patches/compatibility.json) 固定，包含 v0.23.0 和 v0.23.1。
 
 ## 执行与学习闭环
 

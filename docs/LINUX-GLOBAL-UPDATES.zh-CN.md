@@ -1,6 +1,6 @@
 # Linux／SSH 全局学习与更新（0.4.2）
 
-本分支提供独立原生学习实例、systemd 用户服务、固定流程采集、检查后的共享、候选适配和 SSH 桌面通知。Codex 执行任务，Hermes 串行学习；通用实现与状态语义见 [实现整理](./SELF-EVOLUTION.zh-CN.md)。
+主分支的 Linux 方案提供独立原生学习实例、systemd 用户服务、固定流程采集、检查后的共享、候选适配和 SSH 桌面通知。Codex 执行任务，Hermes 串行学习；通用实现与状态语义见 [实现整理](./SELF-EVOLUTION.zh-CN.md)。
 
 ## 初始化与全局采集
 
@@ -32,7 +32,7 @@ systemctl --user status hermes-learning-pilot.service
 journalctl --user -u hermes-learning-pilot.service -n 80
 ```
 
-`systemd` 默认生成候选定义，`--dry-run` 只输出定义；`--start` 先使用 systemd parser 验证，再写入用户服务并启动。已有定义需要 `--replace`，替换前保存前一份定义。服务使用私有权限、5 秒失败重启与 60 秒退出超时。工作区、解释器与服务参数均使用显式路径。
+`systemd` 默认生成候选定义，`--dry-run` 只输出定义；`--start` 仅在 Linux 上执行，先使用 systemd parser 验证，再写入用户服务并启动。已有定义需要 `--replace`，替换前保存前一份定义。服务使用私有权限、5 秒失败重启与 60 秒退出超时。工作区、解释器与服务参数均使用显式路径。
 
 `doctor` 分别报告配置、provider 配置／认证、IPC、陈旧快照、采集缺口和已有模型探针。可达性不等于模型验证通过。worker 不可用时，监督进程继续保留更新与恢复入口；hooks 不等待模型调用。
 
@@ -84,4 +84,4 @@ systemctl --user disable hermes-learning-pilot.service
 python3 -B scripts/check_release.py
 ```
 
-本次分支验证见 [离线记录](../evidence/releases/cloud-0.4.2.json)。[历史全局报告](../ACCEPTANCE.linux-global.json) 保留整理前的 0.4.2／0.4.1 验收范围，[0.2.0 试点](./LINUX-OPERATIONS.zh-CN.md) 保留当时未完成项；私有原始报告未替换成新的完成声明。真实 provider、App 跨聊天应用与 Mac 横幅／点击需要独立验收，通知部署见 [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md)。
+原云端分支的验证见 [0.4.2 基线记录](../evidence/releases/cloud-0.4.2.json)。[历史全局报告](../ACCEPTANCE.linux-global.json) 保留整理前的 0.4.2／0.4.1 验收范围，[0.2.0 试点](./LINUX-OPERATIONS.zh-CN.md) 保留当时未完成项；私有原始报告未替换成新的完成声明。真实 provider、App 跨聊天应用与 Mac 横幅／点击需要独立验收，通知部署见 [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md)。

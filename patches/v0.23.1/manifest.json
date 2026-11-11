@@ -2,7 +2,7 @@
   "upstream": "https://github.com/NousResearch/hermes-agent.git",
   "tag": "v0.23.1",
   "base_commit": "3b421578588243f920886e6fe79a6faa87ea026e",
-  "patch_sha256": "9d4776a3d480ebabf1972252a928d50f12a4325dade42c627a1ce4f7ba610675",
+  "patch_sha256": "60d1efddca0c30a98b1af8dfedbd241a54fc3d4a34dc6b77a813efe6ec90e843",
   "replay_matches_working_source": true,
   "files": {
     "agent/background_review.py": "54a74cd344af918c86f3c99f7b9642bab100e97be99e596a4e873814e34d79b2",
@@ -11,7 +11,7 @@
     "agent/learning_artifacts.py": "0dcb0544489e99979fc053ccbb5872ee98043200b7849bbbbd21944e7327fda9",
     "agent/learning_policy.py": "261d9e0ea1d5e09dc36687b931f8a8982fd95a911c5d32c11a7d674c8d6e67be",
     "agent/learning_results.py": "ad4443d06b67ae0b89123c7f60ebdc6d1f4c89e8b50e1c198e4178be9d907d03",
-    "agent/learning_runtime.py": "5c0c0178fa0556cd5253a6cf28d550b75e8c451409a0fdcd9630180c7bc6a5ff",
+    "agent/learning_runtime.py": "4d7daa7916e9c49394e3296257b0f2e10368d290be29ed73c2b24d6ba3356fe4",
     "agent/learning_service.py": "eaea839cb928ec59ec959236a53b8bb6aad24ccf2e85fe87955b4af2c5ef513e",
     "hermes_cli/plugin_isolation.py": "20967d678786f49f69a25ca0367862462e7b021404b84a1d86b18f16e752e61e",
     "hermes_cli/plugins_capability_ctx.py": "aef315e73dd95d8887808e428856a148e91ad38732bf5c96db6a81f774dad86e",
@@ -22,11 +22,11 @@
   },
   "previous_custom_inputs": [],
   "source_committed": false,
-  "patch_file": "../native-learning-api-v1.patch",
+  "patch_file": "../v0.23.0/native-learning-api-v1.patch",
   "mechanism_review": {
     "classification": "compatible",
     "reviewed_from": "v0.23.0",
-    "reason": "Review forks inherit a conversation ID for plugin hooks. Curator emits a completion hook and scopes checkpoint providers when enabled. Native trigger, memory and skill contracts hold. A SessionDB fixture migrated from schema 32 to 33 and reopened for writes on v0.23.0.",
+    "reason": "Review forks inherit a conversation ID for plugin hooks. Curator emits a completion hook and scopes checkpoint providers when enabled. The shared Learning API v1 adapter also retains the non-interactive direct-review secret-capture guard used by v0.23.0. Native triggers, memory and skill storage and the upstream session schema are unchanged by this guard.",
     "source_tree": "c69ce0f0fb52a2650efcbb79cc97d35474a9be9a"
   }
 }
