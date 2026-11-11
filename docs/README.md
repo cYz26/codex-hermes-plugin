@@ -1,6 +1,6 @@
 # 文档索引
 
-当前学习运行时为官方 Hermes **v0.23.0**＋Learning API v1 补丁、外围插件 **0.3.2**、模型 **gpt-6.1-sol / Max**。学习 worker 共用官方安装的 Python 依赖环境，复用已有 Hermes 登录，学习数据独立。旧版 App/provider 验收保留原版本。
+外围插件 **0.3.3** 支持官方 Hermes **v0.23.1**＋Learning API v1 补丁。学习 worker 共用官方安装的 Python 依赖环境，复用已有 Hermes 登录，学习数据独立。旧版 App/provider 验收保留原版本。
 
 | 文档 | 用途 |
 | --- | --- |
@@ -18,7 +18,7 @@
 | [实施与验收](../IMPLEMENTATION.md) | 实际部署、测试结果、真实模型证据和剩余 App 验收 |
 | [机器可读结果](../ACCEPTANCE.json) | 可提交的验收摘要；本机详细状态另行保留 |
 | [证据索引](../evidence/README.md) | 原版、补丁版、外围、红绿测试和原生模型证据 |
-| [兼容清单](../patches/compatibility.json) | 官方基线、补丁和验证要求；包含 [v0.23.0](../patches/v0.23.0/manifest.json) 与 [v0.22.7](../patches/manifest.json) |
+| [兼容清单](../patches/compatibility.json) | 官方基线、补丁和验证要求；包含 [v0.23.1](../patches/v0.23.1/manifest.json)、[v0.23.0](../patches/v0.23.0/manifest.json) 和 [v0.22.7](../patches/manifest.json) |
 
 ## 历史研究
 

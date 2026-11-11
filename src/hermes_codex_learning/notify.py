@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import plistlib
 import subprocess
 import time
 from pathlib import Path
@@ -9,12 +10,26 @@ from .review_receipt import receipt_text
 from .store import atomic_json, digest
 
 APP_NAME = "Hermes 学习"
-APP_ID = "com.cy.hermes-learning-notifier"
+# The original identifier can retain the placeholder cached by Notification Center.
+APP_ID = "com.cy.hermes-learning-receipts"
+LEGACY_APP_ID = "com.cy.hermes-learning-notifier"
 APP_EXECUTABLE = "HermesLearningNotifier"
 
 
 def notifier_app() -> Path:
     return Path.home() / "Applications" / f"{APP_NAME}.app"
+
+
+def legacy_notifier_app(app: Path) -> Path:
+    return app.parent / ".hermes-learning-legacy" / app.name
+
+
+def bundle_identifier(app: Path) -> str | None:
+    try:
+        with (app / "Contents/Info.plist").open("rb") as info:
+            return plistlib.load(info).get("CFBundleIdentifier")
+    except FileNotFoundError:
+        return None
 
 
 def should_notify(event: dict) -> bool:
@@ -59,9 +74,15 @@ def macos_notification(state: Path, event: dict) -> dict:
             detail = event.get("receipt") or receipt_text(event, {}, event.get("created", time.time()))
             atomic_json(path, {"summary": event["message"], "text": detail})
         record["receipt_path"] = str(path)
-        binary = notifier_app() / "Contents" / "MacOS" / APP_EXECUTABLE
+        app = notifier_app()
+        if not app.exists():
+            legacy_app = legacy_notifier_app(app)
+            if bundle_identifier(legacy_app) == LEGACY_APP_ID:
+                app = legacy_app
+        record["transport"] = bundle_identifier(app) or APP_ID
+        binary = app / "Contents" / "MacOS" / APP_EXECUTABLE
         result = subprocess.run([str(binary), "--post", str(path)], capture_output=True, text=True, timeout=10)
         return {**record, "dispatched": result.returncode == 0,
                 "error": (result.stderr.strip() or f"Notifier exited with {result.returncode}") if result.returncode else None}
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except (OSError, plistlib.InvalidFileException, subprocess.TimeoutExpired) as exc:
         return {**record, "error": str(exc)}

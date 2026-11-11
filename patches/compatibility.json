@@ -3,7 +3,8 @@
   "learning_api": 1,
   "releases": {
     "v0.22.7": "manifest.json",
-    "v0.23.0": "v0.23.0/manifest.json"
+    "v0.23.0": "v0.23.0/manifest.json",
+    "v0.23.1": "v0.23.1/manifest.json"
   },
   "native_tests": [
     "tests/agent/test_learning_service.py",

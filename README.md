@@ -4,11 +4,11 @@
 
 Codex executes business tasks. A globally installed plugin records real hooks with per-project source identities; an independent service delegates unattended learning to native Hermes. Model selection remains **gpt-6.1-sol / openai-codex / codex_responses / Max**.
 
-The deployed learning core is **official Hermes v0.23.0**, commit `2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`, plus the generic Learning API v1 patch. The bridge and Codex plugin are **0.3.2**. The worker shares the official App installation's committed Python dependencies and loads the patch from a separate pinned source view. See the [upgrade workflow](./docs/UPDATES.zh-CN.md) and [v0.23.0 compatibility checks](./docs/UPGRADE-v0.23.0.zh-CN.md). Existing Hermes App authentication is reused through native profile fallback; memory, skills, sessions and bridge data remain independent. The [0.2.2 acceptance report](./docs/RELEASE-0.2.2.zh-CN.md) and [historical acceptance](./ACCEPTANCE.json) record v0.22.7.
+The **0.3.3** bridge and Codex plugin support **official Hermes v0.23.1**, commit `3b421578588243f920886e6fe79a6faa87ea026e`, with the generic Learning API v1 patch. The worker shares the official App installation's committed Python dependencies and loads the patch from a separate pinned source view. See the [upgrade workflow](./docs/UPDATES.zh-CN.md) and [v0.23.1 compatibility checks](./docs/UPDATES.zh-CN.md#v0231-适配). Existing Hermes App authentication is reused through native profile fallback; memory, skills, sessions and bridge data remain independent. The [0.2.2 acceptance report](./docs/RELEASE-0.2.2.zh-CN.md) and [historical acceptance](./ACCEPTANCE.json) record v0.22.7.
 
 ## Current deployment
 
-- Core source: a verified v0.23.0 patch view under the private `updates/` directory, prepared from the local official installation. Read the exact paths with `scripts/bridge update status`.
+- Core source: a verified patch view under the private `updates/` directory, prepared from the local official installation. Read the active version and exact paths with `scripts/bridge update status`.
 - Private data: `/Users/cy/.hermes-codex-learning/pilot`.
 - Hidden native home entry: `/Users/cy/.hermes/profiles/.codex-learning-pilot`, a directory link to the private data.
 - Existing auth root: `/Users/cy/.hermes`; no copied token file and no profile-local `auth.json`.

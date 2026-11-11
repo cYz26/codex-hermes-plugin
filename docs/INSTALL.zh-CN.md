@@ -15,7 +15,7 @@ codex plugin add hermes-learning@hermes-learning-local --json
 
 ## 新建学习实例
 
-从[兼容清单](../patches/compatibility.json)选定官方 commit。在独立检出中应用对应 Learning API v1 补丁；[v0.23.0 清单](../patches/v0.23.0/manifest.json)记录补丁和生效文件的校验值。从该检出用 Hermes 的 PM 创建依赖环境：
+从[兼容清单](../patches/compatibility.json)选定官方 commit。在独立检出中应用对应 Learning API v1 补丁；[v0.23.1 清单](../patches/v0.23.1/manifest.json)记录补丁和生效文件的校验值。从该检出用 Hermes 的 PM 创建依赖环境：
 
 ```sh
 HERMES_HOME=/absolute/learning/pilot HERMES_RUNTIME_DIR=/absolute/learning/tools \
@@ -40,6 +40,7 @@ python3 -B scripts/bridge launchd --settings /absolute/learning/pilot/bridge.jso
 ```
 
 可选：运行 `scripts/bridge install-notifier` 安装 **Hermes 学习** 通知 App，并在系统设置允许通知。
+已有通知 App 时，重新运行这条命令即可更新。首次迁移到带图标的发送方时，按 macOS 提示允许「Hermes 学习」发送通知。安装程序在获得授权后切换发送方，并保留历史回执的打开入口。
 
 ## 更新现有学习服务
 

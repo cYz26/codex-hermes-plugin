@@ -30,6 +30,27 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
             }
         } else if arguments.count == 2 && arguments[0] == "--post" {
             post(URL(fileURLWithPath: arguments[1]))
+        } else if arguments.count == 2 && arguments[0] == "--prepare-upgrade" {
+            prepareUpgrade(at: URL(fileURLWithPath: arguments[1]))
+        }
+    }
+
+    private func prepareUpgrade(at url: URL) {
+        let target = url.standardizedFileURL.resolvingSymlinksInPath()
+        let previous = NSWorkspace.shared.runningApplications.filter {
+            $0.processIdentifier != ProcessInfo.processInfo.processIdentifier &&
+                $0.bundleURL?.standardizedFileURL.resolvingSymlinksInPath() == target
+        }
+        guard previous.allSatisfy({ $0.terminate() }) else {
+            finish("无法退出正在运行的 Hermes 学习，请关闭明细窗口后重试安装")
+            return
+        }
+        DispatchQueue.global().async {
+            let deadline = Date().addingTimeInterval(10)
+            while previous.contains(where: { !$0.isTerminated }) && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            self.finish(previous.contains(where: { !$0.isTerminated }) ? "Hermes 学习尚未退出，安装已取消" : nil)
         }
     }
 

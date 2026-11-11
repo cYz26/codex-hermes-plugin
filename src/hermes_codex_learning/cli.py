@@ -97,40 +97,59 @@ def launchd(args) -> int:
 
 
 def install_notifier() -> int:
-    from .notify import APP_EXECUTABLE, APP_ID, APP_NAME, notifier_app
+    from .notify import (APP_EXECUTABLE, APP_ID, APP_NAME, LEGACY_APP_ID, bundle_identifier,
+                         legacy_notifier_app, notifier_app)
+    from .updates import exclusive
 
     app = notifier_app()
-    source = Path(__file__).resolve().parents[2] / "macos/HermesLearningNotifier.swift"
-    app.parent.mkdir(parents=True, exist_ok=True)
-    if app.exists():
-        installed = plistlib.loads((app / "Contents/Info.plist").read_bytes())
-        if installed.get("CFBundleIdentifier") != APP_ID:
+    root = Path(__file__).resolve().parents[2]
+    source = root / "macos/HermesLearningNotifier.swift"
+    legacy_app = legacy_notifier_app(app)
+    with (exclusive(app.parent / ".hermes-learning-notifier.lock"),
+          tempfile.TemporaryDirectory(prefix=".hermes-learning-", dir=app.parent) as staging):
+        installed_id = bundle_identifier(app)
+        if app.exists() and installed_id not in (APP_ID, LEGACY_APP_ID):
             raise FileExistsError(str(app))
-
-    with tempfile.TemporaryDirectory(prefix=".hermes-learning-", dir=app.parent) as staging:
+        migrating = installed_id == LEGACY_APP_ID
+        has_legacy = legacy_app.exists()
+        if has_legacy and (migrating or bundle_identifier(legacy_app) != LEGACY_APP_ID):
+            raise FileExistsError(str(legacy_app))
         candidate = Path(staging) / app.name
-        binary = candidate / "Contents" / "MacOS" / APP_EXECUTABLE
+        contents = candidate / "Contents"
+        binary = contents / "MacOS" / APP_EXECUTABLE
         binary.parent.mkdir(parents=True)
-        (candidate / "Contents/Info.plist").write_bytes(plistlib.dumps({
+        icon = contents / "Resources/HermesLearning.icns"
+        icon.parent.mkdir()
+        subprocess.run(["/usr/bin/sips", "-s", "format", "icns", str(root / "assets/hermes-learning-icon.png"),
+                        "--out", str(icon)], check=True, stdout=subprocess.DEVNULL)
+        (contents / "Info.plist").write_bytes(plistlib.dumps({
             "CFBundleIdentifier": APP_ID, "CFBundleExecutable": APP_EXECUTABLE,
             "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "LSMinimumSystemVersion": "12.0",
-            "LSUIElement": True,
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "2", "LSMinimumSystemVersion": "12.0",
+            "CFBundleIconFile": icon.name, "LSUIElement": True,
         }))
         target = f"{platform.machine()}-apple-macosx12.0"
         subprocess.run(["/usr/bin/xcrun", "swiftc", "-target", target, "-O", str(source), "-o", str(binary)], check=True)
         subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", str(candidate)], check=True)
-        backup = Path(staging) / "previous.app"
-        if app.exists():
-            app.rename(backup)
+        if migrating or (installed_id is None and has_legacy):
+            subprocess.run([str(binary), "--authorize"], check=True)
+        subprocess.run([str(binary), "--prepare-upgrade", str(app)], check=True, timeout=15)
+        backup = legacy_app if migrating else Path(staging) / "previous.app"
         try:
+            if app.exists():
+                backup.parent.mkdir(exist_ok=True)
+                app.rename(backup)
             candidate.rename(app)
-        except OSError:
-            if backup.exists():
+        except (OSError, KeyboardInterrupt):
+            if backup.exists() and not app.exists():
                 backup.rename(app)
             raise
+        if legacy_app.exists():
+            # Existing Notification Center entries still launch the original bundle ID.
+            register = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+            subprocess.run([register, "-f", str(legacy_app), str(app)], check=True)
+        subprocess.run(["/usr/bin/open", "-gnj", "-n", "-a", str(app), "--args", "--authorize"], check=True)
 
-    subprocess.run(["/usr/bin/open", "-gnj", "-a", str(app), "--args", "--authorize"], check=True)
     print(app)
     return 0
 
