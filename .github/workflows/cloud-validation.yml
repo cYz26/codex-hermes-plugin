@@ -1,0 +1,55 @@
+name: Cloud learning validation
+on:
+  push:
+    branches: ["codex/cloud-*"]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  bridge:
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+        python: ["3.11", "3.14"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install isolated-test dependency
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Portable release checks
+        run: python -B scripts/check_release.py
+      - name: Compile Mac receipt viewer
+        if: runner.os == 'macOS'
+        run: xcrun swiftc -O macos/HermesLearningNotifier.swift -o "$RUNNER_TEMP/HermesLearningNotifier"
+  native:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19
+          path: upstream
+          persist-credentials: false
+      - name: Apply pinned Learning API patch
+        run: git -C upstream apply --index "$GITHUB_WORKSPACE/patches/v0.23.0/native-learning-api-v1.patch"
+      - name: Build isolated native test environment
+        working-directory: upstream
+        env:
+          HERMES_HOME: ${{ runner.temp }}/hermes-fixture
+          HERMES_RUNTIME_DIR: ${{ runner.temp }}/hermes-tools
+        run: python3 -B -m pm.build_env --source . --out "$RUNNER_TEMP/hermes-tests" --group dev --group test
+      - name: Verify native and bridge contracts
+        env:
+          HERMES_TEST_PYTHON: ${{ runner.temp }}/hermes-tests/bin/python
+        run: python3 -B scripts/verify_native.py --source upstream --python "$HERMES_TEST_PYTHON" --output "$RUNNER_TEMP/native-check.json"

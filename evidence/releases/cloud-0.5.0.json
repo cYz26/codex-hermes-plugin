@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "implementation_version": "0.5.0",
+  "state": "deployed_cloud_acceptance_partial",
+  "source_commit": "ccecac6b493a8d4673021dffc7d909ce5964d5f3",
+  "build": {
+    "version": "0.5.0",
+    "digest": "7ec428e947cfd3de30b0b84a092fb5796a3fd36773f95e21728e9ac10c839487"
+  },
+  "verification": {
+    "bridge_integrated": {
+      "passed": 170,
+      "failed": 0
+    },
+    "native": {
+      "files": 20,
+      "passed": 337,
+      "failed": 0
+    },
+    "real_provider_synthetic": {
+      "passed": true,
+      "actual_codex": false,
+      "initial_script": "failed",
+      "revised_script": "passed",
+      "project_memory_written": true,
+      "isolation_verified": true,
+      "requests_observed": 12
+    },
+    "live_worker_recovery": {
+      "passed": true,
+      "seconds": 4.0150957107543945,
+      "during_observation": true
+    },
+    "isolated_runtime_rollback": {
+      "passed": true,
+      "scope": "isolated real workers; compatible pinned views and failed startup recovery",
+      "compatible_rollback": true,
+      "failed_target_restored": true,
+      "knowledge_preserved": true,
+      "real_model_calls": 0,
+      "live_service_changed": false
+    },
+    "public_source_admission": true,
+    "native_configuration_preserved": true
+  },
+  "deployment": {
+    "backend_ready": true,
+    "installed_build_matches": true,
+    "proactive": true,
+    "quality_checks": true,
+    "retention_enabled": true,
+    "codex_hooks": {
+      "state": "awaiting_native_trust",
+      "modified": 7
+    }
+  },
+  "pending": {
+    "codex_session_abc": "blocked_on_native_hook_trust",
+    "observation_24h": "running",
+    "macos_ui": "deferred_by_user"
+  },
+  "archive_sha256": "6fe4f58ed6f4bec0ada59765e2aa108a0a2150cff5da2095881f978f262b972f",
+  "limits": "Local and real-provider synthetic verification completed. No current Codex CLI/Desktop closed-loop acceptance or completed 24-hour observation is claimed."
+}

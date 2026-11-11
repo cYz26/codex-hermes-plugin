@@ -1,6 +1,6 @@
 # 文档索引
 
-主分支的外围版本为 **0.4.2**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
+主分支的外围版本为 **0.6.1**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
 
 ## 平台入口
 
@@ -18,6 +18,7 @@
 | --- | --- |
 | [工程入口](../README.md) | 两种场景、配置和离线检查 |
 | [自进化实现整理](./SELF-EVOLUTION.zh-CN.md) | 执行与学习闭环、资料准入、项目归属、发布和恢复 |
+| [企业专用环境学习](./ENTERPRISE-LEARNING.zh-CN.md) | 企业正文学习、配置绑定与企业内共享 |
 | [全局流程学习](./WORKFLOW-METADATA.zh-CN.md) | 固定流程投影、受限 review 和版本凭证 |
 | [更新流程](./UPDATES.zh-CN.md) | 候选验证、v0.23.1 适配、切换与回退 |
 | [兼容清单](../patches/compatibility.json) | 固定基线、补丁和原生测试集合 |
@@ -27,6 +28,9 @@
 
 | 文档 | 保留范围 |
 | --- | --- |
+| [云端 0.5.0 合同](./CLOUD-0.5.0.zh-CN.md) | 语义准入、主动复盘、通知与留存的引入版本 |
+| [0.5.0 实施与验收](./IMPLEMENTATION-0.5.0.zh-CN.md) | 原云端实现与分别记录的验收范围 |
+| [云端 0.6.0 记录](../evidence/releases/cloud-0.6.0.json) | 企业正文学习的引入与验证 |
 | [本地 0.4.2 基线](../evidence/releases/local-0.4.2.json) | 原本地分支的离线检查，macOS 实机项目单独记录 |
 | [云端 0.4.2 基线](../evidence/releases/cloud-0.4.2.json) | 原云端分支的离线检查与补丁验证 |
 | [历史全局宿主报告](../ACCEPTANCE.linux-global.json) | 整理前 0.4.2／0.4.1 的验证摘要 |

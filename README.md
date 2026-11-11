@@ -1,6 +1,6 @@
 # Hermes Learning for Codex
 
-主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.4.2**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0** 和 **v0.23.1**。
+主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.6.1**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0** 和 **v0.23.1**。
 
 Codex 执行任务，独立 Hermes 从获准的执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。安装插件和启动学习服务应在实际执行 Codex 任务的宿主完成。
 
@@ -35,9 +35,13 @@ scripts/bridge update status --settings /ABS/pilot/bridge.json
 
 ## 学习与更新
 
+新版核心整合来源绑定的语义学习、高价值事件优先、技能应用证据、隔离脚本验证和留存恢复。构建摘要排除 Python 生成的安装元数据；历史验收保留原版本与范围。
+
+[企业专用环境学习](./docs/ENTERPRISE-LEARNING.zh-CN.md)由操作人确认当前企业模型与专用部署后启用：普通内部任务正文参与学习，通用技能在该企业知识库复用；项目归属、凭据过滤和显式禁学约束继续生效。
+
 hooks 使用真实 cwd 确定项目身份，将获准的执行证据写入持久事件箱；hooks 不调用模型。独立监督进程托管 Hermes worker，复用原生 review、Memory、Skills 和 Curator。项目记忆按工作区召回，通用候选通过来源、资源、摘要及共享准入检查后才发布。
 
-[实现整理](./docs/SELF-EVOLUTION.zh-CN.md) 说明共同的执行与学习闭环；[流程学习](./docs/WORKFLOW-METADATA.zh-CN.md) 说明固定流程投影的边界。新建全局配置默认学习固定动作／状态；业务正文需要显式资料准入，流程投影不提供通用脱敏服务。
+[实现整理](./docs/SELF-EVOLUTION.zh-CN.md) 说明共同的执行与学习闭环；[流程学习](./docs/WORKFLOW-METADATA.zh-CN.md) 说明固定流程投影的边界。新建全局配置默认学习固定动作／状态；企业专用部署可按已绑定策略学习正文，其他部署沿用显式来源准入；流程投影不提供通用脱敏服务。
 
 更新器发现官方稳定版后，核对精确提交、补丁和原生／外围合同，再由监督进程暂停学习并验证候选。`updates.auto_adapt` 默认关闭；开启后，兼容维护仍须通过独立验证器，重设计和不可逆迁移需要具体方案。恢复保留当前事件、已交付回执、学习结果和根账号认证。原生版本适配见 [更新流程](./docs/UPDATES.zh-CN.md)。
 

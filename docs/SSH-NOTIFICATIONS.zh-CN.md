@@ -1,5 +1,7 @@
 # SSH 桌面通知与只读明细（0.4.2）
 
+0.5.0 接收器兼容此安装入口，增加 V2 游标与批量传输、未知投递处置、远端 Python 选择及 90 天明细保留；详见 [当前运行合同](./CLOUD-0.5.0.zh-CN.md)。已有通知 App 的图标随包保留，独立更新工具为 desktop/update_macos_icon.py。
+
 开发机上的真实学习变更生成持久回执，Mac 上的接收器经已有 SSH host 配置补收通知。通知不写入 `additionalContext`、`systemMessage`、聊天正文或 MCP 返回，也不启动 Codex 回合或调用模型。当前没有经过验证的 SSH 纯 UI 聊天提示接口，`notices capabilities` 报告 `chat_ui: false`。
 
 ## 持久投递

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "version": "0.6.0",
+  "build": {
+    "version": "0.6.0",
+    "digest": "b7e5d2478ae6b54ad222ad327b3bea3069703708c6b7bd7f7775d92468b74cab"
+  },
+  "recorded_at": 1794317533.9177196,
+  "status": "deployed_pending_native_hook_trust",
+  "behavior": {
+    "ordinary_enterprise_body_learning": true,
+    "source_manifest_required": false,
+    "sharing_audience": "enterprise",
+    "project_memory_scoped": true,
+    "credential_filtering": true,
+    "explicit_restrictions_preserved": true,
+    "model_configuration_unchanged": true
+  },
+  "offline": {
+    "native_tests_passed": 337,
+    "native_failures": 0,
+    "bridge_tests_passed": 189,
+    "bridge_skipped": 0,
+    "bridge_failures": 0,
+    "release_checks_passed": true,
+    "native": {
+      "local_record": "evidence/private/enterprise/verified.native.log",
+      "sha256": "d24ac21a4cce6892142cdd3bb5a845e86521e0bc480dc50fb5573f7a56d0c459"
+    },
+    "bridge": {
+      "local_record": "evidence/private/enterprise/bridge-final.log",
+      "sha256": "8625b0b5e6e94e3416159a089dcad03021d9976fafebf25501168f1789563be6"
+    },
+    "release": {
+      "local_record": "evidence/private/enterprise/release-gates-final.log",
+      "sha256": "4869ef654ce4199990233ae5586f9bf5ecdae528be427554fe36dc0b9dbc79d5"
+    }
+  },
+  "real_provider": {
+    "passed": true,
+    "input": "explicit synthetic fixture using the existing approved enterprise route",
+    "actual_codex": false,
+    "phase": "enterprise learning before final boundary and local-ingress hardening; final changes covered by bridge/native fixture regressions",
+    "skill_revised": true,
+    "final_script_verified": true,
+    "project_memory_written": true,
+    "isolation_verified": true,
+    "foreign_memory_preserved": true,
+    "enterprise_shared": true,
+    "other_project_memory_empty": true,
+    "evidence": {
+      "local_record": "evidence/private/enterprise/real-provider-1/result.json",
+      "sha256": "abfbfa7d3dc77f64a0237006063c92ad90289b05ac22993c1f783ce02bd20b21"
+    }
+  },
+  "deployment": {
+    "passed": true,
+    "evidence": {
+      "local_record": "evidence/private/enterprise/deployed-final.json",
+      "sha256": "45f3b38d7a2f4ccff4972ac1c6e6e00dc65c5cb1cd3b0e5226c317fb9e3df04c"
+    }
+  },
+  "native_hooks": {
+    "ready": false,
+    "count": 7,
+    "trust_statuses": [
+      "modified"
+    ],
+    "trust_hashes_modified_by_agent": false,
+    "evidence": {
+      "local_record": "evidence/private/enterprise/hooks-final.json",
+      "sha256": "0f69d39f4b7fc76455a54467ff33edf1ed835c3db3821ae95bcf6d6713683939"
+    }
+  },
+  "observation_24h": {
+    "state": "running",
+    "scope": "service and enterprise policy only",
+    "completed": false,
+    "local_record": "evidence/private/enterprise/observation-24h.json"
+  },
+  "not_covered": [
+    "0.6.0 actual Codex capture and cross-session application awaiting native hook trust",
+    "completed 24-hour observation",
+    "Mac Desktop UI (deferred by user)",
+    "learning quality across production enterprise tasks"
+  ]
+}

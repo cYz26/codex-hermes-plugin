@@ -2,6 +2,8 @@
 
 需要 Python 3.11+、Codex CLI 或带 Codex 的桌面 App，以及与 [兼容清单](../patches/compatibility.json) 匹配的 Hermes 源码。两种场景使用同一插件：在实际执行 Codex 任务的宿主安装插件与学习服务。macOS 本地宿主使用本页的 launchd 流程；Linux／SSH 宿主使用 [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md)，桌面 Mac 只需按 [SSH 通知](./SSH-NOTIFICATIONS.zh-CN.md) 安装接收器。
 
+现有 Linux 学习服务可使用 `scripts/bridge install --settings /ABS/pilot/bridge.json` 预览不可变安装包，再加 `--apply --start` 排空复盘并替换服务。继续复用原配置、认证和学习数据，详见 [云端安装合同](./CLOUD-0.5.0.zh-CN.md)。
+
 ## Codex 插件
 
 在干净的发布版本检出根目录，使用目标桌面 App 对应的 Codex CLI：

@@ -27,9 +27,12 @@ def register(ctx):
             settings = Settings.load(args.settings)
             api = ctx.learning(version=1)
             workflow_registration = None
+            semantic_registration = None
             try:
                 from hermes_codex_learning.workflow_review import install_workflow_policy
                 workflow_registration = install_workflow_policy(api, settings, ctx)
+                from hermes_codex_learning.semantic_review import install_semantic_policy
+                semantic_registration = install_semantic_policy(api, settings, ctx)
                 install_review_policy(api)
             except Exception:
                 api.close()
@@ -37,6 +40,8 @@ def register(ctx):
             try:
                 return run(settings, api, review_writes)
             finally:
+                if semantic_registration is not None:
+                    semantic_registration.dispose()
                 if workflow_registration is not None:
                     workflow_registration.dispose()
         finally:

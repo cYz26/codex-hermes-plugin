@@ -169,18 +169,25 @@ class GlobalTests(unittest.TestCase):
         self.assertFalse(self.store.pending())
 
     def test_mcp_uses_explicit_cwd_and_shared_skill_reads_keep_native_receipts(self):
+        import hashlib
+        artifact=self.root/"artifact"
+        artifact.mkdir()
+        (artifact/"SKILL.md").write_text("procedure")
         class API:
             def read(self, **kwargs):
-                return {"name": kwargs["name"], "version": "immutable-version", "delivery_token": "fixture", "content": "procedure"}
+                return {"name": kwargs["name"], "version": "immutable-version", "delivery_token": "fixture", "content": "procedure",
+                        "resource_dir":str(artifact),"files":{"SKILL.md":hashlib.sha256(b"procedure").hexdigest()},
+                        "file_path":"SKILL.md","content_hash":hashlib.sha256(b"procedure").hexdigest()}
         atomic_json(self.settings.state / "context.json", self.context())
         self.store.set("knowledge-index-v1", self.context()["bridge_provenance"])
         bridge = Bridge(self.settings, API())
         try:
+            bridge.cache_artifacts(self.context())
             self.assertFalse(bridge.rpc("context", {})["memories"])
             self.assertFalse(bridge.rpc("context", {"cwd": str(self.b)})["memories"])
             self.assertTrue(bridge.rpc("context", {"cwd": str(self.a)})["memories"])
             loaded = bridge.rpc("skill_load", {"name": "regression-tests", "cwd": str(self.b)})
-            self.assertEqual(loaded["delivery_token"], "fixture")
+            self.assertTrue(loaded["delivery_token"].startswith("read-v1."))
             self.assertEqual(loaded["source_projects"], [str(self.a)])
             self.assertEqual(loaded["request_project"], str(self.b))
             with self.assertRaises(ValueError):
