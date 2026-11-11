@@ -1,3 +1,2 @@
-HERMES-CODEX-PROBE.json -text
-patches/** -text
-evidence/** -text
+# Empty context lines in unified diffs contain a required space. Preserve patch bytes.
+*.patch whitespace=-blank-at-eol

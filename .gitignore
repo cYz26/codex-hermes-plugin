@@ -13,3 +13,5 @@ backups/
 /UPGRADE-CHECKPOINT.json
 /build/
 /dist/
+/report/
+/pilot-project/.codex/config.toml

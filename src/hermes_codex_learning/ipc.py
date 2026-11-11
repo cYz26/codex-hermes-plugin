@@ -4,9 +4,9 @@ import socket
 from .config import Settings
 
 
-def request(settings: Settings, method: str, params: dict | None = None) -> dict:
+def request(settings: Settings, method: str, params: dict | None = None, *, timeout: float = 15) -> dict:
     with socket.socket(socket.AF_UNIX) as client:
-        client.settimeout(15)
+        client.settimeout(timeout)
         client.connect(str(settings.socket))
         client.sendall((json.dumps({"method": method, "params": params or {}}) + "\n").encode())
         stream = client.makefile("rb")

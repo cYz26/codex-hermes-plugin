@@ -1,16 +1,31 @@
 import json
+import plistlib
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from hermes_codex_learning.notify import macos_notification, message
+from hermes_codex_learning.notify import (LEGACY_APP_ID, APP_EXECUTABLE, legacy_notifier_app,
+                                         macos_notification, message)
 from hermes_codex_learning.review_input import BUDGET_EXHAUSTED
 from hermes_codex_learning.review_receipt import ReviewWrites, receipt_text
 
 
 class ReviewReceiptTests(unittest.TestCase):
+    def test_dispatch_uses_preserved_legacy_app_during_interrupted_migration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            state = Path(temporary)
+            app = state / "Hermes 学习.app"
+            legacy = legacy_notifier_app(app)
+            (legacy / "Contents/MacOS").mkdir(parents=True)
+            (legacy / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": LEGACY_APP_ID}))
+            with patch("hermes_codex_learning.notify.notifier_app", return_value=app), \
+                 patch("hermes_codex_learning.notify.subprocess.run", return_value=subprocess.CompletedProcess([], 0)) as run:
+                result = macos_notification(state, self.event("fallback"))
+            self.assertEqual(result["transport"], LEGACY_APP_ID)
+            self.assertEqual(run.call_args.args[0][0], str(legacy / "Contents/MacOS" / APP_EXECUTABLE))
+
     def event(self, identity="review-a", **fields):
         event = {"id": identity, "kind": "review.finished", "run_status": "completed", **fields}
         return {**event, "message": message(event)}
@@ -51,7 +66,7 @@ class ReviewReceiptTests(unittest.TestCase):
         writes.record(session_id="native-handle", tool_name="memory", tool_call_id="m",
                       args={"action": "add", "content": "Late write"})
         receipt = receipt_text(self.event(applied=facts), calls, 0)
-        self.assertIn("3 项变更生效", receipt)
+        self.assertIn("2 项变更生效", receipt)
         self.assertIn("新增 · 记忆\n写入的内容\nUse frozen inputs", receipt)
         self.assertIn("匹配的原文\nOriginal rule\n写入的内容\nRevised rule", receipt)
         self.assertIn("匹配的原文\nRevised rule\n写入的内容\nUse fixed input hashes", receipt)

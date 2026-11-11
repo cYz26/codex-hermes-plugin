@@ -27,6 +27,12 @@ class Settings:
     official_source: Path | None = None
     fallback_python: Path | None = None
     upgrade_official: bool = False
+    auto_adapt: bool = False
+    adaptation_timeout: float = 1800
+    data_policy: dict = field(default_factory=dict)
+    checked_publication: bool = False
+    site_manifest: Path | None = None
+    runtime_extras: tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.capture_scope not in {"project", "global"}:
@@ -39,6 +45,11 @@ class Settings:
             raise ValueError("updates.interval_seconds must be between one hour and 30 days")
         if not isinstance(self.upgrade_official, bool) or (self.upgrade_official and self.official_source is None):
             raise ValueError("updates.upgrade_official requires an official source and a boolean value")
+        if not isinstance(self.auto_adapt, bool) or not 60 <= self.adaptation_timeout <= 7200:
+            raise ValueError("Automatic adaptation requires a boolean policy and a 60–7200 second timeout")
+        if not isinstance(self.data_policy, dict) or ('workflow_projection' in self.data_policy
+                and not isinstance(self.data_policy['workflow_projection'], bool)):
+            raise ValueError('data_policy.workflow_projection must be a boolean')
 
     @property
     def interpreter(self) -> Path:
@@ -112,4 +123,10 @@ class Settings:
                 if data.get("updates", {}).get("official_source") else None,
             fallback_python=Path(data["fallback_python"]).absolute() if data.get("fallback_python") else None,
             upgrade_official=data.get("updates", {}).get("upgrade_official", False),
+            auto_adapt=data.get("updates", {}).get("auto_adapt", False),
+            adaptation_timeout=float(data.get("updates", {}).get("adaptation_timeout", 1800)),
+            data_policy=data.get("data_policy", {}),
+            checked_publication=data.get("checked_publication", False),
+            site_manifest=Path(data["updates"]["site_manifest"]).resolve() if data.get("updates", {}).get("site_manifest") else None,
+            runtime_extras=tuple(data.get("runtime_extras", [])),
         )

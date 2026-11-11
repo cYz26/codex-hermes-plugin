@@ -4,6 +4,7 @@ import UserNotifications
 private struct Receipt: Decodable {
     let summary: String
     let text: String
+    let scope: String?
 
     init(at url: URL) throws {
         self = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
@@ -27,6 +28,28 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         if arguments == ["--authorize"] {
             center.requestAuthorization(options: .alert) { allowed, error in
                 self.finish(error?.localizedDescription ?? (allowed ? nil : "已关闭 Hermes 学习通知"))
+            }
+        } else if arguments.count == 2 && arguments[0] == "--authorize-result" {
+            let url = URL(fileURLWithPath: arguments[1])
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            center.requestAuthorization(options: .alert) { allowed, error in
+                self.center.getNotificationSettings { settings in
+                    let result: [String: Any] = [
+                        "allowed": allowed,
+                        "authorization_status": settings.authorizationStatus.rawValue,
+                        "bundle_identifier": Bundle.main.bundleIdentifier ?? "",
+                        "bundle_path": Bundle.main.bundleURL.path,
+                        "error": error?.localizedDescription ?? "",
+                    ]
+                    do {
+                        let data = try JSONSerialization.data(withJSONObject: result, options: .sortedKeys)
+                        try data.write(to: url, options: .atomic)
+                        self.finish(nil)
+                    } catch {
+                        self.finish(error.localizedDescription)
+                    }
+                }
             }
         } else if arguments.count == 2 && arguments[0] == "--post" {
             post(URL(fileURLWithPath: arguments[1]))
@@ -70,7 +93,12 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
                 let request = UNNotificationRequest(identifier: url.deletingPathExtension().lastPathComponent,
                                                     content: content, trigger: trigger)
-                self.center.add(request) { error in self.finish(error?.localizedDescription) }
+                self.center.add(request) { error in
+                    if error == nil {
+                        try? Data("accepted".utf8).write(to: URL(fileURLWithPath: url.path + ".sent"), options: .atomic)
+                    }
+                    self.finish(error?.localizedDescription)
+                }
             }
         } catch {
             finish(error.localizedDescription)
@@ -102,7 +130,9 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         let scroll = NSScrollView(frame: frame)
         scroll.hasVerticalScroller = true
         let text = NSTextView(frame: scroll.bounds)
-        text.string = (try? Receipt(at: url).text) ?? "这条通知对应的本地回执已无法读取。"
+        let receipt = try? Receipt(at: url)
+        text.string = receipt.map { "范围：\($0.scope ?? "本机")\n\n\($0.text)" }
+            ?? "这条通知对应的本地回执已无法读取。"
         text.font = .systemFont(ofSize: 14)
         text.isEditable = false
         text.isRichText = false
@@ -121,6 +151,9 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         window = viewer
         NSApp.activate(ignoringOtherApps: true)
         viewer.makeKeyAndOrderFront(nil)
+        if receipt != nil {
+            try? Data("opened".utf8).write(to: URL(fileURLWithPath: url.path + ".read"), options: .atomic)
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

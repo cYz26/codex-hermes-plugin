@@ -115,15 +115,24 @@ class Store:
             self.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)", (key, dumps(value)))
 
 
-def atomic_json(path: Path, value: Any) -> None:
+def atomic_text(path: Path, value: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
-        with os.fdopen(fd, "w") as stream:
-            json.dump(value, stream, ensure_ascii=False)
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(value)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(tmp, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def atomic_json(path: Path, value: Any) -> None:
+    atomic_text(path, json.dumps(value, ensure_ascii=False) + "\n")

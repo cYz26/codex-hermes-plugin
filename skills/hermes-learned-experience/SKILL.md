@@ -12,3 +12,5 @@ When a learned skill matches the task, use the Hermes learning MCP `skill_load` 
 If experience changes your approach, briefly mention the relevant lesson. Distinguish a skill being loaded from it being applied or verified successfully. Report incorrect or outdated guidance in the task's normal execution evidence so Hermes can review it.
 
 Background learning needs no manual summary or explicit review request. `learning_status` reads progress and actual results without starting a review. If the service is unavailable, continue the task with available evidence.
+
+With checked publication enabled, only accepted generic versions are shared across workspaces. A withheld candidate is not a published lesson. Notification delivery is independent of business recall: do not fetch or quote notice receipts unless the user explicitly asks to use that material. There is no verified UI-only Codex chat notice channel on this SSH host.

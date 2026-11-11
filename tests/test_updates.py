@@ -40,13 +40,13 @@ class UpdateTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 replace(self.settings, **fields)
 
-    def test_unknown_release_with_large_learning_changes_requests_a_plan(self):
+    def test_large_learning_diff_requires_research_not_automatic_redesign_classification(self):
         release = {"tag": "v0.99.0"}
         comparison = {"files": [{"filename": "agent/background_review.py", "status": "modified",
                                   "additions": 180, "deletions": 90}]}
         with patch.object(Updater, "current", return_value="v0.22.7"):
             result = self.updater.check(fetch=lambda _: release, compare=lambda *_: comparison)
-        self.assertEqual(result["state"], "plan_required")
+        self.assertEqual(result["state"], "mechanism_review_required")
         self.assertTrue(result["assessment"]["changed_mechanisms"])
         self.assertFalse((self.updater.directory / "request.json").exists())
 
@@ -60,7 +60,7 @@ class UpdateTests(unittest.TestCase):
         result = assess_changes({"files": [{"filename": "new/engine.py", "previous_filename": "agent/curator.py",
                                            "status": "renamed", "additions": 0, "deletions": 0}]},
                                 current="v0.22.7", target="v0.23.0")
-        self.assertEqual(result["state"], "plan_required")
+        self.assertEqual(result["state"], "mechanism_review_required")
 
     def test_redesign_recipe_is_not_allowed_before_plan_agreement(self):
         recipe = {"tag": "v0.23.0", "mechanism_review": {"classification": "redesign_required", "reason": "new flow"}}
@@ -91,9 +91,14 @@ class UpdateTests(unittest.TestCase):
         self.assertFalse((self.updater.directory / "candidates").exists())
 
     def test_plan_required_never_stages_or_activates_in_auto_mode(self):
-        with patch.object(self.updater, "check", return_value={"state": "plan_required"}), \
-                patch.object(self.updater, "prepare") as prepare, patch.object(self.updater, "request") as request:
-            self.updater.cycle()
+        updater = Updater(replace(self.settings, auto_adapt=True))
+        result = {"state": "plan_required", "latest": {"tag": "v0.99.0"},
+                  "assessment": {"reason": "storage migration requires an agreed plan"}}
+        with patch.object(updater, "check", return_value=result), \
+                patch.object(updater, "prepare") as prepare, patch.object(updater, "request") as request, \
+                patch("hermes_codex_learning.adaptation.Adapter.run") as adapt:
+            self.assertEqual(updater.cycle(), result)
+        adapt.assert_not_called()
         prepare.assert_not_called()
         request.assert_not_called()
 
@@ -107,6 +112,19 @@ class UpdateTests(unittest.TestCase):
                 patch.object(self.updater, "prepare", return_value={"state": "failed"}), patch.object(self.updater, "request") as request:
             self.updater.cycle()
             request.assert_not_called()
+
+    def test_automatic_research_only_advances_after_independent_verification(self):
+        updater = Updater(replace(self.settings, auto_adapt=True))
+        research = {'state': 'mechanism_review_required', 'latest': {'tag': 'v0.99.0'}}
+        available = {'state': 'available', 'latest': {'tag': 'v0.99.0'}}
+        with patch.object(updater, 'check', side_effect=[research, available]), \
+                patch('hermes_codex_learning.adaptation.Adapter.run', return_value={'state': 'verified'}) as adapt, \
+                patch.object(updater, 'prepare', return_value={'state': 'ready'}) as prepare, \
+                patch.object(updater, 'request', return_value={'state': 'queued'}) as request:
+            updater.cycle()
+        adapt.assert_called_once_with('v0.99.0')
+        prepare.assert_called_once_with('v0.99.0')
+        request.assert_called_once_with('apply', automatic=True)
 
     def test_official_app_change_can_be_followed_without_fetching_a_release(self):
         updater = Updater(replace(self.settings, official_source=self.root / "hermes-agent"))
@@ -412,7 +430,7 @@ class ActivationTests(unittest.TestCase):
         previous = json.loads((self.updater.directory / "previous.json").read_text())
         atomic_json(self.updater.directory / "request.json", {"id": "r2", "action": "rollback", "target": digest(previous)})
         (self.home / "memories/MEMORY.md").write_text("new knowledge")
-        with patch("hermes_codex_learning.supervisor.verify_source"):
+        with patch.object(Updater, "runtime_info", return_value={"tag": "v0.22.7"}):
             supervisor.activate()
         self.assertEqual(json.loads(self.config.read_text())["source"], self.before["source"])
         self.assertEqual((self.home / "memories/MEMORY.md").read_text(), "new knowledge")
@@ -442,6 +460,28 @@ class ActivationTests(unittest.TestCase):
         inode = owner.stat().st_ino
         restore(Settings.load(self.config), backup)
         self.assertEqual(owner.stat().st_ino, inode)
+
+    def test_restore_keeps_workflow_attestations_bound_to_the_restored_skill_version(self):
+        from hermes_codex_learning.store import Store
+
+        settings = Settings.load(self.config)
+        original = {"workflow-verification": {"version": "accepted-v1", "catalog_version": "catalog-v1"}}
+        store = Store(settings.state)
+        store.set("workflow-skill-attestations", original)
+        store.close()
+        backup = self.root / "snapshot"
+        snapshot(settings, backup)
+        store = Store(settings.state)
+        store.set("workflow-skill-attestations", {"workflow-verification": {"version": "failed-v2"}})
+        store.set("delivery:after-snapshot", {"stage": "body_delivered"})
+        store.close()
+        restore(settings, backup)
+        store = Store(settings.state)
+        try:
+            self.assertEqual(store.get("workflow-skill-attestations"), original)
+            self.assertEqual(store.get("delivery:after-snapshot"), {"stage": "body_delivered"})
+        finally:
+            store.close()
 
     def test_lost_resume_after_commit_restarts_new_runtime_without_restoring_data(self):
         worker = FakeWorker(self.home)

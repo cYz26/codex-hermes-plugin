@@ -1,79 +1,53 @@
 # Hermes Learning for Codex
 
-新装和升级见 [安装与更新](./docs/INSTALL.zh-CN.md)。[文档索引](./docs/README.md) 区分当前实现、验收记录和历史研究；[证据索引](./evidence/README.md) 说明测试、真实模型与 App 验收的边界。
+本分支 `codex/cloud-dev-self-evolution` 提供云端 Linux／SSH 开发机实现，见 [运行与升级](./docs/LINUX-GLOBAL-UPDATES.zh-CN.md) 和 [SSH 桌面通知](./docs/SSH-NOTIFICATIONS.zh-CN.md)。本地 macOS 的独立分支见 [本地分支](https://github.com/cYz26/codex-hermes-plugin/tree/codex/local-learning-improvements)。
 
-Codex executes business tasks. A globally installed plugin records real hooks with per-project source identities; an independent service delegates unattended learning to native Hermes. Model selection remains **gpt-6.1-sol / openai-codex / codex_responses / Max**.
+Codex 执行任务，独立 Hermes 从执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。当前外围版本为 **0.4.2**，学习核心为官方 **Hermes v0.23.0**（`2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19`）加 Learning API v1 补丁。
 
-The **0.3.3** bridge and Codex plugin support **official Hermes v0.23.1**, commit `3b421578588243f920886e6fe79a6faa87ea026e`, with the generic Learning API v1 patch. The worker shares the official App installation's committed Python dependencies and loads the patch from a separate pinned source view. See the [upgrade workflow](./docs/UPDATES.zh-CN.md) and [v0.23.1 compatibility checks](./docs/UPDATES.zh-CN.md#v0231-适配). Existing Hermes App authentication is reused through native profile fallback; memory, skills, sessions and bridge data remain independent. The [0.2.2 acceptance report](./docs/RELEASE-0.2.2.zh-CN.md) and [historical acceptance](./ACCEPTANCE.json) record v0.22.7.
+[实现整理](./docs/SELF-EVOLUTION.zh-CN.md) 说明执行与学习闭环、资料准入、版本发布、运行时更新和恢复；[流程学习](./docs/WORKFLOW-METADATA.zh-CN.md) 说明全局固定流程投影的边界。安装入口、当前部署说明和历史验收见 [文档索引](./docs/README.md)。
 
-## Current deployment
+## 工作方式
 
-- Core source: a verified patch view under the private `updates/` directory, prepared from the local official installation. Read the active version and exact paths with `scripts/bridge update status`.
-- Private data: `/Users/cy/.hermes-codex-learning/pilot`.
-- Hidden native home entry: `/Users/cy/.hermes/profiles/.codex-learning-pilot`, a directory link to the private data.
-- Existing auth root: `/Users/cy/.hermes`; no copied token file and no profile-local `auth.json`.
-- Interpreters: the supervisor uses the local Python that registered its LaunchAgent. `bridge.json` selects the worker's published official environment and a verified private fallback; preserve the venv paths as written.
-- Service: `com.cy.hermes-codex-learning.pilot`.
-- Global capture configuration: all local main chats with a real hook cwd; Git roots/worktrees or non-Git working directories retain separate source identities. No old transcript is imported. Deployment and host-trust gates are tracked in [global rollout](./docs/GLOBAL-ROLLOUT.zh-CN.md).
+- Codex hooks 使用真实 cwd 确定项目身份，将获准的执行证据写入持久事件箱；hooks 不调用模型。
+- 独立监督进程托管 Hermes worker，复用原生 review、Memory、Skills 和 Curator；配置、学习数据和运行中的主应用分开。
+- 项目记忆按工作区召回。通用候选通过来源、路径、内容摘要及共享准入检查后才发布，拒绝的新候选不会替换上一已发布版本。
+- 新建全局配置默认学习固定动作／状态。业务正文仍需要显式资料准入，这套流程投影不提供通用脱敏服务。
+- 模型、provider、API 模式和推理档位通过原生配置选择。既有认证由 Hermes 管理，不复制 Token，也不改变 Codex 的当前模型配置。
 
-The native profile has `gateway.standalone: true` so the App's host gateway does not serve it. The App's source, package and running process were not replaced or restarted. Native root credentials use the same locking and refresh write-back path; native profile config and learned artifacts stay local to the separate home.
+Linux／SSH 与本地 macOS 使用独立分支，共用便携学习核心；平台服务和桌面接收组件由对应分支提供。原版 0.3.2 的 macOS 部署及 v0.22.7 验收保留原版本与范围。
 
-**This is a hidden background learning scope.** Its former visible `codex-learning-pilot` registration caused `Runtime not ready` / `profile_mismatch` when selected in Desktop. The registration now uses `.codex-learning-pilot`: native enumeration skips it, so both the App profile API and Bots RPC omit it. Authentication fallback and the physical learning home are unchanged. Use `scripts/bridge` to inspect it; it is no longer a selectable `hermes -p` name. See [Desktop profile boundary and diagnosis](./docs/PROFILE-DESKTOP.zh-CN.md).
+## 检查和使用
 
-## Inspect and use
-
-**0.3.2 adds the [Learning Loop icon](./docs/design/hermes-learning-icon/README.md) and bounds background review input.** Large attachments and tool output are compacted in the review copy; the recorded task evidence is kept. The supervisor can start when a Hermes worker environment is missing. Official updates still require verification against the exact target; see [更新策略、兼容性与回退](./docs/UPDATES.zh-CN.md).
-
-```sh
-scripts/bridge update status
-scripts/bridge update check
-```
-
-在本工程的 Codex 聊天发 **“自动验收 Hermes 跨项目召回”**，由 Codex 创建两条真实 App 聊天并核对各自的召回来源。[自动验收流程](./docs/GLOBAL-ROLLOUT.zh-CN.md#按需自动验收)
-
-```sh
-scripts/bridge auth-status
-scripts/bridge status
-```
-
-`auth-status` exports only a native read-only status, not credentials. `login` returns the existing status when Hermes is already logged in; no additional authorization is needed for this deployment. Account recovery belongs to the existing Hermes login flow. The bridge never imports Codex App authentication.
-
-The plugin selector is `hermes-learning@hermes-learning-local`. See [installation verification](./docs/INSTALL.zh-CN.md#安装后回读) for hook trust checks. Each hook response limits its full `additionalContext` to 256 UTF-8 bytes, a conservative upper bound for the host's byte-level BPE. Codex can retrieve the complete project context or load a relevant skill through MCP when the preview is clipped.
-
-Learning feedback appears in macOS notifications. Each banner shows the project and counts, and opens the review's local receipt. The receipt shows when the review started and ended, applied memory and skill changes, and pending or incomplete outcomes. It keeps the operation details in the pilot's private data directory. Older records can show the original operation list when the change text is unavailable. Codex hooks continue to capture activity and supply project-scoped recall to the model. Set `notifications` to `false` in `bridge.json` to disable the macOS channel on the next bridge start.
-
-## Verification and recovery
+需要 Python 3.11 或更高版本。外围客户端只有标准库依赖；Hermes worker 需要验证过的原生运行时及固定补丁。
 
 ```sh
 python3 -B scripts/check_release.py
+scripts/bridge --help
+scripts/bridge init --help
+scripts/bridge auth-status --settings /ABS/pilot/bridge.json
+scripts/bridge doctor --settings /ABS/pilot/bridge.json --json
+scripts/bridge status --settings /ABS/pilot/bridge.json
+scripts/bridge update status --settings /ABS/pilot/bridge.json
 ```
 
-This portable check runs the bridge tests and verifies package versions, patch integrity, preserved evidence, local document links and the absence of credential material in the publishable tree. It does not call a model, install a plugin or modify a live Hermes profile. The extra packaging regression executes the MCP manifest exactly, without hook environment variables or placeholder expansion.
+新建配置先使用 `init --dry-run` 核对固定源码、解释器、project、home 和 provider 参数。选择 `--capture-scope global` 时默认启用资料准入、固定流程投影和检查后的共享；已有配置保留既有策略。平台安装步骤见分支文档及 [安装与更新](./docs/INSTALL.zh-CN.md)。
 
-Run native tests through `scripts/run_tests.sh` from the Hermes checkout with `HERMES_PYTHON` set to the test interpreter. The preserved v0.22.7 core baseline covers 328 original and 343 modified native tests and all 14 native checks. The [v0.23.0 shared candidate](./evidence/updates/v0.3.1.json) passed 333 native tests before the 0.3.2 bridge changes.
+更新器发现官方稳定版后，核对精确提交、补丁和原生／外围合同，再由监督进程暂停学习并验证候选。`updates.auto_adapt` 默认关闭；开启后，Codex 维护兼容材料仍要通过未被修改的验证器，重设计或不可逆迁移需要具体方案。回退保护当前事件、已交付回执和根账号认证。
 
-`probes/check_hidden_profile.py --source /absolute/hermes-source`, run with the dedicated Hermes interpreter, separately checks hidden enumeration, shared OAuth refresh write-back and independent Learning API data using temporary dummy credentials. The [visibility follow-up evidence](./evidence/v0.22.7/hidden-profile.json) records live App REST / Bots RPC list checks; it does not claim direct UI or new model acceptance.
+学习通知使用独立回执和桌面窗口。通知投递不代表系统横幅已显示，技能加载不代表业务验证通过。实际模型探针、App hooks 与 A→B→C 跨聊天验收分开记录，不用历史 macOS 结果替代新平台验收。
 
-`probes/real_learning.py` is an opt-in real-provider contract probe through the public plugin facade. Stop the pilot owner first. It labels its evidence as a synthetic fixture, uses native authentication and saves outcomes/usage separately. It may retain real pilot conventions through native memory/skill rules. It cannot establish App hooks or automatic triggering; do not count it as a captured App conversation.
+## 验证与源码边界
 
-Admission/counters/intents are durable. Stable message UIDs support transcript projection; a lost in-progress projection or review becomes uncertain/unknown and is not silently replayed. Native files, state.db, the learning journal and remote providers are not one cross-storage transaction. Usage receipts remain best-effort telemetry. Notification dispatch does not prove OS visibility; skill delivery does not prove adoption or successful application.
-
-On upgrade, stop only this pilot, snapshot its data and service config, reapply the generic patch on a new official stable candidate, and run native and plugin-contract regression before switching. Keep root authentication managed by Hermes; do not restore a stale copy of rotating credentials. Rollback details and snapshot pointer are in [IMPLEMENTATION.md](./IMPLEMENTATION.md).
-
-## Repository layout
+`check_release.py` 核对包版本、补丁、保留证据、链接和凭据，并运行离线回归；不会调用模型、安装插件或修改运行中的 Hermes。原生测试通过固定上游源码中的 `scripts/run_tests.sh` 执行；真实模型探针是显式、独立验证 home 中的合成夹具。
 
 ```text
-src/hermes_codex_learning/   Durable bridge, hooks, IPC, MCP, auth diagnostics
-hermes-plugin/              Native Hermes plugin entry point
-hooks/ skills/              Codex hook declarations and learned-skill loading policy
-assets/                     Codex plugin icon
-patches/                    Hermes Learning API patch and pinned manifest
-scripts/                    Client/service entry points and release checks
-probes/                     Explicit real-provider verification fixture
-tests/                      Portable bridge regression
-docs/                       Overall design, documentation index and archives
-evidence/                   Versioned verification records and public summaries
-third_party/                Upstream license notice
+src/hermes_codex_learning/   hooks、持久桥接、MCP、资料准入、发布和更新恢复
+hermes-plugin/              原生 Hermes 插件入口
+hooks/ skills/              Codex hooks 与技能加载策略
+patches/                    固定官方基线、Learning API 补丁及兼容清单
+scripts/ probes/ tests/     客户端、服务入口、显式模型探针与离线回归
+docs/ evidence/             实现说明、分支验证和历史证据
+macos/ assets/              通知 App 源码与插件图标
 ```
 
-Hermes itself is obtained from the pinned official source and patched; the full upstream checkout, runtime, user authentication, learned data and rollback snapshots are not vendored. `source_committed` in the patch manifest describes the separate Hermes checkout, not whether this plugin repository is committed. See [third-party notices](./THIRD_PARTY_NOTICES.md).
+完整 Hermes checkout、依赖环境、用户认证、学习数据及回退快照不随仓库发布。补丁来源与许可证见 [第三方声明](./THIRD_PARTY_NOTICES.md)，历史证据的实际范围见 [证据索引](./evidence/README.md)。

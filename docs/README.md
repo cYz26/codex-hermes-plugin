@@ -1,36 +1,47 @@
 # 文档索引
 
-外围插件 **0.3.3** 支持官方 Hermes **v0.23.1**＋Learning API v1 补丁。学习 worker 共用官方安装的 Python 依赖环境，复用已有 Hermes 登录，学习数据独立。旧版 App/provider 验收保留原版本。
+当前实现为外围 **0.4.2** 与官方 **Hermes v0.23.0**＋Learning API v1 补丁。Linux／SSH 和本地 macOS 共用学习核心，以不同分支提供平台适配。真实验收记录按当时版本保留，不能把安装或离线测试改写成模型／App 验收。
 
-| 文档 | 用途 |
+## 云端 Linux／SSH 分支
+
+| 文档 | 内容 |
 | --- | --- |
-| [安装与更新](./INSTALL.zh-CN.md) | Codex 插件、学习运行时、macOS 服务和回读 |
-| [主动更新与适配](./UPDATES.zh-CN.md) | 自动检查、候选验证、切换与回退；自进化重设计先商定方案 |
-| [插件图标](./design/hermes-learning-icon/README.md) | 学习回路图标、源稿和标识出处 |
-| [全局启用](./GLOBAL-ROLLOUT.zh-CN.md) | 全局采集、项目记忆、共享技能、部署与宿主信任状态 |
-| [整体方案](./ARCHITECTURE.zh-CN.md) | 架构、原生能力边界、认证、数据、触发、反馈、tokens、验收和升级 |
-| [学习 profile 与 Hermes App](./PROFILE-DESKTOP.zh-CN.md) | 后台专用定位、App 切换报错的复现和当前查看方式 |
-| [真实 Codex App 续验](./APP-VALIDATION.zh-CN.md) | 0.1.6 单项目闭环、信任恢复、真实版本交付、通知与边界 |
-| [0.2.2 验收](./RELEASE-0.2.2.zh-CN.md) | Curator 到期、通知点击、注入上限、两组同任务用量和复验命令 |
-| [工程入口](../README.md) | 安装、运行、目录结构和可移植检查命令 |
-| [当前方案摘要](../HERMES-CODEX-PLAN.md) | 当前实现分工与策略 |
-| [Learning API 合同](../HERMES-CODEX-EXTENSION-REVIEW.md) | v1 接口、持久化、故障语义和支持边界 |
-| [实施与验收](../IMPLEMENTATION.md) | 实际部署、测试结果、真实模型证据和剩余 App 验收 |
-| [机器可读结果](../ACCEPTANCE.json) | 可提交的验收摘要；本机详细状态另行保留 |
-| [证据索引](../evidence/README.md) | 原版、补丁版、外围、红绿测试和原生模型证据 |
-| [兼容清单](../patches/compatibility.json) | 官方基线、补丁和验证要求；包含 [v0.23.1](../patches/v0.23.1/manifest.json)、[v0.23.0](../patches/v0.23.0/manifest.json) 和 [v0.22.7](../patches/manifest.json) |
+| [云端实现与分工](./CODEX-CLOUD-SELF-EVOLUTION.zh-CN.md) | 组件归属、平台边界和部署选择 |
+| [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md) | 初始化、systemd、诊断、自动适配和回退 |
+| [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md) | Mac 接收器安装、持久投递、只读明细和验收 |
+| [当前分支验证](../evidence/releases/cloud-0.4.2.json) | 本次离线测试与补丁验证 |
+| [历史全局宿主报告](../ACCEPTANCE.linux-global.json) | 整理前 0.4.2／0.4.1 的验证摘要，机器标识与私有路径省略 |
+| [历史 Linux 试点](./LINUX-OPERATIONS.zh-CN.md) | 0.2.0 的运行记录及 [当时验收](../ACCEPTANCE.linux.json) |
 
-## 历史研究
+## 当前实现
 
-以下文档保留研究过程及当时的源码依据，包含 v0.22.5 或 v0.22.6 的结论；不替代当前实现和验收记录。
+| 文档 | 内容 |
+| --- | --- |
+| [自进化实现整理](./SELF-EVOLUTION.zh-CN.md) | 执行与学习闭环、资料准入、项目归属、通用发布、适配和恢复 |
+| [全局流程学习](./WORKFLOW-METADATA.zh-CN.md) | 固定动作／状态投影、受限原生 review、版本凭证和验证 |
+| [工程入口](../README.md) | 运行边界、诊断和离线发布检查 |
+| [安装与更新](./INSTALL.zh-CN.md) | 原有 macOS 安装流程；0.3.2 的机器部署内容保留原范围 |
+| [主动更新与适配](./UPDATES.zh-CN.md) | 原有更新策略、验证、切换和回退；增量合同见当前实现整理 |
+| [兼容清单](../patches/compatibility.json) | 固定基线、原生测试集合与 [v0.23.0 补丁](../patches/v0.23.0/manifest.json) |
+| [插件图标](./design/hermes-learning-icon/README.md) | 源稿与标识出处 |
 
-- [最初研究](../HERMES-CODEX-RESEARCH.md)
-- [集成方式比较](../HERMES-CODEX-OPTIONS.md)
-- [原生能力差异分析](../HERMES-CODEX-NATIVE-PARITY.md)
-- [历史探针原文件](../HERMES-CODEX-PROBE.json)：字节和 SHA-256 保持不变，仅证明探针当时覆盖的路径。
-- [v0.22.5 研究方案](./archive/HERMES-CODEX-PLAN.v0.22.5.md)
-- [v0.22.5 扩展合同研究](./archive/HERMES-CODEX-EXTENSION-REVIEW.v0.22.5.md)
-- [v0.22.6 实施记录](./archive/IMPLEMENTATION.v0.22.6.md)
-- [原始获批方案](./archive/APPROVED-PLAN.before-max.md)与 [v0.22.6 / Max 方案](./archive/APPROVED-PLAN.v0.22.6.md)
+## 历史实现与验收
 
-原始测试记录按版本保留。私有运行回执和升级快照不进入 Git；不会将其删除后用摘要冒充原始记录。
+| 文档 | 保留范围 |
+| --- | --- |
+| [整体方案](./ARCHITECTURE.zh-CN.md) | 历史原生能力、认证、数据、触发与验收方案 |
+| [全局启用](./GLOBAL-ROLLOUT.zh-CN.md) | 原有宿主部署、信任和跨项目验证 |
+| [学习 profile 与 Hermes App](./PROFILE-DESKTOP.zh-CN.md) | 后台独立 profile 的定位与历史诊断 |
+| [真实 App 续验](./APP-VALIDATION.zh-CN.md) | 0.1.6 单项目闭环与当时的验证边界 |
+| [0.2.2 验收](./RELEASE-0.2.2.zh-CN.md) | 当时的 Curator、通知、注入和用量对照 |
+| [历史机器可读验收](../ACCEPTANCE.json) | v0.22.7／0.2.2 的记录 |
+| [证据索引](../evidence/README.md) | 原版、补丁版、外围测试和模型证据 |
+| [当前方案摘要](../HERMES-CODEX-PLAN.md) | 原有方案分工 |
+| [Learning API 合同](../HERMES-CODEX-EXTENSION-REVIEW.md) | v1 接口、持久化和故障语义 |
+| [历史实施](../IMPLEMENTATION.md) | 当时部署、测试和源码指针 |
+
+## 研究档案
+
+[最初研究](../HERMES-CODEX-RESEARCH.md)、[集成方式比较](../HERMES-CODEX-OPTIONS.md)、[原生能力差异](../HERMES-CODEX-NATIVE-PARITY.md) 与 [历史探针](../HERMES-CODEX-PROBE.json) 保留研究时的版本依据。
+
+历史设计另见 [v0.22.5 方案](./archive/HERMES-CODEX-PLAN.v0.22.5.md)、[扩展合同](./archive/HERMES-CODEX-EXTENSION-REVIEW.v0.22.5.md)、[v0.22.6 实施](./archive/IMPLEMENTATION.v0.22.6.md) 与 [获批方案](./archive/APPROVED-PLAN.v0.22.6.md)。原始证据摘要不改版本；私有完整运行记录与回退快照不进入 Git。

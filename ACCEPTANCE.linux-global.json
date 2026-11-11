@@ -1,0 +1,72 @@
+{
+  "record_type": "historical_host_report",
+  "status": "reported_implemented_and_validated",
+  "implementation_version": "0.4.2",
+  "platform": "linux-ssh",
+  "recorded_at": "2026-11-09T09:25:53.961274+00:00",
+  "reference_commit": "1de68951774a198b340d1168f45551ec81fcffbc",
+  "upstream": {
+    "tag": "v0.23.0",
+    "commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+  },
+  "recorded_verification": {
+    "native_contracts": {
+      "passed": 333,
+      "files": 19
+    },
+    "bridge_contracts": {
+      "passed": 139
+    },
+    "site_contracts": {
+      "passed": 664,
+      "files": 46
+    },
+    "real_provider": {
+      "reported_passed": true,
+      "actual_app": false,
+      "historical_evidence_version": "0.4.1"
+    },
+    "app_abc": {
+      "reported_passed": true,
+      "task_test_counts": {
+        "A": 20,
+        "B": 14,
+        "C": 30
+      },
+      "historical_evidence_version": "0.4.1",
+      "evidence_sha256": "abbf95aa367e630e08ce7e9bac81a5d6b3944eeda51c46ca8a28ed3a76d67b5b"
+    },
+    "workflow_real_provider": {
+      "state": "completed",
+      "real_provider": true,
+      "actual_app": false,
+      "isolation_verified": true,
+      "memory_unchanged": true,
+      "skill_changed": true,
+      "passed": true,
+      "model_requests": 2
+    },
+    "workflow_actual_app": {
+      "reported_passed": true,
+      "metadata_only": true,
+      "evidence_sha256": "c93a6b74d47eaa4e488c70a13a019e0d3866cb686f0f5ec202f2a7b91f8e91f8"
+    },
+    "desktop_notification": {
+      "reported_visible": true,
+      "reported_clicked": true,
+      "chat_ui_only": false
+    },
+    "unattended_adaptation": {
+      "reported_state": "verified",
+      "attempts": 1,
+      "scope": "isolated same-version repair and real worker activation; no new upstream release installed"
+    }
+  },
+  "provenance": {
+    "original_report_sha256": "56535bd25cdfe6c37543f6abbf636cb5cb3019fb419ece99ec47a9f1ccf8e40c",
+    "original_retained_privately": true,
+    "private_paths_chat_ids_and_provider_identifiers_omitted": true
+  },
+  "validation_scope": "Recorded results predate branch organization; model, App, desktop and live activation were not rerun for these commits.",
+  "current_branch_validation": "evidence/releases/cloud-0.4.2.json"
+}

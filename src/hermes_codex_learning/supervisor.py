@@ -12,13 +12,15 @@ from pathlib import Path
 
 from .config import Settings
 from .ipc import request
-from .store import atomic_json, digest
+from .store import Store, atomic_json, digest
 from .updates import ROOT, UpdateError, Updater, catalog, exclusive, read_json, verify_source
 
 # These are the stores used by Learning API v1, native review and Curator.
 # Never restore the hook outbox or any shared/root authentication store.
 DATA_PATHS = ("config.yaml", "SOUL.md", "memories", "skills", "learning", "sessions", "state",
               ".curator_backups", "state.db", "state.db-wal", "state.db-shm")
+DERIVED_KEYS = ("knowledge-index-v1", "publications-v1", "publication-decisions", "publication-context-version",
+               "skill-versions-v1", "workflow-skill-attestations")
 
 
 def copy_entry(source: Path, target: Path):
@@ -39,6 +41,11 @@ def snapshot(settings: Settings, destination: Path):
             path = settings.home / name
             if path.exists() or path.is_symlink():
                 copy_entry(path, destination / name)
+        store = Store(settings.state)
+        try:
+            atomic_json(destination / "bridge-derived.json", {key: store.get(key) for key in DERIVED_KEYS})
+        finally:
+            store.close()
         atomic_json(destination / "complete.json", {"home": str(settings.home), "paths": list(DATA_PATHS)})
 
 
@@ -68,6 +75,17 @@ def restore(settings: Settings, source: Path):
                 shutil.rmtree(target)
             if (source / name).exists():
                 copy_entry(source / name, target)
+        derived = read_json(source / "bridge-derived.json", {})
+        store = Store(settings.state)
+        try:
+            for key in DERIVED_KEYS:
+                if key in derived and derived[key] is not None:
+                    store.set(key, derived[key])
+                elif key in derived:
+                    with store.db:
+                        store.db.execute("DELETE FROM meta WHERE key=?", (key,))
+        finally:
+            store.close()
 
 
 class Worker:
@@ -99,6 +117,8 @@ class Worker:
         raise UpdateError("New learning worker did not pass startup/API/context checks")
 
     def drain(self, timeout=300):
+        if self.process is None:
+            return
         if self.process.poll() is not None:
             return
         request(self.settings, "quiesce_for_update")
@@ -138,6 +158,13 @@ class Supervisor:
         """An uncommitted activation never starts learning after a supervisor crash."""
         path = self.updater.directory / "transaction.json"
         transaction = read_json(path)
+        if transaction and transaction["state"] == "committed":
+            candidate = read_json(self.updater.directory / "candidate.json", {})
+            current = Settings.load(self.config)
+            if candidate.get("site") and candidate.get("source") == str(current.source):
+                from .site_updates import publish_binding
+                publish_binding(current, candidate, self.config)
+            return
         if not transaction or transaction["state"] not in {"switching", "starting", "restoring"}:
             return
         current = read_json(self.config)
@@ -182,10 +209,10 @@ class Supervisor:
                 previous = read_json(updater.directory / "previous.json", {})
                 if digest(previous) != pending["target"]:
                     raise UpdateError("Rollback target changed")
-                recipe = catalog(self.root).get(previous.get("tag"))
+                recipe = updater.recipes().get(previous.get("tag"))
                 if not recipe:
                     raise UpdateError("Rollback runtime no longer has a compatible recipe")
-                verify_source(Path(previous["source"]), recipe)
+                updater.runtime_info(Path(previous["source"]))
                 target = {key: previous[key] for key in ("source", "python")}
                 target["fallback_python"] = previous.get("fallback_python")
                 if before_policy.get("official_source") or previous.get("official_source"):
@@ -243,6 +270,9 @@ class Supervisor:
                 updater.notice(transaction)
                 return
             request_path.unlink(missing_ok=True)
+            if pending["action"] == "apply" and candidate.get("site"):
+                from .site_updates import publish_binding
+                publish_binding(Settings.load(self.config), candidate, self.config)
             try:
                 self.worker.resume()
             except (OSError, RuntimeError, ValueError):
@@ -257,18 +287,30 @@ class Supervisor:
         thread = None
         observed_official = None
         next_official_probe = 0.0
+        next_worker_probe = 0.0
+        next_site_probe = 0.0
         with exclusive(self.updater.directory / "supervisor.lock"):
             self.recover()
             try:
-                self.worker.start(Settings.load(self.config), self.config)
-                self.worker.ready()
                 while not self.stop.is_set():
                     self.updater = Updater(Settings.load(self.config), root=self.root)
                     updater = self.updater
-                    if self.worker.process.poll() is not None:
-                        self.worker.stop()
-                        self.worker.start(updater.settings, self.config)
-                        self.worker.ready()
+                    if updater.settings.site_manifest and time.monotonic() >= next_site_probe:
+                        from .site_updates import refresh_runtime
+                        next_site_probe = time.monotonic() + 30
+                        atomic_json(updater.directory / "site-runtime.json", refresh_runtime(updater.settings))
+                    if ((self.worker.process is None or self.worker.process.poll() is not None)
+                            and time.monotonic() >= next_worker_probe):
+                        next_worker_probe = time.monotonic() + 30
+                        try:
+                            self.worker.stop()
+                            self.worker.start(updater.settings, self.config)
+                            self.worker.ready()
+                            (updater.directory / "worker-error.json").unlink(missing_ok=True)
+                        except Exception as exc:
+                            self.worker.stop()
+                            atomic_json(updater.directory / "worker-error.json",
+                                        {"at": time.time(), "error_type": type(exc).__name__, "state": "unavailable"})
                     # Candidate builds run off the learning thread; failure or slow
                     # networking cannot delay capture, reviews or MCP reads.
                     if thread is None or not thread.is_alive():

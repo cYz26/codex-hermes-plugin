@@ -1,7 +1,19 @@
 #!/usr/bin/env python3
 """Use the plugin's pure-stdlib client even before a Hermes runtime is provisioned."""
 import sys
+import os
 from pathlib import Path
+
+try:
+    import sqlite3
+    import tomllib
+except ImportError:
+    # Some development hosts put a Python without SQLite first on PATH. Use the
+    # OS stdlib interpreter, never a disposable Hermes worker environment.
+    stable = Path("/usr/bin/python3")
+    if sys.platform == "linux" and stable.is_file() and Path(sys.executable).resolve() != stable.resolve():
+        os.execv(str(stable), [str(stable), "-I", "-B", __file__, *sys.argv[1:]])
+    raise
 
 # Capture, MCP reads and recovery must work even when a candidate interpreter fails.
 # Native operations select Settings.python explicitly; this client is stdlib only.

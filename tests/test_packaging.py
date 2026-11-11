@@ -8,8 +8,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import test_macos_bundle as macos_bundle_tests
+
 from hermes_codex_learning import __version__
 from hermes_codex_learning.cli import install_notifier
+from hermes_codex_learning.macos_bundle import NotificationAuthorizationError
 
 
 class PackagingTests(unittest.TestCase):
@@ -26,9 +29,10 @@ class PackagingTests(unittest.TestCase):
                     self.assertEqual(command[2], str(app))
                     self.assertEqual(info.read_bytes(), installed_plist)
                     raise subprocess.CalledProcessError(1, command)
+                return macos_bundle_tests.MacOSBundleTests.native(command, **kwargs)
 
-            with patch("hermes_codex_learning.notify.notifier_app", return_value=app), \
-                    patch("hermes_codex_learning.cli.subprocess.run", side_effect=refuse_to_exit):
+            with patch("hermes_codex_learning.macos_bundle.notifier_app", return_value=app), \
+                    patch("hermes_codex_learning.macos_bundle.subprocess.run", side_effect=refuse_to_exit):
                 with self.assertRaises(subprocess.CalledProcessError):
                     install_notifier()
 
@@ -44,13 +48,17 @@ class PackagingTests(unittest.TestCase):
             info.write_bytes(legacy_plist)
 
             def deny_authorization(command, **kwargs):
-                if command[1:] == ["--authorize"]:
+                result = macos_bundle_tests.MacOSBundleTests.native(command, **kwargs)
+                if "--authorize-result" in command:
                     self.assertEqual(info.read_bytes(), legacy_plist)
-                    raise subprocess.CalledProcessError(1, command)
+                    path = Path(command[-1])
+                    path.write_text(json.dumps({**json.loads(path.read_text()),
+                                               "allowed": False, "authorization_status": 1}))
+                return result
 
-            with patch("hermes_codex_learning.notify.notifier_app", return_value=app), \
-                    patch("hermes_codex_learning.cli.subprocess.run", side_effect=deny_authorization):
-                with self.assertRaises(subprocess.CalledProcessError):
+            with patch("hermes_codex_learning.macos_bundle.notifier_app", return_value=app), \
+                    patch("hermes_codex_learning.macos_bundle.subprocess.run", side_effect=deny_authorization):
+                with self.assertRaises(NotificationAuthorizationError):
                     install_notifier()
 
             self.assertEqual(info.read_bytes(), legacy_plist)
