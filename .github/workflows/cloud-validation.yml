@@ -73,33 +73,45 @@ jobs:
         run: python3 -B scripts/verify_native.py --source upstream --python "$HERMES_TEST_PYTHON" --output "$RUNNER_TEMP/native-check.json"
   release:
     needs: [bridge, native]
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
-      - name: Publish the validated tag
+      - name: Publish the validated tag or synchronize its notes
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          HERMES_RELEASE_TAG: ${{ github.ref_name }}
+          HERMES_RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
         run: |
           python3 - <<'PY'
           import json, os, re
           from pathlib import Path
-          tag = os.environ['HERMES_RELEASE_TAG']
           version = json.loads(Path('.codex-plugin/plugin.json').read_text())['version']
+          tag = os.environ['HERMES_RELEASE_TAG'] or 'v' + version
           if not re.fullmatch(r'v\d+\.\d+\.\d+', tag) or tag != 'v' + version:
               raise SystemExit('Release tag differs from the validated package version')
-          if not Path('docs', f'RELEASE-{version}.zh-CN.md').is_file():
-              raise SystemExit('Version-specific release notes are required')
+          Path(os.environ['RUNNER_TEMP'], 'hermes-release-tag').write_text(tag)
           PY
-          if gh release view "$HERMES_RELEASE_TAG" >/dev/null 2>&1; then
+          HERMES_RELEASE_TAG="$(cat "$RUNNER_TEMP/hermes-release-tag")"
+          if ! git rev-parse --verify "${HERMES_RELEASE_TAG}^{commit}" >/dev/null 2>&1; then
             exit 0
           fi
-          gh release create "$HERMES_RELEASE_TAG" --verify-tag \
-            --title "Hermes Learning $HERMES_RELEASE_TAG" \
-            --notes-file "docs/RELEASE-${HERMES_RELEASE_TAG#v}.zh-CN.md"
+          if ! git diff --quiet "$HERMES_RELEASE_TAG" HEAD -- \
+            src scripts tests hermes-plugin hooks skills patches probes fixtures \
+            desktop macos assets pyproject.toml .codex-plugin/plugin.json .mcp.json; then
+            exit 0
+          fi
+          test -f "docs/RELEASE-${HERMES_RELEASE_TAG#v}.zh-CN.md"
+          if gh release view "$HERMES_RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$HERMES_RELEASE_TAG" \
+              --notes-file "docs/RELEASE-${HERMES_RELEASE_TAG#v}.zh-CN.md"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            gh release create "$HERMES_RELEASE_TAG" --verify-tag \
+              --title "Hermes Learning $HERMES_RELEASE_TAG" \
+              --notes-file "docs/RELEASE-${HERMES_RELEASE_TAG#v}.zh-CN.md"
+          fi

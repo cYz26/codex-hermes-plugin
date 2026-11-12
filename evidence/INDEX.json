@@ -478,7 +478,7 @@
     {
       "original": "Hermes Learning 0.10.2 release and candidate portability verification",
       "path": "evidence/releases/0.10.2.json",
-      "sha256": "aa724a770c1ffae28d7c171635572e77b22b5223b72136b7818f0b8fc038dc13",
+      "sha256": "feecb18e7f0fa91234b5f27f65163dabe7524be1ed873bf26ea4efd10ea3bb62",
       "visibility": "repository"
     }
   ],

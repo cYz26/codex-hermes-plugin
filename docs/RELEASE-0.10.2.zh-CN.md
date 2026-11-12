@@ -4,6 +4,6 @@
 
 macOS 发布检查在临时目录别名下使用了未解析的测试路径，而 hooks 和项目隔离使用真实路径。测试夹具现在解析临时目录；CLI 检查另外通过项目符号链接验证真实项目归属。Linux 的符号链接临时目录复现了此前的 7 项失败和 15 项错误，修正后继续运行完整发布检查。GitHub 保留两个系统、两个 Python 版本、Swift 编译和原生验证，并在失败时显示检查详情。
 
-自动反馈、原生 Curator、归档恢复和引用留存沿用 [0.10.0 的集成](./RELEASE-0.10.0.zh-CN.md)，已有数据上的状态读取沿用 [0.10.1 的修复](./RELEASE-0.10.1.zh-CN.md)。学习算法、模型和现有更新策略保持一致；真实模型实验继续保留在实际执行的 0.10.0 记录中。
+自动反馈、原生 Curator、归档恢复和引用留存沿用 [0.10.0 的集成](https://github.com/cYz26/codex-hermes-plugin/blob/v0.10.2/docs/RELEASE-0.10.0.zh-CN.md)，已有数据上的状态读取沿用 [0.10.1 的修复](https://github.com/cYz26/codex-hermes-plugin/blob/v0.10.2/docs/RELEASE-0.10.1.zh-CN.md)。学习算法、模型和现有更新策略保持一致；真实模型实验继续保留在实际执行的 0.10.0 记录中。
 
-本版本的离线、GitHub 和本机升级结果分别记录在 [0.10.2 验证记录](../evidence/releases/0.10.2.json)。实际 Desktop 跨聊天学习和生产 Curator 质量仍需对应运行证据，启动与 hooks 配置检查不代替这两项验收。
+本版本的离线、GitHub 和本机升级结果分别记录在 [0.10.2 验证记录](https://github.com/cYz26/codex-hermes-plugin/blob/main/evidence/releases/0.10.2.json)。标签工作流已通过四组平台检查和原生验证，并生成正式 Release。实际 Desktop 跨聊天学习和生产 Curator 质量仍需对应运行证据，启动与 hooks 配置检查不代替这两项验收。

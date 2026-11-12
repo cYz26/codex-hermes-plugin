@@ -4,7 +4,7 @@
     "version": "0.10.2",
     "digest": "2b0981a7f448b939a37fee3ccacd884c8ce05be56ee04710ca5ffc81849a2d76"
   },
-  "state": "portable_validated_native_validation_in_progress",
+  "state": "validated_for_release",
   "native_tag": "v0.23.0",
   "native_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
   "model_behavior": "unchanged; real-provider synthetic feedback evidence remains in the 0.10.0 record",
@@ -32,11 +32,54 @@
     }
   },
   "deployment": {
-    "state": "pending"
+    "state": "installed_native_candidate_deferred_and_hook_retrust_required",
+    "version": "0.10.2",
+    "service_ready": true,
+    "status_seconds": 0.097,
+    "build_digest": "2b0981a7f448b939a37fee3ccacd884c8ce05be56ee04710ca5ffc81849a2d76",
+    "codex_plugin_cache_version": "0.10.2",
+    "native_candidate": {
+      "id": "v0.23.0-f6b2450fa657",
+      "verified": true,
+      "activation": "deferred_until_current_review_finishes"
+    },
+    "hooks": {
+      "count": 7,
+      "enabled": 7,
+      "trust_status": "modified",
+      "trust_changed": false,
+      "hooks_executed": false,
+      "scope": "fresh CLI configuration; actual Desktop execution not inferred"
+    },
+    "configuration_checks": {
+      "native_config_preserved": true,
+      "learning_settings_preserved_except_runtime_pointers": true,
+      "codex_other_plugins_preserved": true,
+      "codex_protected_settings_preserved_from_0_10_1": true
+    }
   },
   "release": {
     "tag": "v0.10.2",
-    "state": "pending"
+    "state": "published",
+    "url": "https://github.com/cYz26/codex-hermes-plugin/releases/tag/v0.10.2",
+    "tag_commit": "0e882b5e65d0b065ed4bfe753928a2066aaaef06",
+    "main_workflow": "https://github.com/cYz26/codex-hermes-plugin/actions/runs/43157495652",
+    "tag_workflow": "https://github.com/cYz26/codex-hermes-plugin/actions/runs/43158635131",
+    "main_and_tag_conclusion": "success",
+    "platform_matrix": {
+      "os": [
+        "ubuntu-22.04",
+        "macos-15"
+      ],
+      "python": [
+        "3.11",
+        "3.14"
+      ]
+    },
+    "swift_compilation": "passed_required_macOS_step",
+    "native_job": "passed",
+    "release_job": "passed",
+    "evidence": "public Actions and Release HTML readback; anonymous API rate limited"
   },
   "portable": {
     "tests": 335,
@@ -44,5 +87,40 @@
     "exit_code": 0,
     "temporary_directory_alias": true,
     "log_sha256": "58335403dcf51785bed0230e9a98e735e45f3af4dd24846d817d3b296640dce8"
+  },
+  "gates": [
+    "git-init",
+    "fetch",
+    "checkout",
+    "patch-check",
+    "patch",
+    "native-contracts",
+    "site-clone",
+    "site-checkout",
+    "site-patch",
+    "site-contracts",
+    "bridge-contracts",
+    "runtime-smoke"
+  ],
+  "candidate_id": "v0.23.0-f6b2450fa657",
+  "verification": {
+    "native-contracts.log": {
+      "sha256": "58aeaf64c945d560bf13b8ff1e563f25597fa3ae6d400e65c6b6b9c255f1bdfc",
+      "files": 21,
+      "passed": 354,
+      "failed": 0
+    },
+    "site-contracts.log": {
+      "sha256": "7c9350cbde3a80f97ef7f2db59684f1cb92f0f5b793fdcbd862c68d67f3f59bd",
+      "files": 46,
+      "passed": 664,
+      "failed": 0
+    },
+    "bridge-contracts.log": {
+      "sha256": "63740d3207961b2c4cf8e2dfd9b41af2ebc7c35616e834457eeed2fea2291cbf",
+      "passed": 335,
+      "failed": 0,
+      "skipped": 0
+    }
   }
 }
