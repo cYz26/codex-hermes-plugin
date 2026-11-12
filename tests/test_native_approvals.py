@@ -16,7 +16,7 @@ from hermes_codex_learning.store import Store, digest
 class NativeApprovalTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.base = Path(self.temporary.name)
+        self.base = Path(self.temporary.name).resolve()
         self.project = self.base / "project"
         self.project.mkdir()
         self.home = self.base / "learning-home"
