@@ -1,0 +1,71 @@
+{
+  "version": "0.10.1",
+  "build": {
+    "version": "0.10.1",
+    "digest": "ebebb45a6f85897cc8a08c6b6beef8ccc0ac7d1c999ca4a89455e9db9d2f77c3"
+  },
+  "state": "validated_for_release",
+  "native_tag": "v0.23.0",
+  "native_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "gates": [
+    "git-init",
+    "fetch",
+    "checkout",
+    "patch-check",
+    "patch",
+    "native-contracts",
+    "site-clone",
+    "site-checkout",
+    "site-patch",
+    "site-contracts",
+    "bridge-contracts",
+    "runtime-smoke"
+  ],
+  "verification": {
+    "native-contracts.log": {
+      "files": 21,
+      "passed": 354,
+      "failed": 0,
+      "sha256": "e383b6be3017723f12864a0b0cecf920f02f90fd54946bb1998b360edf08913b"
+    },
+    "site-contracts.log": {
+      "files": 46,
+      "passed": 664,
+      "failed": 0,
+      "sha256": "2bcc225e48c0a3c74e9e413d15969e357e8ee763fded5e7f9513345dbd7a00ab"
+    },
+    "bridge-contracts.log": {
+      "passed": 335,
+      "failed": 0,
+      "skipped": 0,
+      "sha256": "1cba16fcf1ab10beb80a3f39c49fc1d9cc59d4e0864125485a317e5da075f83a"
+    }
+  },
+  "portable": {
+    "tests": 335,
+    "skipped": 11,
+    "exit_code": 0
+  },
+  "regression": {
+    "retained_data_before_seconds": 5.2026,
+    "retained_data_after_seconds": 0.1794,
+    "retained_events": 11598,
+    "retained_turns": 153,
+    "read_only_comparison": true,
+    "startup_status_timeout_seconds": 2,
+    "sqlite_instruction_budget_regression": "red before, green after"
+  },
+  "model_behavior": "unchanged; real-provider synthetic feedback evidence remains in the 0.10.0 record",
+  "github_runner_change": {
+    "old": "macos-14",
+    "new": "macos-15",
+    "checks_preserved": true
+  },
+  "deployment": {
+    "state": "pending"
+  },
+  "release": {
+    "tag": "v0.10.1",
+    "state": "pending"
+  }
+}

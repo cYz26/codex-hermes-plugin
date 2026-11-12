@@ -26,19 +26,25 @@ def summarize(store, *, project=None, chat=None, turn=None, limit=20, after_curs
           SUM(CASE WHEN json_extract(e.payload,'$.bridge_admission.body_retained')=0 OR json_extract(e.payload,'$.bridge_evidence_mode')='workflow-v1' THEN 1 ELSE 0 END) unretained_events,
           MAX(delivered) consumed_at,MIN(CASE WHEN delivered IS NULL THEN created END) pending_at
         FROM events e WHERE """ + " AND ".join(where) + """ GROUP BY chat,turn,project,host)
-        SELECT c.*,t.id turn_key,t.observed_revision,
-          json_extract(t.payload,'$.status') turn_status,json_extract(t.payload,'$._ended_by') ended_by,
-          json_extract(t.payload,'$._evidence_mode') evidence_mode,json_extract(t.payload,'$.coverage') gaps
-        FROM captured c LEFT JOIN turns t ON json_extract(t.payload,'$.source.chat')=c.chat
-          AND json_extract(t.payload,'$.source.turn')=c.turn AND json_extract(t.payload,'$.source.host')=c.host
-          AND json_extract(t.payload,'$.source.project')=c.project
+        SELECT c.* FROM captured c
         WHERE c.cursor>? ORDER BY c.cursor LIMIT ?"""
     rows = store.db.execute(query,[*args,after_cursor,limit+1]).fetchall()
     publications, decisions = store.get("publications-v1",{}), store.get("publication-decisions",{})
     queue = store.get("review-queue",{})
     items = []
-    for row in rows[:limit]:
-        key = row["turn_key"] or digest([row["chat"],row["turn"]])
+    for captured in rows[:limit]:
+        # Bound the page before touching retained turn bodies. Joining every
+        # turn through JSON source fields scales with the whole history.
+        row = {**dict(captured), "turn_key":None, "observed_revision":None,
+               "turn_status":None, "ended_by":None, "evidence_mode":None, "gaps":None}
+        key = digest([row["chat"],row["turn"]])
+        metadata = store.db.execute("""SELECT id turn_key,observed_revision,
+          json_extract(payload,'$.status') turn_status,json_extract(payload,'$._ended_by') ended_by,
+          json_extract(payload,'$._evidence_mode') evidence_mode,json_extract(payload,'$.coverage') gaps
+          FROM turns WHERE id=? AND json_extract(payload,'$.source.host')=?
+          AND json_extract(payload,'$.source.project')=?""", (key,row["host"],row["project"])).fetchone()
+        if metadata:
+            row.update(dict(metadata))
         admission = store.get("turn-admission:"+key,{})
         receipt = store.get("observation-receipt:"+key,{})
         native_revision, handle = receipt.get("revision"), receipt.get("handle")

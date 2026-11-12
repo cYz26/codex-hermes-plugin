@@ -454,7 +454,7 @@
     {
       "original": "Hermes Learning 0.10.0 0.10.0 verification",
       "path": "evidence/releases/0.10.0.json",
-      "sha256": "f45f280dbdf51221246b2832aa01e5fad2d13f123d1cc2f309ad66f5a9b055d5",
+      "sha256": "3980bed3d4081bdc44f9bfd0c982d4eba3eff6fbc738d5afd65fc95e2ca92913",
       "visibility": "repository"
     },
     {
@@ -467,6 +467,12 @@
       "original": "Hermes Learning 0.10.0 plans verification",
       "path": "evidence/releases/0.10.0/plans.json",
       "sha256": "d6c1f725ce948586d4bc4c193bfd120d46be11975a73971b2eda8895a7439f1b",
+      "visibility": "repository"
+    },
+    {
+      "original": "Hermes Learning 0.10.1 status/readiness fix verification",
+      "path": "evidence/releases/0.10.1.json",
+      "sha256": "3a4327f165a537248f2ea4fe3d435413a21419714f7a380c03cdeb247b60e7af",
       "visibility": "repository"
     }
   ],

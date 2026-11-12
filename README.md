@@ -1,8 +1,10 @@
 # Hermes Learning for Codex
 
-主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.10.0**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0** 和 **v0.23.1**。
+主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.10.1**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0** 和 **v0.23.1**。
 
 Codex 执行任务，独立 Hermes 从获准的执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。安装插件和启动学习服务应在实际执行 Codex 任务的宿主完成。
+
+0.10.1 修复保留历史增大时进度查询导致的启动核对超时，先分页，再按主键读取回合状态，见 [修复与验证](./docs/RELEASE-0.10.1.zh-CN.md)。
 
 0.10.0 将[自动反馈学习](./docs/AUTOMATIC-FEEDBACK-LEARNING.zh-CN.md)与原生学习维护接在同一流程：跨轮证据、保真裁剪、sidechat 父上下文、技能相关性与归类，以及按聊天／回合查询的分阶段进度。复盘的实际工具和提示说明遵守所选学习范围。验证与升级记录见 [0.10.0 发布说明](./docs/RELEASE-0.10.0.zh-CN.md)。
 

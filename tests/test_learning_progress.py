@@ -13,6 +13,27 @@ from hermes_codex_learning.store import digest,dumps
 
 
 class LearningProgressTests(unittest.TestCase):
+    def test_status_lookup_is_bounded_before_joining_many_retained_turns(self):
+        for i in range(200):
+            self.event('UserPromptSubmit', turn=f'many-{i}', prompt='Synthetic retained goal')
+            self.event('Stop', turn=f'many-{i}', last_assistant_message='Synthetic retained result')
+        while self.bridge.store.pending():
+            self.bridge.ingest()
+        instructions = 0
+        def bounded():
+            nonlocal instructions
+            instructions += 1000
+            return instructions > 200000
+        self.bridge.store.db.set_progress_handler(bounded, 1000)
+        try:
+            from hermes_codex_learning.progress import summarize
+            result = summarize(self.bridge.store, project=str(self.root), chat='chat', limit=5)
+            self.assertEqual(len(result['turns']), 5)
+            self.assertTrue(result['has_more'])
+            self.assertTrue(all(row['admission']['state']=='admitted' for row in result['turns']))
+        finally:
+            self.bridge.store.db.set_progress_handler(None, 0)
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
         self.settings=Settings(self.root/'home',self.root,self.root,Path('/usr/bin/python3'),proactive=True)

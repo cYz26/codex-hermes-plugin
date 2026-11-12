@@ -97,11 +97,18 @@
     "source_queries_executed": false
   },
   "deployment": {
-    "state": "pending"
+    "state": "rolled_back",
+    "active_version_after_failure": "0.9.0",
+    "reason": "Status lookup took 5.2026 seconds against retained data, exceeding the 2-second installed-build check.",
+    "learning_data_preserved": true,
+    "followup_version": "0.10.1"
   },
   "release": {
-    "state": "pending",
-    "tag": "v0.10.0"
+    "state": "workflow_cancelled",
+    "tag": "v0.10.0",
+    "tag_pushed": true,
+    "workflow_url": "https://github.com/cYz26/codex-hermes-plugin/actions/runs/43152855359",
+    "reason": "macos-14-arm64-us-default runner configuration is not supported"
   },
   "limitations": [
     "Real-provider evidence uses synthetic feedback and controlled plans, not business queries.",
