@@ -17,7 +17,7 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
     private let openAction = "view-learning-receipt"
     private let category = "learning-receipt"
     private var window: NSWindow?
-    private var reviewScope: String?
+    private var reviewTarget: (receipt: URL, scope: String)?
     private var reviewProcesses: [Process] = []
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -138,7 +138,11 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         scroll.hasVerticalScroller = true
         let text = NSTextView(frame: scroll.bounds)
         let receipt = try? Receipt(at: url)
-        reviewScope = receipt?.scope
+        if let scope = receipt?.scope, scope.hasPrefix("/") {
+            reviewTarget = (url, scope)
+        } else {
+            reviewTarget = nil
+        }
         text.string = receipt.map { "范围：\($0.scope ?? "本机")\n\n\($0.text)" }
             ?? "这条通知对应的本地回执已无法读取。"
         text.font = .systemFont(ofSize: 14)
@@ -153,7 +157,7 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         let review = NSButton(title: "查看当前待审", target: self, action: #selector(openReviews))
         review.frame = NSRect(x: 22, y: 12, width: 145, height: 28)
         review.bezelStyle = .rounded
-        review.isEnabled = reviewScope?.hasPrefix("/") == true
+        review.isEnabled = reviewTarget != nil
         content.addSubview(review)
         let note = NSTextField(labelWithString: "回执记录生成时的结果；当前状态以审批页为准")
         note.frame = NSRect(x: 182, y: 14, width: frame.width - 200, height: 22)
@@ -177,23 +181,38 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
     }
 
     @objc private func openReviews() {
-        guard let scope = reviewScope, scope.hasPrefix("/") else { return }
-        let helper = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/HermesLearningSSH/review.command")
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: helper.path),
-              (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
-              attributes[.type] as? FileAttributeType == .typeRegular,
-              let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue,
-              permissions & 0o022 == 0, permissions & 0o100 != 0 else {
-            let alert = NSAlert()
-            alert.messageText = "审批入口尚未安装"
-            alert.informativeText = "请先运行 Mac 验收包中的安装入口。"
-            alert.runModal()
-            return
-        }
+        guard let target = reviewTarget else { return }
+        let receiver = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/HermesLearningSSH", isDirectory: true)
+        let receiptDirectory = target.receipt.resolvingSymlinksInPath().deletingLastPathComponent()
         let process = Process()
-        process.executableURL = helper
-        process.arguments = [scope]
+        if receiptDirectory.path == receiver.resolvingSymlinksInPath().path {
+            let helper = receiver.appendingPathComponent("review.command")
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: helper.path),
+                  (attributes[.ownerAccountID] as? NSNumber)?.uint32Value == getuid(),
+                  attributes[.type] as? FileAttributeType == .typeRegular,
+                  let permissions = (attributes[.posixPermissions] as? NSNumber)?.intValue,
+                  permissions & 0o022 == 0, permissions & 0o100 != 0 else {
+                let alert = NSAlert()
+                alert.messageText = "SSH 审批入口尚未安装"
+                alert.informativeText = "请先运行 Mac 验收包中的安装入口。"
+                alert.runModal()
+                return
+            }
+            process.executableURL = helper
+            process.arguments = [target.scope]
+        } else {
+            guard let script = Bundle.main.url(forResource: "review", withExtension: "py"),
+                  let python = Bundle.main.object(forInfoDictionaryKey: "HermesReviewPython") as? String else {
+                let alert = NSAlert()
+                alert.messageText = "本机审批入口尚未安装"
+                alert.informativeText = "请更新 Hermes 学习通知 App。"
+                alert.runModal()
+                return
+            }
+            process.executableURL = URL(fileURLWithPath: python)
+            process.arguments = ["-I", "-B", script.path, "--receipt", target.receipt.path]
+        }
         process.standardOutput = FileHandle.nullDevice
         let errors = Pipe()
         process.standardError = errors

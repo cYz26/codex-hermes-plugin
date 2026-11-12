@@ -8,6 +8,7 @@ import platform
 import plistlib
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -16,6 +17,7 @@ APP_NAME = "Hermes 学习"
 APP_ID = "com.cy.hermes-learning-receipts"
 LEGACY_APP_ID = "com.cy.hermes-learning-notifier"
 APP_EXECUTABLE = "HermesLearningNotifier"
+REVIEW_ASSETS = ("review.py", "review.html")
 REGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 
@@ -116,6 +118,7 @@ def normalize_bundle_permissions(app: Path) -> dict:
     files = [(info_path, 0o644), (app / "Contents/MacOS" / executable, 0o755),
              (icon_path, 0o644),
              (app / "Contents/_CodeSignature/CodeResources", 0o644)]
+    files.extend((app / "Contents/Resources" / name, 0o644) for name in REVIEW_ASSETS)
     plan = []
     for path, mode in [(path, 0o755) for path in directories] + files:
         if path.is_symlink():
@@ -164,11 +167,14 @@ def install_notification_app(root: Path, app: Path | None = None) -> dict:
         icon = build_macos_icon(root / "assets/hermes-learning-icon.png", staging / "HermesLearning.icns")
         icon_name = "hermes-learning-icon-" + hashlib.sha256(icon.read_bytes()).hexdigest()[:12] + ".icns"
         shutil.copy2(icon, resources / icon_name)
+        for name in REVIEW_ASSETS:
+            shutil.copy2(root / "desktop" / name, resources / name)
         (contents / "Info.plist").write_bytes(plistlib.dumps({
             "CFBundleIdentifier": APP_ID, "CFBundleExecutable": APP_EXECUTABLE,
             "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "5", "LSMinimumSystemVersion": "12.0",
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "6", "LSMinimumSystemVersion": "12.0",
             "HermesReviewProtocolVersion": 1,
+            "HermesReviewPython": sys.executable,
             "HermesReviewSourceSHA256": hashlib.sha256((root / "macos/HermesLearningNotifier.swift").read_bytes()).hexdigest(),
             "CFBundleIconFile": icon_name, "LSUIElement": True,
         }))

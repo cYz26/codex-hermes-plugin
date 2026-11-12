@@ -1,6 +1,8 @@
 import importlib.util
 import http.client
 import json
+import plistlib
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -32,6 +34,44 @@ class DesktopReviewTests(unittest.TestCase):
         self.assertIn("/active/plugin/scripts/bridge approvals list", second[-1])
         self.assertIn("--cwd /project", second[-1])
         self.assertEqual(first[:2], ["ssh", "-T"])
+
+    def test_local_receipt_binds_the_active_bridge_to_its_project_and_learning_home(self):
+        review = self.module()
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary).resolve()
+            learning_home = home / "Local learning data"
+            receipt = learning_home / "bridge/receipts/history.json"
+            receipt.parent.mkdir(parents=True)
+            scope = str(home / "Workspace with spaces")
+            receipt.write_text(json.dumps({"summary": "Existing receipt", "text": "Detail", "scope": scope}))
+            settings = home / "active settings.json"
+            settings.write_text(json.dumps({"home": str(learning_home)}))
+            agent = home / "Library/LaunchAgents" / (review.LOCAL_AGENT + ".plist")
+            agent.parent.mkdir(parents=True)
+            python = "/stable/python3"
+            agent.write_bytes(plistlib.dumps({"Label": review.LOCAL_AGENT, "ProgramArguments": [
+                python, "-I", "-B", "/bootstrap/scripts/serve.py", str(settings)]}))
+
+            client = review.local_reviews(receipt, home)
+            status = {"plugin_root": "/active/plugin", "approval_capabilities": {"revision_checked_decisions": True}}
+            answers = [SimpleNamespace(returncode=0, stdout=json.dumps(value)) for value in (
+                status, {"proposals": []}, {"state": "rejected"})]
+            with patch.object(review.subprocess, "run", side_effect=answers) as execute:
+                self.assertEqual(client.list()["proposals"], [])
+                self.assertEqual(client.decide("11111111", "a" * 64, "reject")["state"], "rejected")
+            common = [python, "-I", "-B"]
+            active = [*common, "/active/plugin/scripts/bridge", "approvals"]
+            config = ["--settings", str(settings)]
+            self.assertEqual([call.args[0] for call in execute.call_args_list], [
+                [*common, "/bootstrap/scripts/bridge", "status", *config],
+                [*active, "list", "--cwd", scope, *config],
+                [*active, "reject", "--cwd", scope, "--id", "11111111", "--revision", "a" * 64, *config],
+            ])
+
+            outside = home / "unbound-receipt.json"
+            outside.write_bytes(receipt.read_bytes())
+            with self.assertRaisesRegex(ValueError, "不属于当前本机学习服务"):
+                review.local_reviews(outside, home)
 
     def server(self):
         review = self.module()

@@ -176,6 +176,12 @@ class MacOSBundleTests(unittest.TestCase):
             legacy = legacy_notifier_app(app)
             self.assertTrue(result["migrated"])
             self.assertEqual(bundle_identifier(app), APP_ID)
+            info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+            self.assertEqual(info["HermesReviewPython"], sys.executable)
+            for name in ("review.py", "review.html"):
+                installed = app / "Contents/Resources" / name
+                self.assertEqual(installed.read_bytes(), (root / "desktop" / name).read_bytes())
+                self.assertEqual(installed.stat().st_mode & 0o777, 0o644)
             self.assertEqual((legacy / "Contents/Info.plist").read_bytes(), original)
             self.assertEqual((legacy / "Contents/MacOS" / APP_EXECUTABLE).read_bytes(), b"original notifier")
             registrations = [call.args[0] for call in calls.call_args_list if Path(call.args[0][0]).name == "lsregister"]
@@ -243,6 +249,10 @@ class MacOSNotificationRefreshTests(unittest.TestCase):
             source = directory / "package/macos/HermesLearningNotifier.swift"
             source.parent.mkdir(parents=True)
             source.write_text("// Synthetic native compiler boundary\n")
+            assets = directory / "package/desktop"
+            assets.mkdir()
+            for name in ("review.py", "review.html"):
+                (assets / name).write_text("Synthetic review resource\n")
             allowed = False
             decisions, settings, posts = [], [], []
 
