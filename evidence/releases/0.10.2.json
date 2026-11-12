@@ -4,7 +4,7 @@
     "version": "0.10.2",
     "digest": "2b0981a7f448b939a37fee3ccacd884c8ce05be56ee04710ca5ffc81849a2d76"
   },
-  "state": "validated_for_release",
+  "state": "published_and_locally_upgraded_hook_retrust_required",
   "native_tag": "v0.23.0",
   "native_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
   "model_behavior": "unchanged; real-provider synthetic feedback evidence remains in the 0.10.0 record",
@@ -32,16 +32,17 @@
     }
   },
   "deployment": {
-    "state": "installed_native_candidate_deferred_and_hook_retrust_required",
+    "state": "ready_hook_retrust_required",
     "version": "0.10.2",
     "service_ready": true,
-    "status_seconds": 0.097,
+    "status_seconds": 0.094,
     "build_digest": "2b0981a7f448b939a37fee3ccacd884c8ce05be56ee04710ca5ffc81849a2d76",
     "codex_plugin_cache_version": "0.10.2",
     "native_candidate": {
       "id": "v0.23.0-f6b2450fa657",
       "verified": true,
-      "activation": "deferred_until_current_review_finishes"
+      "activation": "committed",
+      "transaction_id": "f32fb790992d48dc9a66404ca6714857"
     },
     "hooks": {
       "count": 7,
@@ -56,7 +57,15 @@
       "learning_settings_preserved_except_runtime_pointers": true,
       "codex_other_plugins_preserved": true,
       "codex_protected_settings_preserved_from_0_10_1": true
-    }
+    },
+    "service_state": "idle",
+    "native_lifecycle_state": "ready",
+    "foreign_and_missing_cwd_memory_targets_empty": true,
+    "acceptance_limits": [
+      "Fresh CLI hook trust shows modified; operator must use native Codex UI trust flow",
+      "Actual Desktop execution and cross-chat learning have not been repeated for this version",
+      "Production Curator quality is not inferred from startup"
+    ]
   },
   "release": {
     "tag": "v0.10.2",
@@ -79,7 +88,13 @@
     "swift_compilation": "passed_required_macOS_step",
     "native_job": "passed",
     "release_job": "passed",
-    "evidence": "public Actions and Release HTML readback; anonymous API rate limited"
+    "evidence": "public Actions and Release HTML readback; anonymous API rate limited",
+    "notes_sync": {
+      "state": "verified",
+      "workflow": "https://github.com/cYz26/codex-hermes-plugin/actions/runs/43159954721",
+      "urls": "absolute URLs verified in the actual Release page",
+      "published_tag_preserved": true
+    }
   },
   "portable": {
     "tests": 335,
