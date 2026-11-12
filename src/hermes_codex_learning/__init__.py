@@ -1,3 +1,3 @@
 """Peripheral Codex integration. Native learning decisions belong to Hermes."""
 
-__version__ = "0.10.1"
+__version__ = "0.10.2"

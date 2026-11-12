@@ -1,6 +1,6 @@
 # 文档索引
 
-主分支的外围版本为 **0.10.1**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
+主分支的外围版本为 **0.10.2**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
 
 ## 平台入口
 
@@ -25,6 +25,7 @@
 | [主动复盘与资料学习](./ACTIVE-LEARNING.zh-CN.md) | 显式请求、资料分批学习、查询与恢复 |
 | [0.10.0 发布说明](./RELEASE-0.10.0.zh-CN.md) | 自动反馈与原生维护的集成、验证和升级范围 |
 | [0.10.1 修复说明](./RELEASE-0.10.1.zh-CN.md) | 已有数据上的状态读取与安装核对修复 |
+| [0.10.2 发布说明](./RELEASE-0.10.2.zh-CN.md) | 候选与安装包指纹一致性、macOS 发布检查与升级结果 |
 | [自动反馈学习](./AUTOMATIC-FEEDBACK-LEARNING.zh-CN.md) | 跨轮证据、预算、sidechat、技能相关性与分阶段进度 |
 | [自动反馈学习验证](./AUTOMATIC-FEEDBACK-VALIDATION.zh-CN.md) | 原生合同、真实模型合成实验与实际 Desktop 验收的边界 |
 | [企业专用环境学习](./ENTERPRISE-LEARNING.zh-CN.md) | 企业正文学习、配置绑定与企业内共享 |

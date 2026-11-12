@@ -472,7 +472,13 @@
     {
       "original": "Hermes Learning 0.10.1 status/readiness fix verification",
       "path": "evidence/releases/0.10.1.json",
-      "sha256": "3a4327f165a537248f2ea4fe3d435413a21419714f7a380c03cdeb247b60e7af",
+      "sha256": "3d48a9cb2f719052c6c7cec291ca645aae8599a03c3757366569fb9fa31b6330",
+      "visibility": "repository"
+    },
+    {
+      "original": "Hermes Learning 0.10.2 release and candidate portability verification",
+      "path": "evidence/releases/0.10.2.json",
+      "sha256": "aa724a770c1ffae28d7c171635572e77b22b5223b72136b7818f0b8fc038dc13",
       "visibility": "repository"
     }
   ],

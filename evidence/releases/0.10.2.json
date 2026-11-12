@@ -1,0 +1,48 @@
+{
+  "version": "0.10.2",
+  "build": {
+    "version": "0.10.2",
+    "digest": "2b0981a7f448b939a37fee3ccacd884c8ce05be56ee04710ca5ffc81849a2d76"
+  },
+  "state": "portable_validated_native_validation_in_progress",
+  "native_tag": "v0.23.0",
+  "native_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "model_behavior": "unchanged; real-provider synthetic feedback evidence remains in the 0.10.0 record",
+  "regression": {
+    "candidate_fingerprint": {
+      "generated_egg_info_before": "failed",
+      "generated_egg_info_after": "passed",
+      "changed_source_rejected": true
+    },
+    "aliased_temporary_directory": {
+      "scope": "synthetic Linux temporary-directory alias; actual macOS is checked by GitHub",
+      "before": {
+        "tests": 335,
+        "failures": 7,
+        "errors": 15,
+        "skipped": 11
+      },
+      "after": {
+        "tests": 335,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 11,
+        "exit_code": 0
+      }
+    }
+  },
+  "deployment": {
+    "state": "pending"
+  },
+  "release": {
+    "tag": "v0.10.2",
+    "state": "pending"
+  },
+  "portable": {
+    "tests": 335,
+    "skipped": 11,
+    "exit_code": 0,
+    "temporary_directory_alias": true,
+    "log_sha256": "58335403dcf51785bed0230e9a98e735e45f3af4dd24846d817d3b296640dce8"
+  }
+}

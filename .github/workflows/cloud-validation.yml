@@ -10,6 +10,7 @@ permissions:
 jobs:
   bridge:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-22.04, macos-15]
         python: ["3.11", "3.14"]
@@ -25,7 +26,20 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
       - name: Portable release checks
-        run: python -B scripts/check_release.py
+        run: |
+          python -B - <<'PY'
+          import re, subprocess, sys
+          result = subprocess.run([sys.executable, '-B', 'scripts/check_release.py'],
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+          print(result.stdout, end='')
+          if result.returncode:
+              blocks = re.findall(r'(?:FAIL|ERROR):.*?(?=\n={20,}|\n-{20,}\nRan |\Z)',
+                                  result.stdout, re.S)
+              detail = ('\n'.join(blocks) if blocks else result.stdout)[-6000:]
+              detail = detail.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print('::error title=Portable release checks::' + detail)
+          raise SystemExit(result.returncode)
+          PY
       - name: Compile Mac receipt viewer
         if: runner.os == 'macOS'
         run: xcrun swiftc -O macos/HermesLearningNotifier.swift -o "$RUNNER_TEMP/HermesLearningNotifier"

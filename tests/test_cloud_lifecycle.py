@@ -66,7 +66,7 @@ class CloudLifecycleTests(unittest.TestCase):
 
     def test_workflow_delivery_and_session_close_keep_the_actual_identity(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             settings = Settings(root/'home', root, root, Path(sys.executable), capture_scope='global',
                                 data_policy={'enabled': True, 'workflow_projection': True})
             class API:
@@ -100,6 +100,6 @@ class CloudLifecycleTests(unittest.TestCase):
                 payloads = ''.join(row[0] for row in bridge.store.db.execute('SELECT payload FROM events'))
                 self.assertNotIn('PRIVATE-', payloads)
                 source = bridge.store.get('workflow-local-source:' + api.observed[0])
-                self.assertEqual(source['project'], directory)
+                self.assertEqual(source['project'], str(root))
             finally:
                 bridge.store.close()

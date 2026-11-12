@@ -15,18 +15,20 @@ class PendingReviewCommandTests(unittest.TestCase):
     def test_project_can_inspect_an_empty_queue_without_starting_a_model(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
-            base = Path(temporary)
+            base = Path(temporary).resolve()
             project = base / "project"
             project.mkdir()
+            alias = base / "project-link"
+            alias.symlink_to(project, target_is_directory=True)
             settings = base / "bridge.json"
             settings.write_text(json.dumps({
-                "home": str(base / "learning-home"), "project": str(project),
+                "home": str(base / "learning-home"), "project": str(alias),
                 "source": str(base / "unused-source"), "python": sys.executable,
                 "capture_scope": "global",
             }))
             result = subprocess.run(
                 [sys.executable, "-B", str(root / "scripts/bridge"), "approvals", "list",
-                 "--settings", str(settings), "--cwd", str(project)],
+                 "--settings", str(settings), "--cwd", str(alias)],
                 capture_output=True, text=True, timeout=15,
             )
             self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
@@ -47,7 +49,7 @@ class PendingReviewTests(unittest.TestCase):
 
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        self.base = Path(self.temporary.name)
+        self.base = Path(self.temporary.name).resolve()
         self.project = self.base / "project-a"
         self.foreign = self.base / "project-b"
         self.project.mkdir()

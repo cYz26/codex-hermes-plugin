@@ -52,7 +52,7 @@ class ActiveLearningTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.project = self.root / "project"
         self.project.mkdir()
         self.settings = Settings(self.root / "home", self.project, self.root / "native",

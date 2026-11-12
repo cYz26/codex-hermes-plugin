@@ -62,10 +62,32 @@
     "checks_preserved": true
   },
   "deployment": {
-    "state": "pending"
+    "state": "installed_bundle_ready",
+    "version": "0.10.1",
+    "build_digest": "ebebb45a6f85897cc8a08c6b6beef8ccc0ac7d1c999ca4a89455e9db9d2f77c3",
+    "codex_plugin_cache_version": "0.10.1",
+    "startup_status_seconds": 0.0937,
+    "hooks": {
+      "count": 7,
+      "enabled": 7,
+      "trusted": 7,
+      "trust_changed": false,
+      "hooks_executed": false,
+      "scope": "fresh CLI configuration; actual Desktop execution not inferred"
+    },
+    "native_candidate_activation": "superseded_by_0.10.2; native runtime stayed on the previous compatible source",
+    "native_config_preserved": true,
+    "learning_settings_preserved_except_runtime_pointers": true,
+    "other_codex_plugins_preserved": true
   },
   "release": {
     "tag": "v0.10.1",
-    "state": "pending"
+    "state": "workflow_failed_no_github_release",
+    "tag_commit": "e1a93bd80e1927de5bece32db4f406c12d92e3f7",
+    "tag_workflow": "https://github.com/cYz26/codex-hermes-plugin/actions/runs/43155618240",
+    "main_workflow": "https://github.com/cYz26/codex-hermes-plugin/actions/runs/43155333663",
+    "failure": "macos-15 Python 3.14 portable release checks; native job succeeded; Release job skipped",
+    "full_remote_test_log_available": false,
+    "published_tag_preserved": true
   }
 }

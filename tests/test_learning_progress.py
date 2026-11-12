@@ -35,7 +35,7 @@ class LearningProgressTests(unittest.TestCase):
             self.bridge.store.db.set_progress_handler(None, 0)
 
     def setUp(self):
-        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name)
+        self.temp=tempfile.TemporaryDirectory();self.root=Path(self.temp.name).resolve()
         self.settings=Settings(self.root/'home',self.root,self.root,Path('/usr/bin/python3'),proactive=True)
         self.observed=[]
         def observe(handle,body,**kw):

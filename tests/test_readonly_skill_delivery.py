@@ -20,7 +20,7 @@ class ReadonlyDeliveryTests(unittest.TestCase):
 
     def test_skill_read_has_no_persistent_writes_and_delivery_is_recorded_by_hook(self):
         with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory)
+            root=Path(directory).resolve()
             settings=Settings(root/"home",root,root,Path("/usr/bin/python3"),capture_scope="global")
             artifact=root/"artifact";artifact.mkdir()
             (artifact/"SKILL.md").write_text("Synthetic procedure.")

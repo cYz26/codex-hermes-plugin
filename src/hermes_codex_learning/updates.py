@@ -53,7 +53,8 @@ def plugin_hash(root: Path = ROOT) -> str:
     for name in ("src", "scripts", "tests", "hermes-plugin", "hooks", "skills", "patches",
                  "probes", "fixtures", "desktop", "macos", "assets"):
         paths.extend(p for p in (root / name).rglob("*") if p.is_file()
-                     and "__pycache__" not in p.parts and p.suffix != ".pyc")
+                     and "__pycache__" not in p.parts and p.suffix != ".pyc"
+                     and not any(part.endswith(".egg-info") for part in p.relative_to(root).parts))
     paths.extend(root / name for name in ("pyproject.toml", ".codex-plugin/plugin.json", ".mcp.json"))
     return digest({str(p.relative_to(root)): file_hash(p) for p in sorted(paths)})
 
