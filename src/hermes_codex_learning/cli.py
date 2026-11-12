@@ -220,7 +220,7 @@ def main() -> int:
         parser.error("Writing or starting a launchd service requires macOS")
     if args.command == "systemd" and args.start and not args.dry_run and sys.platform != "linux":
         parser.error("Starting a systemd service requires Linux")
-    if args.command in {"install","sources","learning-config","enterprise-config","retention","quality","migration","review-retry"}:
+    if args.command in {"install","sources","learning-config","enterprise-config","retention","quality","migration","review-retry","curator-config"}:
         from .operations import execute
         try:
             result = execute(args)

@@ -21,10 +21,14 @@ def register(ctx):
         from hermes_codex_learning.daemon import run
         from hermes_codex_learning.review_input import install_review_policy
         from hermes_codex_learning.review_receipt import ReviewWrites
+        from hermes_codex_learning.lifecycle import curation_tool_guard
 
         review_writes = ReviewWrites()
+        def before_tool(**event):
+            review_writes.record_attempt(**event)
+            return curation_tool_guard(**event)
         with ExitStack() as registrations:
-            for hook, callback in (("pre_tool_call", review_writes.record_attempt),
+            for hook, callback in (("pre_tool_call", before_tool),
                                    ("post_tool_call", review_writes.record)):
                 registrations.callback(ctx.register_hook(hook, callback).dispose)
             settings = Settings.load(args.settings)

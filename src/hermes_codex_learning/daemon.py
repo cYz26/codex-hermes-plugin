@@ -445,9 +445,14 @@ class Bridge:
         return list(latest.values())
 
     def has_active_turns(self):
-        return bool(self.store.db.execute(
-            "SELECT 1 FROM latest_turns l JOIN turns t ON t.id=l.turn_id "
-            "WHERE json_extract(t.payload,'$.status') IN ('running','incomplete') LIMIT 1").fetchone())
+        for row in self.latest_turns():
+            data = json.loads(row['payload'])
+            if data['status'] == 'running':
+                return True
+            if (data['status'] == 'incomplete' and data.get('_ended_by') not in {'Stop', 'Interrupt'}
+                    and not data.get('assistant')):
+                return True
+        return False  # Unknown tool outcomes do not reopen a terminated host turn.
 
     def update_knowledge(self, context: dict, *, persist=True, **kwargs) -> dict:
         stored_index = self.store.get("knowledge-index-v1", {})
@@ -468,7 +473,14 @@ class Bridge:
     def publish(self) -> None:
         if time.monotonic() - self.last_publish < 10:
             return
+        from .lifecycle import synchronize
+        page = synchronize(self)
+        if page and page.get('has_more'):
+            return  # Finish native history replay before replacing the recall view.
         context = self.api.read(kind="context")
+        from .lifecycle import recover_archived, reconcile_interrupted_curation
+        reconcile_interrupted_curation(self, context)
+        recover_archived(self, context)
         if self.settings.capture_scope == "global" or self.settings.data_policy.get("mode")=="trusted_enterprise":
             context = self.update_knowledge(context)
         self.cache_artifacts(context)
@@ -491,6 +503,7 @@ class Bridge:
     def cache_artifacts(self, context):
         previous=self.store.get("artifact-read-cache",{})
         current={}
+        retired = self.store.get('artifact-retired-at', {})
         for item in context.get("skills",[]):
             name=item["name"];cached=previous.get(name,{})
             if (cached.get("catalog_version")==item.get("version") and cached.get("artifact")
@@ -503,6 +516,11 @@ class Bridge:
                                "catalog_version":item.get("version")}
             except (OSError,ValueError):
                 continue
+        for name, record in previous.items():
+            version = record.get('artifact', {}).get('version')
+            if version and version != current.get(name, {}).get('artifact', {}).get('version'):
+                retired.setdefault(version, time.time())
+        self.store.set('artifact-retired-at', retired)
         self.store.set("artifact-read-cache",current)
 
     def publish_checked(self, context: dict) -> dict:
@@ -514,13 +532,17 @@ class Bridge:
         publications = self.store.get("publications-v1", {})
         aliases = self.store.get("publication-aliases", {})
         present = {item["name"] for item in context.get("skills", [])}
-        publications = {name: item for name, item in publications.items() if name in present}
+        native_aliases = self.store.get('native-skill-aliases', {})
+        publications = {name: item for name, item in publications.items() if name in present or name in native_aliases}
         from .quality import verifier_hash
         publication_key = digest([context.get('version'), context.get('bridge_provenance'),
                                   self.store.get('workflow-skill-attestations', {}),
                                   self.store.get('semantic-skill-attestations', {}), self.settings.data_policy,
                                   enterprise["id"] if enterprise else None,
                                   self.settings.quality_checks, verifier_hash() if self.settings.quality_checks else None,
+                                  native_aliases, self.store.get('lifecycle-withheld', {}),
+                                  self.store.get('native-candidate-intents', {}),
+                                  self.store.get('native-lifecycle-status', {}).get('state'),
                                   [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]])
         if self.store.get("publication-context-version") != publication_key:
             index = context.get("bridge_provenance", {})
@@ -537,8 +559,17 @@ class Bridge:
                     artifact_root = Path(value["resource_dir"]).resolve()
                     if not artifact_root.is_relative_to((self.settings.home / "learning/artifacts").resolve()):
                         raise ValueError("Artifact is outside the learning publication directory")
+                    intent = self.store.get('native-candidate-intents', {}).get(name, {})
                     decision = sharing_check(value, origins, markers, executable_candidate=self.settings.quality_checks,
-                                             enterprise=bool(enterprise))
+                                             enterprise=bool(enterprise),
+                                             native_candidate=intent.get('version') == value['version'] and bool(intent.get('sources')))
+                    lifecycle_block = self.store.get('lifecycle-withheld', {}).get(name)
+                    if lifecycle_block:
+                        decision = {'allowed': False, **lifecycle_block}
+                    elif self.store.get('native-lifecycle-status', {}).get('state') == 'history_gap':
+                        proof = self.store.get('semantic-skill-attestations', {}).get(name, {})
+                        if proof.get('version') != value['version']:
+                            decision = {'allowed': False, 'reason': 'native_history_gap'}
                     required={proof.get("boundary_id") for proof in (
                         self.store.get("semantic-skill-attestations",{}).get(name,{}),
                         publications.get(name,{}).get("check",{})) if proof.get("boundary_id")}
@@ -593,7 +624,7 @@ class Bridge:
                         aliases.pop(name, None)
                         history = self.store.get("publication-history:" + name, {})
                         if name in publications:
-                            history[publications[name]["artifact"]["version"]] = publications[name]
+                            history[publications[name]["artifact"]["version"]] = {**publications[name], 'retired_at': time.time()}
                         self.store.set("publication-history:" + name, history)
                         publications[name] = {"artifact": {key: val for key, val in value.items() if key != "delivery_token"},
                                               "catalog_entry": item, "sources": origins, "check": decision}
@@ -611,6 +642,11 @@ class Bridge:
                     decisions[name] = decision
                 except (OSError, ValueError) as exc:
                     decisions[name] = {"allowed": False, "reason": type(exc).__name__}
+            from .lifecycle import aliases_for
+            forwarded = aliases_for(self.store, {name: item for name, item in publications.items() if name in present})
+            aliases.update(forwarded)
+            for name in forwarded:
+                publications.pop(name, None)
             self.store.set("publications-v1", publications)
             self.store.set("publication-aliases", {name:target for name,target in aliases.items() if target in publications})
             self.store.set("publication-decisions", decisions)
@@ -647,6 +683,11 @@ class Bridge:
                     catalog.append(publications[name]["catalog_entry"])
             else:
                 catalog.append(item)
+        # The old immutable version remains usable until the replacement passes
+        # the same publication checks. A native archive does not invalidate it.
+        for name, item in publications.items():
+            if name not in present:
+                catalog.append(item['catalog_entry'])
         return {**context, "skills":catalog, "checked_publication": True, "publications": visible}
 
     def notifications(self) -> None:
@@ -692,7 +733,11 @@ class Bridge:
                         del closing[event_id]
                 self.store.set("closing", closing)
                 if not self.has_active_turns():
-                    self.api.maintenance()
+                    from .lifecycle import maintenance
+                    maintenance(self)
+                if self.store.get('native-curator-config-request'):
+                    from .lifecycle import configure
+                    configure(self)
                 self.publish()
                 if self.store.get("state") != "idle":
                     self.store.set("state", "idle")
@@ -727,6 +772,14 @@ class Bridge:
                 return PendingReviews(self.settings, store).list(params.get("cwd"), params.get("id"))
         if method == "capabilities":
             return {"build":self.build,"native":self.native_capabilities}
+        if method == 'configure_curator':
+            if not self.native_capabilities.get('skill_lifecycle'):
+                raise RuntimeError('Activate the verified native lifecycle patch first')
+            if params.get('dry_run', True):
+                return {'dry_run': True, 'changes': {'curator.enabled': True, 'curator.consolidate': True}}
+            with StoreConnection(self.settings) as store:
+                store.set('native-curator-config-request', {'at': time.time()})
+            return {'state': 'queued'}
         if method == "review_retry":
             if not self.resume.is_set() or self.drain.is_set():
                 raise RuntimeError("Learning runtime is paused; retry after the update")
@@ -780,6 +833,9 @@ class Bridge:
                                 "SELECT json_extract(payload,'$.validation'),COUNT(*) FROM application_evidence GROUP BY 1")}
                         },
                         "retention":store.get("retention:last"),
+                        "native_curator": store.get('native-curator-status'),
+                        "native_lifecycle": store.get('native-lifecycle-status'),
+                        "native_curator_configuration": store.get('native-curator-config-result'),
                         "enterprise_policy":store.get("enterprise-policy-state"),
                         "pid": os.getpid(), "ready": self.ready.is_set(), "learning_api": self.api.version,
                         "source": str(self.settings.source),

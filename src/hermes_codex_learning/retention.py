@@ -63,8 +63,57 @@ def run(settings, store, api, *, dry_run=True):
         with store.db:
             store.db.execute("DELETE FROM delivery_events WHERE delivered IS NOT NULL AND delivered<?", (cutoff,))
     result["runtime"] = runtime_cleanup(settings,dry_run=dry_run)
+    result['artifacts'] = retain_artifacts(store, api, dry_run=dry_run)
     if not dry_run:
         store.set("retention:last", {**result, "at":time.time()})
+    return result
+
+
+def retain_artifacts(store, api, *, dry_run=True):
+    """Collect only unreferenced host snapshots through their native owner.
+
+    Native archives, the mutation ledger and its blobs keep their own policies.
+    The 30-day grace also covers stateless read receipts not yet acknowledged.
+    """
+    if not hasattr(api, 'prune_artifacts'):
+        return {'state': 'native_artifact_retention_unavailable', 'dry_run': dry_run}
+    protected = set()
+    def protect(record):
+        version = record.get('artifact', record).get('version')
+        if isinstance(version, str) and re.fullmatch(r'[a-f0-9]{64}', version):
+            protected.add(version)
+    for key in ('publications-v1', 'artifact-read-cache'):
+        for record in store.get(key, {}).values():
+            protect(record)
+    for intent in store.get('native-candidate-intents', {}).values():
+        if intent.get('version') in protected:
+            for version in intent.get('sources', {}).values():
+                protect({'version': version})
+    now = time.time()
+    retired = store.get('artifact-retired-at', {})
+    protected.update(version for version, at in retired.items() if at >= now-30*86400)
+    histories = {}
+    for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'publication-history:%'"):
+        history = json.loads(row['value'])
+        for position, (version, record) in enumerate(reversed(list(history.items()))):
+            # Legacy undated versions get a grace period before collection.
+            record.setdefault('retired_at', now)
+            if position < 2 or record['retired_at'] >= now-30*86400:
+                protect(record)
+        histories[row['key']] = history
+    for row in store.db.execute("SELECT payload FROM application_evidence"):
+        protect(json.loads(row[0]))
+    for row in store.db.execute("SELECT value FROM meta WHERE key LIKE 'issued-delivery:%'"):
+        protect(json.loads(row[0]))
+    result = api.prune_artifacts(sorted(protected), retention_seconds=30*86400, dry_run=dry_run)
+    if not dry_run:
+        removed = set(result.get('removed', []))
+        with store.db:
+            for key, history in histories.items():
+                store.db.execute('UPDATE meta SET value=? WHERE key=?',
+                                 (dumps({v:r for v,r in history.items() if v not in removed}), key))
+            store.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',
+                             ('artifact-retired-at', dumps({v:at for v,at in retired.items() if v not in removed})))
     return result
 
 

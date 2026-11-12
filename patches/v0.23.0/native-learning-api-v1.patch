@@ -47,10 +47,10 @@ index cfc3b9c6..f47e2f1e 100644
          _call_guarded(getattr(agent, "_sync_external_memory_for_turn", None), "external memory sync raised", kwargs=dict(
 diff --git a/agent/learning_api.py b/agent/learning_api.py
 new file mode 100644
-index 00000000..0da24d9b
+index 00000000..75fb6ff4
 --- /dev/null
 +++ b/agent/learning_api.py
-@@ -0,0 +1,55 @@
+@@ -0,0 +1,63 @@
 +"""Supported plugin-facing Learning API v1; all method results are serializable values."""
 +from __future__ import annotations
 +
@@ -98,8 +98,16 @@ index 00000000..0da24d9b
 +    def record_usage(self, token: str, evidence: dict) -> dict:
 +        return self._service.record_usage(token, evidence)
 +
-+    def maintenance(self, *, handle: str | None = None, idle_flush: bool = False) -> dict:
-+        return self._service.maintenance(handle=handle, idle_flush=idle_flush)
++    def prune_artifacts(self, protected_versions: list[str], *, retention_seconds: float = 30 * 86400,
++                        dry_run: bool = True) -> dict:
++        return self._service.prune_artifacts(protected_versions, retention_seconds=retention_seconds, dry_run=dry_run)
++
++    def configure_curator(self) -> dict:
++        return self._service.configure_curator()
++
++    def maintenance(self, *, handle: str | None = None, idle_flush: bool = False,
++                    host_idle_seconds: float | None = None) -> dict:
++        return self._service.maintenance(handle=handle, idle_flush=idle_flush, host_idle_seconds=host_idle_seconds)
 +
 +    def cancel(self) -> dict:
 +        return self._service.cancel()
@@ -108,10 +116,10 @@ index 00000000..0da24d9b
 +        return self._service.close(handle=handle, event_id=event_id)
 diff --git a/agent/learning_artifacts.py b/agent/learning_artifacts.py
 new file mode 100644
-index 00000000..abc93ee0
+index 00000000..afc6ede0
 --- /dev/null
 +++ b/agent/learning_artifacts.py
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,115 @@
 +"""Read native learning artifacts without recording catalog scans as skill use."""
 +from __future__ import annotations
 +
@@ -128,6 +136,8 @@ index 00000000..abc93ee0
 +
 +def context(home: Path) -> dict:
 +    from tools.skills_tool import _skill_catalog
++    from agent.learning_graph import build_skill_nodes
++    nodes = build_skill_nodes([('profile', home / 'skills')])
 +
 +    memories = {}
 +    for name in ("MEMORY.md", "USER.md"):
@@ -140,8 +150,11 @@ index 00000000..abc93ee0
 +        path = entry["path"]
 +        signature = [(str(p.relative_to(path.parent)), p.stat().st_size, p.stat().st_mtime_ns)
 +                     for p in sorted(path.parent.rglob("*")) if p.is_file()]
++        node = nodes.get(entry['load_name'])
 +        skills.append({"name": entry["load_name"], "description": entry["description"],
-+                       "version": fingerprint(signature)})
++                       "version": fingerprint(signature),
++                       **({'related_skills': node.related, 'state': node.state, 'pinned': node.pinned,
++                           'use_count': node.use_count} if node else {})})
 +    result = {"memories": memories, "skills": skills}
 +    version = fingerprint(result)
 +    summary = "\n".join(text for text in memories.values() if text)[:340]
@@ -222,6 +235,153 @@ index 00000000..abc93ee0
 +        content = None
 +    return {"name":name,"version":version,"file_path":relative,"resource_dir":str(root),"files":files,
 +            "content":content,"content_hash":files[relative],"readiness_status":"available"}
+diff --git a/agent/learning_maintenance.py b/agent/learning_maintenance.py
+new file mode 100644
+index 00000000..212bc320
+--- /dev/null
++++ b/agent/learning_maintenance.py
+@@ -0,0 +1,141 @@
++"""Native maintenance and read-only lifecycle facts for external learning hosts.
++
++The host supplies idle time. All due, pin, archive, consolidation and backup
++decisions remain in the native Curator and skill tools.
++"""
++from __future__ import annotations
++
++import hashlib
++import copy
++import json
++import re
++import shutil
++import time
++from pathlib import Path
++
++
++def scheduled(idle_seconds):
++    from agent import curator
++
++    if not curator.should_run_now() or idle_seconds < curator.get_min_idle_hours() * 3600:
++        return {'curator': None, 'idle_seconds': idle_seconds}
++    if not curator._claim_run():
++        return {'curator': None, 'idle_seconds': idle_seconds}
++    try:
++        # The external host has one write owner. Its maintenance call must finish
++        # before the next review, publication or runtime drain can start.
++        result = curator.run_curator_review(synchronous=True, trigger='scheduled')
++        return {'curator': result, 'idle_seconds': idle_seconds}
++    finally:
++        curator._release_run_claim()
++
++
++def status():
++    from agent import curator, curator_backup
++    from hermes_cli.config import load_config_readonly
++    configuration = copy.deepcopy(load_config_readonly())
++    for key in ('enabled', 'consolidate'):
++        configuration.setdefault('curator', {}).pop(key, None)
++    scope_hash = hashlib.sha256(json.dumps(configuration, sort_keys=True, default=str).encode()).hexdigest()
++    state = curator.load_state()
++    return {'enabled': curator.is_enabled(), 'consolidate': curator.get_consolidate(),
++            'interval_hours': curator.get_interval_hours(), 'min_idle_hours': curator.get_min_idle_hours(),
++            'stale_after_days': curator.get_stale_after_days(), 'archive_after_days': curator.get_archive_after_days(),
++            'backup_keep': curator_backup.get_keep(), 'configuration_scope_hash': scope_hash,
++            'managed_skills': [row['name'] for row in curator.skill_usage.curated_report()
++                               if not curator.skill_usage.is_bundled(row['name'])], **state}
++
++
++def configure():
++    from hermes_cli.config import load_config_readonly, set_config_value
++    cfg = load_config_readonly().get('curator', {})
++    before = {'enabled': cfg.get('enabled', True), 'consolidate': cfg.get('consolidate', False)}
++    set_config_value('curator.enabled', 'true')
++    set_config_value('curator.consolidate', 'true')
++    return {'previous': before, 'enabled': True, 'consolidate': True}
++
++
++def history(cursor=None, limit=200):
++    from tools import skill_ledger
++    with skill_ledger._ledger_lock():
++        raw = skill_ledger._read_ledger('external lifecycle', quiet_missing=True)
++        if raw is None and skill_ledger.ledger_path().exists():
++            return {'events': [], 'cursor': cursor, 'cursor_found': False, 'has_more': False}
++        if raw:
++            try:
++                if any(not isinstance(json.loads(line), dict) for line in raw.decode('utf-8').splitlines() if line.strip()):
++                    raise ValueError('Invalid native history')
++            except (UnicodeError, ValueError):
++                return {'events': [], 'cursor': cursor, 'cursor_found': False, 'has_more': False}
++        rows = list(reversed(skill_ledger.list_entries()))
++    if cursor is None:
++        return {'events': [], 'cursor': rows[-1]['id'] if rows else 'start',
++                'cursor_found': True, 'has_more': False}
++    start = 0
++    if cursor != 'start':
++        match = next((i for i, row in enumerate(rows) if row.get('id') == cursor), None)
++        if match is None:
++            return {'events': [], 'cursor': cursor, 'cursor_found': False, 'has_more': False}
++        start = match + 1
++    selected = rows[start:start + limit]
++    events = []
++    for row in selected:
++        if not all(isinstance(row.get(key), str) for key in ('id', 'action', 'skill')):
++            raise ValueError('Malformed native skill lifecycle entry')
++        event = {key: row[key] for key in ('id', 'action', 'skill')}
++        evidence = row.get('evidence') or {}
++        target = evidence.get('absorbed_into')
++        if row['action'] == 'delete' and evidence.get('archived') is True and isinstance(target, str) and target:
++            event['absorbed_into'] = target
++        events.append(event)
++    return {'events': events, 'cursor': selected[-1]['id'] if selected else cursor,
++            'cursor_found': True, 'has_more': start + len(selected) < len(rows)}
++
++
++def prune_artifacts(home, protected_versions, *, retention_seconds=30 * 86400, dry_run=True):
++    from agent.learning_artifacts import fingerprint
++    from tools.skills_tool import _skill_catalog
++
++    if (not isinstance(dry_run, bool) or isinstance(retention_seconds, bool)
++            or not 30 * 86400 <= retention_seconds <= 3650 * 86400
++            or not isinstance(protected_versions, list)
++            or any(not isinstance(v, str) or not re.fullmatch(r'[a-f0-9]{64}', v) for v in protected_versions)):
++        raise ValueError('Invalid artifact retention request')
++    protected = set(protected_versions)
++    # Current native packages are authoritative, even if the host has not yet
++    # published them. Never generate snapshots just to compute a dry-run.
++    for entry in _skill_catalog():
++        directory = entry['path'].parent
++        files = {}
++        for path in directory.rglob('*'):
++            if path.is_symlink():
++                raise ValueError('Cannot establish current native artifact references')
++            if path.is_file():
++                files[str(path.relative_to(directory))] = hashlib.sha256(path.read_bytes()).hexdigest()
++        protected.add(fingerprint(files))
++    root = Path(home) / 'learning' / 'artifacts'
++    result = {'dry_run': dry_run, 'eligible': [], 'removed': [], 'protected': len(protected)}
++    cutoff = time.time() - retention_seconds
++    for path in sorted(root.iterdir()) if root.is_dir() else []:
++        if (path.is_symlink() or not path.is_dir() or not re.fullmatch(r'[a-f0-9]{64}', path.name)
++                or path.name in protected or path.stat().st_mtime >= cutoff):
++            continue
++        # A directory without a complete valid immutable package may be a
++        # interrupted publication or operator material; do not collect it.
++        files = {}
++        unsafe = False
++        for file in path.rglob('*'):
++            if file.is_symlink():
++                unsafe = True
++                break
++            if file.is_file():
++                files[str(file.relative_to(path))] = hashlib.sha256(file.read_bytes()).hexdigest()
++        if unsafe or 'SKILL.md' not in files or fingerprint(files) != path.name:
++            continue
++        result['eligible'].append(path.name)
++        if not dry_run:
++            shutil.rmtree(path)
++            result['removed'].append(path.name)
++        if len(result['eligible']) >= 100:
++            break
++    return result
 diff --git a/agent/learning_policy.py b/agent/learning_policy.py
 new file mode 100644
 index 00000000..18052db3
@@ -313,10 +473,10 @@ index 00000000..f9f2fe23
 +    return outcome
 diff --git a/agent/learning_runtime.py b/agent/learning_runtime.py
 new file mode 100644
-index 00000000..8f632452
+index 00000000..32e3d45a
 --- /dev/null
 +++ b/agent/learning_runtime.py
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,168 @@
 +"""Internal adapter to the native learning engine. No executor-specific transport here."""
 +from __future__ import annotations
 +
@@ -437,9 +597,8 @@ index 00000000..8f632452
 +        return review_outcome(st, error, prior_snapshot=messages)
 +
 +    def maintenance(self, idle_seconds: float) -> dict:
-+        from agent.curator import maybe_run_curator
-+        result = maybe_run_curator(idle_for_seconds=idle_seconds)
-+        return {"curator": result, "idle_seconds": idle_seconds}
++        from agent.learning_maintenance import scheduled
++        return scheduled(idle_seconds)
 +
 +    def usage(self, handles: list[str]):
 +        if handles and self.db is None:
@@ -488,10 +647,10 @@ index 00000000..8f632452
 +                db.close()
 diff --git a/agent/learning_service.py b/agent/learning_service.py
 new file mode 100644
-index 00000000..7361e715
+index 00000000..3b84f23a
 --- /dev/null
 +++ b/agent/learning_service.py
-@@ -0,0 +1,566 @@
+@@ -0,0 +1,600 @@
 +"""Learning API v1: profile-bound values, native execution, durable admission receipts.
 +
 +The learning journal owns admission/counters atomically. Native transcript projection is
@@ -849,7 +1008,13 @@ index 00000000..7361e715
 +             after_cursor: int = 0) -> dict:
 +        if kind == "capabilities":
 +            return {"version":1, "artifact_preview":True, "bounded_status":True, "retention":True,"snapshot_delivery":True,
-+                    "explicit_reviews":True, "review_retry":True}
++                    "explicit_reviews":True, "review_retry":True, "skill_lifecycle":True, "artifact_retention":True}
++        if kind == "skill_lifecycle":
++            from agent.learning_maintenance import history
++            return history(name)
++        if kind == "curator_status":
++            from agent.learning_maintenance import status
++            return status()
 +        if kind == "request":
 +            with self.lock:
 +                row = self.db.execute("SELECT i.* FROM intents i JOIN explicit_reviews e ON e.intent=i.id WHERE e.id=?", (name,)).fetchone()
@@ -994,6 +1159,21 @@ index 00000000..7361e715
 +            return result
 +
 +    @_bound
++    def prune_artifacts(self, protected_versions: list[str], *, retention_seconds: float = 30 * 86400,
++                        dry_run: bool = True) -> dict:
++        from agent.learning_maintenance import prune_artifacts
++        with self.lock:
++            protected = set(protected_versions)
++            protected.update(row[0] for row in self.db.execute('SELECT DISTINCT version FROM deliveries'))
++            return prune_artifacts(self.home, list(protected), retention_seconds=retention_seconds, dry_run=dry_run)
++
++    @_bound
++    def configure_curator(self) -> dict:
++        from agent.learning_maintenance import configure
++        with self.lock:
++            return configure()
++
++    @_bound
 +    def record_usage(self, token: str, evidence: dict) -> dict:
 +        from tools.skill_usage import bump_use, bump_view
 +        with self.lock, self.db:
@@ -1012,7 +1192,13 @@ index 00000000..7361e715
 +        return {"recorded": True, "native_telemetry": "best_effort"}
 +
 +    @_bound
-+    def maintenance(self, *, handle: str | None = None, idle_flush: bool = False) -> dict:
++    def maintenance(self, *, handle: str | None = None, idle_flush: bool = False,
++                    host_idle_seconds: float | None = None) -> dict:
++        import math
++        if host_idle_seconds is not None and (isinstance(host_idle_seconds, bool)
++                or not isinstance(host_idle_seconds, (int, float)) or not math.isfinite(host_idle_seconds)
++                or host_idle_seconds < 0):
++            raise ValueError('Host idle time must be a finite non-negative duration')
 +        with self.lock, self.db:
 +            for row in self.db.execute("SELECT id FROM observations WHERE projection='pending'").fetchall():
 +                self._project(row[0])
@@ -1025,7 +1211,14 @@ index 00000000..7361e715
 +                if scope["revision"] > scope["reviewed"] and not pending and not attempted:
 +                    intent = self._intent(handle, scope["revision"], True, True, "idle_flush")
 +            last = self.db.execute("SELECT MAX(activity) FROM scopes").fetchone()[0]
-+        return {"intent": intent, **self.runtime.maintenance(max(0, time.time() - (last or time.time())))}
++        if idle_flush:
++            # A turn flush may occur while another host chat is active. Only
++            # the host's separate idle-maintenance call owns Curator scheduling.
++            return {"intent": intent, "curator": None}
++        idle = max(0, time.time() - (last or time.time()))
++        if host_idle_seconds is not None:
++            idle = min(idle, host_idle_seconds)
++        return {"intent": intent, **self.runtime.maintenance(idle)}
 +
 +    @_bound
 +    def cancel(self) -> dict:
@@ -1192,6 +1385,117 @@ index 00000000..02a81804
 +    (artifact/"SKILL.md").write_text(content+"changed")
 +    with pytest.raises(ValueError):
 +        service.read(kind="skill",name="fixture",artifact_version=version)
+diff --git a/tests/agent/test_learning_lifecycle.py b/tests/agent/test_learning_lifecycle.py
+new file mode 100644
+index 00000000..08333df7
+--- /dev/null
++++ b/tests/agent/test_learning_lifecycle.py
+@@ -0,0 +1,105 @@
++import hashlib
++import os
++import time
++from pathlib import Path
++
++import pytest
++
++
++def test_scheduled_maintenance_finishes_native_pass_before_return(monkeypatch):
++    from agent import curator
++    from agent.learning_maintenance import scheduled
++    calls = []
++    monkeypatch.setattr(curator, 'should_run_now', lambda: True)
++    monkeypatch.setattr(curator, 'get_min_idle_hours', lambda: 2)
++    monkeypatch.setattr(curator, '_claim_run', lambda: True)
++    monkeypatch.setattr(curator, '_release_run_claim', lambda: calls.append('released'))
++    def native(**kwargs):
++        assert kwargs == {'synchronous': True, 'trigger': 'scheduled'}
++        calls.append('completed')
++        return {'done': True}
++    monkeypatch.setattr(curator, 'run_curator_review', native)
++    assert scheduled(7199)['curator'] is None
++    assert calls == []
++    assert scheduled(7200)['curator'] == {'done': True}
++    assert calls == ['completed', 'released']
++
++
++def test_native_history_pages_and_only_accepts_verified_absorption(monkeypatch):
++    from tools import skill_ledger
++    from agent.learning_maintenance import history
++    rows = [{'id': str(i), 'action': 'delete', 'skill': 'old',
++             'evidence': {'absorbed_into': 'combined', 'archived': i == 2}} for i in range(3)]
++    monkeypatch.setattr(skill_ledger, 'list_entries', lambda: list(reversed(rows)))
++    assert history()['cursor'] == '2'
++    first = history('start', limit=2)
++    assert first['has_more'] and first['cursor'] == '1'
++    assert 'absorbed_into' not in first['events'][0]
++    assert history('1')['events'][0]['absorbed_into'] == 'combined'
++    assert history('missing')['cursor_found'] is False
++
++
++def test_corrupt_native_history_does_not_silently_skip_mutations(monkeypatch):
++    from tools import skill_ledger
++    from agent.learning_maintenance import history
++    monkeypatch.setattr(skill_ledger, '_read_ledger', lambda *a, **kw: b'{truncated')
++    assert history('last-good')['cursor_found'] is False
++
++
++def test_artifact_gc_preserves_current_referenced_and_recent_versions(tmp_path, monkeypatch):
++    from agent.learning_artifacts import fingerprint
++    from agent.learning_maintenance import prune_artifacts
++    from tools import skills_tool
++    monkeypatch.setattr(skills_tool, '_skill_catalog', lambda: [])
++    root = tmp_path/'learning/artifacts'
++    def snapshot(body, age):
++        version = fingerprint({'SKILL.md': hashlib.sha256(body.encode()).hexdigest()})
++        folder = root/version
++        folder.mkdir(parents=True)
++        (folder/'SKILL.md').write_text(body)
++        os.utime(folder, (time.time()-age, time.time()-age))
++        return version
++    old = snapshot('old', 40*86400)
++    protected = snapshot('referenced', 40*86400)
++    recent = snapshot('recent', 10)
++    preview = prune_artifacts(tmp_path, [protected])
++    assert preview['eligible'] == [old] and (root/old).exists()
++    result = prune_artifacts(tmp_path, [protected], dry_run=False)
++    assert result['removed'] == [old] and not (root/old).exists()
++    assert (root/protected).exists() and (root/recent).exists()
++
++
++def test_native_configuration_changes_only_requested_curator_flags(tmp_path):
++    from hermes_cli.plugins_loader import _plugin_home_scope
++    from hermes_cli.config import atomic_config_write, load_config_readonly
++    from agent.learning_maintenance import configure, status
++    with _plugin_home_scope(tmp_path):
++        atomic_config_write(tmp_path/'config.yaml', {'curator': {'enabled': False, 'consolidate': False,
++                            'interval_hours': 168}, 'memory': {'write_approval': True}})
++        before = status()['configuration_scope_hash']
++        configure()
++        after = status()
++        assert after['enabled'] and after['consolidate']
++        assert after['configuration_scope_hash'] == before
++        assert load_config_readonly()['memory']['write_approval'] is True
++
++
++def test_host_idle_limits_native_idle_and_turn_flush_does_not_curate(tmp_path):
++    from agent.learning_api import LearningFacade
++    api = LearningFacade(tmp_path, 'idle-fixture')
++    calls = []
++    api._service.runtime.maintenance = lambda idle: calls.append(idle) or {'curator': None}
++    try:
++        handle = api.open({'host': 'fixture', 'project': str(tmp_path), 'chat': 'chat'})['handle']
++        with api._service.db:
++            api._service.db.execute('UPDATE scopes SET activity=activity-10000 WHERE id=?', (handle,))
++        api.maintenance(host_idle_seconds=3)
++        assert calls == [3]
++        api.maintenance(handle=handle, idle_flush=True)
++        assert calls == [3]
++        for invalid in (-1, True, float('nan'), float('inf')):
++            with pytest.raises(ValueError):
++                api.maintenance(host_idle_seconds=invalid)
++    finally:
++        api.close()
++
 diff --git a/tests/agent/test_learning_native_loop.py b/tests/agent/test_learning_native_loop.py
 new file mode 100644
 index 00000000..ea852080

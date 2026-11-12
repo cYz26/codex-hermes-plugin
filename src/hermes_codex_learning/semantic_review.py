@@ -9,9 +9,15 @@ from .knowledge import memory_entries
 from .store import Store, redact
 from .workflow import EXECUTOR
 
-PROMPT = """Review only the admitted execution evidence. Do not execute the user's task.
+BASE_PROMPT = """Review only the admitted execution evidence. Do not execute the user's task.
 Preserve uncertainty and distinguish execution completion from verified correctness.
-Use native memory to add concise project facts, and skill_manage to create or revise
+Only the context and skill names supplied below are available. Do not infer hidden context.
+"""
+MEMORY_PROMPT = """Use native memory to add concise project facts.
+Memory revisions can remain pending for human review. Do not resubmit an identical
+pending revision; continue with other supported findings instead.
+"""
+SKILLS_PROMPT = """Use skill_manage to create or revise
 learned-<topic> skills with applicability, prerequisites, limitations and verification.
 General procedures may declare learning_scope: global_candidate; private project facts
 remain project-specific. Scripts are candidates until independent isolated verification.
@@ -19,10 +25,17 @@ Use skill_view before revising a skill; patch supports old_string/new_string or 
 content. Write resources using write_file with relative paths. Do not set a category.
 skill_manage accepts a single operation or an operations-only array of 1–5 operations;
 each operation must include its own action and name.
-Only the memory and skill names supplied below are available. Do not infer hidden context.
-Memory revisions can remain pending for human review. Do not resubmit an identical
-pending revision; continue with other supported findings instead.
 """
+
+
+def review_prompt(*, review_memory=True, review_skills=True):
+    return (BASE_PROMPT + (MEMORY_PROMPT if review_memory else
+            "Project memory supplied below is read-only context. Do not call memory.\n")
+            + (SKILLS_PROMPT if review_skills else
+            "Skills may be read with skill_view; this review has no skill writes.\n"))
+
+
+PROMPT = review_prompt()
 
 
 def _denied(message, *, position=None, reason=None):
@@ -225,7 +238,7 @@ class SemanticGuard:
         return not path.is_absolute() and ".." not in path.parts and path.suffix in {".py",".sh",".md",".txt",".json",".csv"}
 
     @contextmanager
-    def scope(self, handle):
+    def scope(self, handle, *, review_memory=True, review_skills=True):
         context = self.api.read(kind="context")
         store = Store(self.settings.state)
         try:
@@ -274,25 +287,34 @@ class SemanticGuard:
                        (enterprise_review and publications[name]["check"].get("boundary_id")==approved["id"]))}
         if public_review or enterprise_review:
             owned |= {name for name in shared if name.startswith("learned-")}
-        scope = {"owned":owned, "readable":owned | shared, "existing":set(versions), "memory":entries}
+        scope = {"owned":owned, "readable":owned | shared, "existing":set(versions), "memory":entries,
+                 "review_memory":review_memory, "review_skills":review_skills}
         from .approvals import change_fingerprint
         scope["pending"] = {change_fingerprint(item["operations"]): item["duplicate_of"] or item["id"]
                             for item in pending if item["state"] in {"pending", "duplicate"}}
         self.active[handle] = scope
         try:
             audience = "\nThis review is for the approved enterprise deployment. Generic skills may be reused inside this enterprise library; they are not public material. Never retain credentials, raw chat logs or unrelated personal details.\n" if enterprise_review else ""
-            yield PROMPT + audience + "\nProject memory:\n" + "\n".join(entries) + "\nAvailable skills: " + ", ".join(sorted(scope["readable"])), entries
+            yield review_prompt(review_memory=review_memory, review_skills=review_skills) + audience + "\nProject memory:\n" + "\n".join(entries) + "\nAvailable skills: " + ", ".join(sorted(scope["readable"])), entries
         finally:
             self.active.pop(handle, None)
 
 
-def restrict(agent, prompt, entries):
+def restrict(agent, prompt, entries, *, review_memory=True, review_skills=True):
     agent._memory_manager = None
-    if agent._memory_store is not None and not isinstance(agent._memory_store, ScopedMemory):
+    if not review_memory:
+        agent._memory_store = None
+        agent._memory_enabled = False
+    elif agent._memory_store is not None and not isinstance(agent._memory_store, ScopedMemory):
         agent._memory_store = ScopedMemory(agent._memory_store, entries)
     agent._user_profile_enabled = False
-    agent.enabled_toolsets = ["memory", "skills"]
-    agent.tools = [tool for tool in (agent.tools or []) if tool.get("function", {}).get("name") in {"memory", "skill_manage", "skill_view"}]
+    agent.enabled_toolsets = (["memory"] if review_memory else []) + ["skills"]
+    allowed = {"skill_view"}
+    if review_memory:
+        allowed.add("memory")
+    if review_skills:
+        allowed.add("skill_manage")
+    agent.tools = [tool for tool in (agent.tools or []) if tool.get("function", {}).get("name") in allowed]
     agent.valid_tool_names = {tool["function"]["name"] for tool in agent.tools}
     agent._cached_system_prompt = prompt
     agent._build_system_prompt = lambda *args, **kwargs: prompt
@@ -330,16 +352,18 @@ def install_semantic_policy(api, settings, ctx):
             messages=scrub(messages)
         from agent import background_review
         fork_original = background_review.build_cache_parity_fork
-        with guard.scope(handle) as (prompt, entries):
-            guard.active[handle].update(review_memory=intent["memory"], review_skills=intent["skills"])
+        selected = {"review_memory":intent["memory"], "review_skills":intent["skills"]}
+        with guard.scope(handle, **selected) as (prompt, entries):
             parent = agent(handle, source)
             if isinstance(parent._memory_store, ScopedMemory):
                 parent._memory_store = parent._memory_store._native
+            # Keep the cached parent eligible for future native memory/skill nudges.
+            # The detached review fork advertises only this intent's selected writes.
             restrict(parent, prompt, entries)
             def fork(parent, *args, **kwargs):
                 result = fork_original(parent, *args, **kwargs)
                 if parent.session_id == handle:
-                    restrict(result[0], prompt, entries)
+                    restrict(result[0], prompt, entries, **selected)
                 return result
             background_review.build_cache_parity_fork = fork
             try:

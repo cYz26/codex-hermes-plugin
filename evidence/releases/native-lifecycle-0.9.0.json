@@ -1,0 +1,121 @@
+{
+  "version": "0.9.0",
+  "recorded_at": "2026-11-11T13:52:18.433676+00:00",
+  "requirement": "Complete reuse of native Hermes self-evolution, with Codex lifecycle/publication integration.",
+  "build": {
+    "version": "0.9.0",
+    "digest": "73c18066a86ed773fec0b8c06ccca9cf54a9d87cc12a99d9bd11b3a19271831d"
+  },
+  "native": {
+    "tag": "v0.23.0",
+    "commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "candidate": "v0.23.0-6386031505b5",
+    "scope": "Native learning and Curator implementation retained; external host adapter extended."
+  },
+  "verification": {
+    "native_tests_passed": 354,
+    "bridge_tests_passed": 309,
+    "site_tests_passed": 662,
+    "candidate_gates": [
+      "git-init",
+      "fetch",
+      "checkout",
+      "patch-check",
+      "patch",
+      "native-contracts",
+      "site-clone",
+      "site-checkout",
+      "site-patch",
+      "site-contracts",
+      "bridge-contracts",
+      "runtime-smoke"
+    ],
+    "runtime_smoke": "passed",
+    "native_curator_integration": "scripted decision, real native tools/ledger/backup/restore",
+    "real_provider_curator_quality_verified": false,
+    "actual_App_end_to_end_verified": false,
+    "live_service_scoped_read": true,
+    "live_service_skill_hash_verified": true
+  },
+  "deployment": {
+    "service_ready": true,
+    "runtime_build": {
+      "digest": "73c18066a86ed773fec0b8c06ccca9cf54a9d87cc12a99d9bd11b3a19271831d",
+      "version": "0.9.0"
+    },
+    "activation_state": "committed",
+    "activation_id": "6eaf0d69aa754f49ab7dca128887203d",
+    "site_publication": "complete",
+    "curator_configuration": {
+      "consolidate": true,
+      "enabled": true,
+      "previous": {
+        "consolidate": false,
+        "enabled": true
+      },
+      "state": "applied"
+    },
+    "curator": {
+      "enabled": true,
+      "consolidate": true,
+      "interval_hours": 168,
+      "min_idle_hours": 2.0,
+      "paused": false,
+      "run_count": 0
+    },
+    "enterprise_policy": "ready",
+    "hook_trust_ready": false,
+    "hook_trust_states": [
+      "modified",
+      "modified",
+      "modified",
+      "modified",
+      "modified",
+      "modified",
+      "modified"
+    ]
+  },
+  "artifact_retention_preview": {
+    "dry_run": true,
+    "eligible": 0,
+    "removed": 0,
+    "protected": 77
+  },
+  "followup_verifications": [
+    {
+      "recorded_at": "2026-11-12T03:12:03+00:00",
+      "state": "deployment_and_hook_trust_verified",
+      "user_confirmed_hook_trust": true,
+      "hook_trust_ready": true,
+      "hook_trust_count": 7,
+      "hook_trust_states": [
+        "trusted",
+        "trusted",
+        "trusted",
+        "trusted",
+        "trusted",
+        "trusted",
+        "trusted"
+      ],
+      "hook_verification_scope": "Independent Codex app-server hooks/list for this workspace; no trust records modified by the agent and no hooks executed by the diagnostic.",
+      "runtime_build": {
+        "version": "0.9.0",
+        "digest": "73c18066a86ed773fec0b8c06ccca9cf54a9d87cc12a99d9bd11b3a19271831d"
+      },
+      "service_ready": true,
+      "service_state": "idle",
+      "current_service_error": null,
+      "enterprise_policy": "ready",
+      "native_lifecycle_state": "ready",
+      "curator": {
+        "enabled": true,
+        "consolidate": true,
+        "paused": false,
+        "interval_hours": 168,
+        "min_idle_hours": 2,
+        "run_count": 0
+      }
+    }
+  ],
+  "remaining": "Hook trust confirmation is complete. Production Curator execution and learning quality remain to be observed; actual App end-to-end acceptance is not inferred from hook trust."
+}

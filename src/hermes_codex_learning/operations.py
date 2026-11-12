@@ -11,6 +11,9 @@ from .store import Store, atomic_json, digest
 
 
 def add_parsers(commands):
+    curator = commands.add_parser('curator-config', help='Preview or enable native Curator consolidation')
+    curator.add_argument('--settings')
+    curator.add_argument('--apply', action='store_true')
     retry = commands.add_parser("review-retry", help="Preview or request a bounded retry of a discovered review attempt")
     retry.add_argument("--settings")
     retry.add_argument("--attempt", required=True)
@@ -52,6 +55,9 @@ def add_parsers(commands):
 
 
 def execute(args):
+    if args.command == 'curator-config':
+        from .ipc import request
+        return request(Settings.load(args.settings), 'configure_curator', {'dry_run': not args.apply}, timeout=5)
     if args.command == "review-retry":
         from .ipc import request
         return request(Settings.load(args.settings), "review_retry",

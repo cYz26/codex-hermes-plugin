@@ -3,31 +3,33 @@
   "tag": "v0.23.0",
   "base_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
   "patch_file": "native-learning-api-v1.patch",
-  "patch_sha256": "9abca6a0bcca3fcdb947c58e3ffe7b8e9206f6adc136836ff1588ee22b672cfa",
+  "patch_sha256": "f8709cae0305497285a07a0f100d097e08394a0076073644fcbcd4fc0fa361a8",
   "replay_matches_working_source": true,
   "files": {
     "agent/background_review.py": "611f892375f747ad159938310051ef59ddbb6c86a786b9da8433ed876eaa3b95",
     "agent/codex_runtime.py": "3fc26a08e43138012b3750458b6dcf652070bcd1bc95d129790bd4826af8a051",
-    "agent/learning_api.py": "cd9116605c809a08fa22f1f56fa5b79f3ad2be307203c32aad959b87437e7023",
-    "agent/learning_artifacts.py": "93bcfd8b690f597bf240e59796282aa9903181f0a4009790a8f57c381750a5e6",
+    "agent/learning_api.py": "17c1f20286780c28c887cf210422f6d1c99278714a86debc998e1e5233cd918c",
+    "agent/learning_artifacts.py": "b7d6d3a95fa4310fadb78bd45dfb58e89b08d27d651678c52f437d25f4ac51f7",
     "agent/learning_policy.py": "261d9e0ea1d5e09dc36687b931f8a8982fd95a911c5d32c11a7d674c8d6e67be",
     "agent/learning_results.py": "ad4443d06b67ae0b89123c7f60ebdc6d1f4c89e8b50e1c198e4178be9d907d03",
-    "agent/learning_runtime.py": "550e47e7930df51b0922916fbe294bef0f942888ae587b992e0c01bc62ab839a",
-    "agent/learning_service.py": "3b3433be808ef6faad93bd960ec9b76282326b4386e23ac12296c4e67b2b8141",
+    "agent/learning_runtime.py": "bc278e3b4fd387ce0871abd98a27abbd71438fe1f596ebcce319e3d4d57241bc",
+    "agent/learning_service.py": "c1045e679f5739e19cc1c909d989ce96959ade924f8f2b84c11231a4e0a025d5",
     "hermes_cli/plugin_isolation.py": "d58a128c34834185bb9903a85bcd33754867ac63084fe0f37329b8907a57c35b",
     "hermes_cli/plugins_capability_ctx.py": "aef315e73dd95d8887808e428856a148e91ad38732bf5c96db6a81f774dad86e",
     "tests/agent/test_learning_cloud_contracts.py": "666b7e48bcef66318a10723d32a0efbc889344eeb09b7bf6f974b7f0a990c7bd",
     "tests/agent/test_learning_native_loop.py": "0532508a72e212c2faff776d609caebfd12acc8dc460a0c5a9340e7f4ff589e8",
     "tests/agent/test_learning_service.py": "cc0f133d9cece322da9f242245f89a235db329ae731724cd99dc22740c2114e6",
     "tests/hermes_cli/test_learning_profile_auth.py": "fc9af1e77755047303d0805f7c6ef751e529740a4226cfbc712618b34995ce6e",
-    "tests/hermes_cli/test_plugin_learning_api.py": "9a04aee873b35384e9bd7ee3e7b6073c14af195767f099db3b936bdd2202aed0"
+    "tests/hermes_cli/test_plugin_learning_api.py": "9a04aee873b35384e9bd7ee3e7b6073c14af195767f099db3b936bdd2202aed0",
+    "agent/learning_maintenance.py": "0a2ade7b4b5d55d1771fa2aea8022c8bff77329bb4f6eb19a4045ba490bee41a",
+    "tests/agent/test_learning_lifecycle.py": "0103ca217be213e70a9168dab0913fc22c30ada13c15faf9b9d5444a87880c21"
   },
   "previous_custom_inputs": [],
   "source_committed": false,
   "mechanism_review": {
     "classification": "adapted",
-    "reason": "Integrate the user-requested explicit learning API and bounded automatic review recovery. Explicit request snapshots, focus, attended writes and cancellation remain bound to their requests and are excluded from automatic retries. Schema 2 preserves existing receipts and prevents recovery-unaware owners from executing successor intents.",
-    "agreed_plan": "docs/REVIEW-RETRIES.zh-CN.md",
+    "reason": "Reuse native Curator policies and tools through synchronous maintenance, expose native ledger lineage and graph metadata, and add reference-aware retention for external delivery artifacts. Native memory approvals, review prompts, ledger storage and archive/restore semantics remain owned by Hermes.",
+    "agreed_plan": "docs/NATIVE-LIFECYCLE.zh-CN.md",
     "approved_on": "2026-11-11",
     "source_tree": "89c3e51d6579e5bbab5fb45ba84f10e35d39799c"
   },
@@ -40,6 +42,7 @@
     }
   },
   "additional_native_tests": [
-    "tests/agent/test_learning_cloud_contracts.py"
+    "tests/agent/test_learning_cloud_contracts.py",
+    "tests/agent/test_learning_lifecycle.py"
   ]
 }

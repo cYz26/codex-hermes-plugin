@@ -206,6 +206,15 @@ def main():
                           material_learning_completed=learned["state"]=="completed",
                           reference_index_verified=learned.get("reference_check",{}).get("passed",False),
                           three_batches_completed=len(learned["results"])==3)
+            if not args.live_settings:
+                material_requests = requests[summary_review_requests:]
+                result["material_scope_matches_tool_schema"] = bool(material_requests) and all(
+                    {tool.get("function", {}).get("name") for tool in request.get("tools", [])}
+                    == {"skill_manage", "skill_view"} for request in material_requests)
+                result["material_scope_excludes_memory_write_prompt"] = all(
+                    "Use native memory to add" not in str(message.get("content", ""))
+                    for request in material_requests for message in request.get("messages", [])
+                    if message.get("role") == "system")
             if learned["state"] != "completed":
                 (args.workspace/"request-result.json").write_text(json.dumps(learned,ensure_ascii=False,indent=2))
                 outcomes = [m for request in requests for m in request.get("messages",[]) if m.get("role") == "tool"]

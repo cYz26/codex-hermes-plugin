@@ -1,6 +1,6 @@
 # 文档索引
 
-主分支的外围版本为 **0.8.0**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
+主分支的外围版本为 **0.9.0**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
 
 ## 平台入口
 
@@ -18,6 +18,8 @@
 | --- | --- |
 | [工程入口](../README.md) | 两种场景、配置和离线检查 |
 | [自进化实现整理](./SELF-EVOLUTION.zh-CN.md) | 执行与学习闭环、资料准入、项目归属、发布和恢复 |
+| [原生学习与维护](./NATIVE-LIFECYCLE.zh-CN.md) | 完整复用原生能力、Curator 来源与发布衔接、快照留存及验证 |
+| [自进化定期审查方案](./SELF-EVOLUTION-REVIEW-PLAN.zh-CN.md) | 前两周每日审查、每周机制 review、产物质量标准与落地步骤（方案） |
 | [待审记忆处理与验证](./PENDING-REVIEWS.zh-CN.md) | 项目范围内的差异、批准／丢弃、重复清理及 Mac 验收入口 |
 | [复盘恢复与重试](./REVIEW-RETRIES.zh-CN.md) | 自动复盘冷却、失败回执保留、手动提前与 schema 2 回退边界 |
 | [主动复盘与资料学习](./ACTIVE-LEARNING.zh-CN.md) | 显式请求、资料分批学习、查询与恢复 |

@@ -66,10 +66,13 @@ def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe"
     return {"allowed": False, "reason": "assessment_not_approved"}
 
 
-def sharing_check(value: dict, origins: list[str], private_markers: list[str], *, executable_candidate=False, enterprise=False) -> dict:
+def sharing_check(value: dict, origins: list[str], private_markers: list[str], *, executable_candidate=False,
+                  enterprise=False, native_candidate=False) -> dict:
     content = value.get("content") or ""
     front = content.split("---", 2)
-    if len(front) < 3 or not re.search(r"(?m)^learning_scope:\s*global_candidate\s*$", front[1]):
+    declared = len(front) >= 3 and re.search(r"(?m)^learning_scope:\s*global_candidate\s*$", front[1])
+    inherited = native_candidate and len(front) >= 3 and not re.search(r'(?m)^\s*learning_scope\s*:', front[1])
+    if not declared and not inherited:
         return {"allowed": False, "reason": "project_experience"}
     if not origins:
         return {"allowed": False, "reason": "unknown_source"}
@@ -111,7 +114,7 @@ def sharing_check(value: dict, origins: list[str], private_markers: list[str], *
     forbidden = r"/(?:Users|home|data00|etc)/" if enterprise else r"https?://[^\s/]*(?:bytedance|larkoffice|feishu|\.internal|\.corp)|/(?:Users|home|data00|etc)/"
     if re.search(forbidden, combined, re.I):
         return {"allowed": False, "reason": "internal_address_or_absolute_path"}
-    return {"allowed": True, "basis": "explicit_generic_candidate_and_resource_checks",
+    return {"allowed": True, "basis": "native_curator_candidate_and_resource_checks" if inherited else "explicit_generic_candidate_and_resource_checks",
             "version": value["version"], "manifest_hash": digest(files)}
 
 

@@ -86,7 +86,7 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
             selected.setdefault(target, []).append(entry)
     memories = {key: ENTRY_DELIMITER.join(entries) for key, entries in selected.items()}
     terms = _tokens(query[:4000])
-    catalog, ranked = [], []
+    catalog, ranked, eligible = [], [], []
     for skill in context.get("skills", []):
         required=context.get("enterprise_skill_boundaries",{}).get(skill["name"])
         known_publication=context.get("publications",{}).get(skill["name"],{})
@@ -112,13 +112,17 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
             publication=context.get("publications",{}).get(skill["name"],{})
             if required or publication.get("audience")=="enterprise":
                 item.update(audience="enterprise",boundary_id=required or publication.get("boundary_id"))
-        # Cross-project learned skills require a relevant query, or an explicit skill_load.
-        if not origins or project in origins or score:
+        eligible.append((item, origins, score))
+    # Native related_skills links are hints, never permission to cross a scope.
+    matched = {item['name'] for item, _, score in eligible if score}
+    for item, origins, score in eligible:
+        related = bool(set(item.get('related_skills', [])) & matched)
+        if not origins or project in origins or score or related:
             catalog.append(item)
-        if project in origins or score:
-            ranked.append((score + (2 if project in origins else 0), item))
-    ranked.sort(key=lambda pair: (-pair[0], pair[1]["name"]))
-    recommended = [item["name"] for _, item in ranked[:5]]
+        if score or related or (not terms and project in origins):
+            ranked.append((bool(score), score + (2 if project in origins else 0), item))
+    ranked.sort(key=lambda row: (-int(row[0]), -row[1], row[2]['name']))
+    recommended = [item['name'] for _, _, item in ranked[:5]]
     summary = "\n".join(memories.values())[:340]
     if recommended:
         summary += "\n相关技能：" + "、".join(recommended)
