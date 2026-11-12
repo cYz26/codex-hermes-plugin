@@ -19,6 +19,16 @@ class NativeScopedContractTests(unittest.TestCase):
             self.assertTrue(json.loads(result.stdout.strip().splitlines()[-1])['passed'])
 
     @unittest.skipUnless(os.environ.get("HERMES_LEARNING_NATIVE_SOURCE"), "Runs in the verified native candidate gate")
+    def test_automatic_feedback_learning_sidechat_and_routed_budget_contracts(self):
+        root=Path(__file__).resolve().parents[1]
+        for flags in ([],['--sidechat'],['--routed']):
+            with self.subTest(flags=flags),tempfile.TemporaryDirectory() as temporary:
+                result=subprocess.run([sys.executable,'-I','-B',str(root/'probes/feedback_learning.py'),
+                    '--source',os.environ['HERMES_LEARNING_NATIVE_SOURCE'],'--workspace',str(Path(temporary)/'feedback'),*flags],
+                    capture_output=True,text=True,timeout=180)
+                self.assertEqual(result.returncode,0,result.stdout[-5000:]+result.stderr[-2500:])
+                self.assertTrue(json.loads(result.stdout.strip().splitlines()[-1])['passed'])
+    @unittest.skipUnless(os.environ.get("HERMES_LEARNING_NATIVE_SOURCE"), "Runs in the verified native candidate gate")
     def test_explicit_refine_and_material_batches_use_native_writes_and_publication(self):
         root=Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:

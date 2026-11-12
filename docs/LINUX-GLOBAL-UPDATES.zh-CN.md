@@ -1,4 +1,4 @@
-# Linux／SSH 全局学习与更新（0.8.0）
+# Linux／SSH 全局学习与更新（0.10.0）
 
 主分支的 Linux 方案提供独立原生学习实例、systemd 用户服务、固定流程采集、检查后的共享、候选适配和 SSH 桌面通知。Codex 执行任务，Hermes 串行学习；通用实现与状态语义见 [实现整理](./SELF-EVOLUTION.zh-CN.md)。
 

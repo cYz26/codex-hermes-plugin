@@ -2,6 +2,7 @@ name: Learning validation
 on:
   push:
     branches: ["main", "codex/cloud-*"]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -35,6 +36,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/checkout@v4
         with:
           repository: NousResearch/hermes-agent
@@ -53,3 +57,35 @@ jobs:
         env:
           HERMES_TEST_PYTHON: ${{ runner.temp }}/hermes-tests/bin/python
         run: python3 -B scripts/verify_native.py --source upstream --python "$HERMES_TEST_PYTHON" --output "$RUNNER_TEMP/native-check.json"
+  release:
+    needs: [bridge, native]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish the validated tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HERMES_RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          from pathlib import Path
+          tag = os.environ['HERMES_RELEASE_TAG']
+          version = json.loads(Path('.codex-plugin/plugin.json').read_text())['version']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+', tag) or tag != 'v' + version:
+              raise SystemExit('Release tag differs from the validated package version')
+          if not Path('docs', f'RELEASE-{version}.zh-CN.md').is_file():
+              raise SystemExit('Version-specific release notes are required')
+          PY
+          if gh release view "$HERMES_RELEASE_TAG" >/dev/null 2>&1; then
+            exit 0
+          fi
+          gh release create "$HERMES_RELEASE_TAG" --verify-tag \
+            --title "Hermes Learning $HERMES_RELEASE_TAG" \
+            --notes-file "docs/RELEASE-${HERMES_RELEASE_TAG#v}.zh-CN.md"

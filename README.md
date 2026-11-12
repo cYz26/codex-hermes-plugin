@@ -1,10 +1,14 @@
 # Hermes Learning for Codex
 
-主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.9.0**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0** 和 **v0.23.1**。
+主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.10.0**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0** 和 **v0.23.1**。
 
 Codex 执行任务，独立 Hermes 从获准的执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。安装插件和启动学习服务应在实际执行 Codex 任务的宿主完成。
 
+0.10.0 将[自动反馈学习](./docs/AUTOMATIC-FEEDBACK-LEARNING.zh-CN.md)与原生学习维护接在同一流程：跨轮证据、保真裁剪、sidechat 父上下文、技能相关性与归类，以及按聊天／回合查询的分阶段进度。复盘的实际工具和提示说明遵守所选学习范围。验证与升级记录见 [0.10.0 发布说明](./docs/RELEASE-0.10.0.zh-CN.md)。
+
 0.9.0 补齐[原生学习与维护](./docs/NATIVE-LIFECYCLE.zh-CN.md)：Curator 合并后的来源继承、发布与旧名称转发、归档恢复，以及交付快照留存。复用官方整理提示、工具、账本和备份，不建立第二个学习引擎。0.8.0 引入的[待审记忆](./docs/PENDING-REVIEWS.zh-CN.md)和[复盘恢复](./docs/REVIEW-RETRIES.zh-CN.md)继续保留。
+
+0.8.0 整合通知复盘简述、真实状态摘要和拒绝操作明细，以及[待审记忆的差异查看与明确审批](./docs/PENDING-REVIEWS.zh-CN.md)；合法单条与批量调用使用相同范围检查；自动复盘失败默认按 5／10／20 分钟冷却，最多重试三次，见 [复盘恢复](./docs/REVIEW-RETRIES.zh-CN.md)。通知简述复用同一次复盘的最终回复，修改明细保留在后面。
 
 0.7.0 增加[主动复盘与资料学习](./docs/ACTIVE-LEARNING.zh-CN.md)：支持用户显式请求、指定学习重点、按资料分批提炼技能，以及按请求查询实际结果。
 

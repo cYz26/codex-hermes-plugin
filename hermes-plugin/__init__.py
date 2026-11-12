@@ -40,7 +40,7 @@ def register(ctx):
                 workflow_registration = install_workflow_policy(api, settings, ctx)
                 from hermes_codex_learning.semantic_review import install_semantic_policy
                 semantic_registration = install_semantic_policy(api, settings, ctx)
-                install_review_policy(api)
+                install_review_policy(api, settings)
             except Exception:
                 api.close()
                 raise

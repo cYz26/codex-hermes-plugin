@@ -67,6 +67,12 @@ def _tokens(text: str) -> set[str]:
         {"修复","fix","repair"}, {"错误","失败","error","failure","failed"},
         {"部署","deploy","deployment"}, {"安装","install","installation"},
         {"表头","header","headers"}, {"规范化","normalize","normalization"},
+        {"研究","调研","research","investigation"},
+        {"资料","文档","来源","source","sources","document","documents","documentation"},
+        {"方案","选型","alternative","alternatives","option","options"},
+        {"内部","企业","internal","enterprise"}, {"外部","公开","external","public"},
+        {"能力","capability","capabilities"}, {"比较","对比","compare","comparison","comparative"},
+        {"技术","technical","technology"},
     ):
         if terms & aliases or any(word in text for word in aliases if not word.isascii()):
             terms.update(word for word in aliases if word.isascii())

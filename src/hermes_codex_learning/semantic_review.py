@@ -25,14 +25,35 @@ Use skill_view before revising a skill; patch supports old_string/new_string or 
 content. Write resources using write_file with relative paths. Do not set a category.
 skill_manage accepts a single operation or an operations-only array of 1–5 operations;
 each operation must include its own action and name.
+Select a related existing skill by applicability, read it, then revise the supported
+step or caution. If none fits, create a new learned-<topic> candidate. Do not append
+an unrelated workflow to a skill just because it is published or writable.
+"""
+EVIDENCE_PROMPT = """
+Learn the change in method, not just the task topic: connect the initial goal,
+earlier approach, user addition/correction, and subsequent result using the evidence refs.
+Natural additions can reveal an improved workflow without a request to "remember".
+Keep project facts in project memory; reusable procedures belong in appropriately
+scoped skills. Stable preferences require user evidence and keep their stated scope.
+For a stable preference, quote the user's words establishing that ongoing scope.
+Every write operation must include evidence: {classification: project_fact|procedure|
+stable_preference, basis: [{ref: evidence_ref, quote: verbatim source excerpt}],
+rationale: explanation of the supported lesson and this target's relevance}.
+Use an own-task quote; parent excerpts provide context only. For a procedure also
+cite a result. Quotes must be 8–600 characters; rationale must be 24–2000 characters.
+For explicitly admitted material learning, a material ref can support a procedure
+directly; reading material never proves that its procedure was executed successfully.
+Limit a general lesson to the demonstrated conditions, explain source/coverage gaps,
+and preserve explicit user constraints. Tool completion is separate from correctness.
 """
 
 
-def review_prompt(*, review_memory=True, review_skills=True):
+def review_prompt(*, review_memory=True, review_skills=True, require_evidence=False):
     return (BASE_PROMPT + (MEMORY_PROMPT if review_memory else
             "Project memory supplied below is read-only context. Do not call memory.\n")
             + (SKILLS_PROMPT if review_skills else
-            "Skills may be read with skill_view; this review has no skill writes.\n"))
+            "Skills may be read with skill_view; this review has no skill writes.\n")
+            + (EVIDENCE_PROMPT if require_evidence else ""))
 
 
 PROMPT = review_prompt()
@@ -131,6 +152,35 @@ class SemanticGuard:
         filtered=scrub(args) if getattr(self.settings,"data_policy",{}).get("mode")==MODE else redact(args)
         if filtered != args:
             return _denied("参数包含受保护信息；请移除凭据或禁止学习的内容。")
+        claims, native_args = [], args
+        if tool_name in {"memory","skill_manage"} and "evidence" in scope:
+            if tool_name == "skill_manage" and "operations" in args and set(args) != {"operations"}:
+                return _denied("技能批量调用只支持 operations；证据放在每项操作内。")
+            if tool_name == "memory" and args.get("target","memory") != "memory":
+                return _denied("后台复盘只能修改项目记忆（target=memory）。")
+            from .review_relevance import check_claim
+            operations = args.get("operations") if "operations" in args else [args]
+            if not isinstance(operations,list) or not 1 <= len(operations) <= 5:
+                return _denied("写入必须包含 1–5 项操作。")
+            clean = []
+            pending_owned=set(scope["owned"])
+            for position, operation in enumerate(operations,1):
+                if not isinstance(operation,dict):
+                    return _denied("操作必须是对象。",position=position)
+                proof = operation.get("evidence")
+                native = {key:value for key,value in operation.items() if key != "evidence"}
+                if tool_name == "memory" and native.get("target","memory") != "memory":
+                    return _denied("后台复盘只能修改项目记忆（target=memory）。",position=position)
+                claim, error = check_claim({**scope,"owned":pending_owned},tool_name,native,proof)
+                if error:
+                    scope["claims"].append({"state":"blocked","tool":tool_name,"name":native.get("name"),"reason":error})
+                    return _denied("本次修改缺少有效的任务证据：" + error + "。请引用已提供的原文，并说明适用关系。",position=position,reason=error)
+                claims.append({"state":"accepted","tool":tool_name,"name":native.get("name"),"action":native.get("action"),**claim})
+                clean.append(native)
+                if native.get("action") == "create" and isinstance(native.get("name"),str):
+                    pending_owned.add(native["name"])
+            native_args = {"operations":clean}
+            args = native_args
         if tool_name == "memory":
             if scope.get("review_memory") is False:
                 return _denied("本次复盘未选择项目记忆写入；请遵守所选学习范围。")
@@ -151,6 +201,9 @@ class SemanticGuard:
             if duplicate:
                 return _denied(f"相同记忆修改已在等待批准：{duplicate}，不再创建重复提案。",
                                reason="review_already_pending")
+            if claims:
+                scope["claims"].extend(claims)
+                return {"action":"modify","args":native_args}
             return None
         if tool_name == "skill_view":
             if set(args) - {"name", "file_path"}:
@@ -162,6 +215,7 @@ class SemanticGuard:
             if path is not None and not self.resource_path(path):
                 return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。",
                                reason="review_resource_path")
+            scope.setdefault("viewed",set()).add(name)
             return None
         if tool_name != "skill_manage":
             return _denied("后台复盘只能使用 memory、skill_view 和 skill_manage；外部工具不可用。")
@@ -185,7 +239,11 @@ class SemanticGuard:
             elif not isinstance(action, str) or action not in {"patch", "edit", "write_file"}:
                 return _denied("技能操作只支持 create、patch、edit 或 write_file。", position=position)
             elif name not in owned:
+                if "evidence" in scope:
+                    scope["claims"].append({"state":"blocked","tool":"skill_manage","name":name,"reason":"learning_target_unrelated"})
                 return _denied("技能不在本次复盘可修改范围内；请只修改已准入的技能。", position=position)
+            elif "evidence" in scope and name in scope["existing"] and name not in scope.get("viewed",set()):
+                return _denied("请先读取相关技能的当前版本，再修订本次证据支持的步骤。",position=position,reason="learning_skill_not_viewed")
             if action == "write_file":
                 if not self.resource_path(op.get("file_path", "")):
                     return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。",
@@ -211,6 +269,9 @@ class SemanticGuard:
                 return _denied("单项写入内容超过 65,536 字符；请缩小每次写入范围。", position=position)
         scope["owned"] = owned
         scope["readable"].update(owned)
+        if claims:
+            scope["claims"].extend(claims)
+            return {"action":"modify","args":native_args}
         return None
 
     @staticmethod
@@ -238,7 +299,7 @@ class SemanticGuard:
         return not path.is_absolute() and ".." not in path.parts and path.suffix in {".py",".sh",".md",".txt",".json",".csv"}
 
     @contextmanager
-    def scope(self, handle, *, review_memory=True, review_skills=True):
+    def scope(self, handle, messages=None, *, review_memory=True, review_skills=True):
         context = self.api.read(kind="context")
         store = Store(self.settings.state)
         try:
@@ -289,18 +350,38 @@ class SemanticGuard:
             owned |= {name for name in shared if name.startswith("learned-")}
         scope = {"owned":owned, "readable":owned | shared, "existing":set(versions), "memory":entries,
                  "review_memory":review_memory, "review_skills":review_skills}
+        candidate_details = {}
+        if messages is not None:
+            from .review_relevance import task_evidence, related_skills
+            evidence, topic = task_evidence(messages)
+            candidate_details = related_skills(context.get("skills",[]),topic,scope["readable"])
+            explicit = next((message.get("learning_context",{}) for message in messages if message.get("review_manifest")),{})
+            if explicit.get("mode") == "learn" and explicit.get("basis") == "admitted_explicit_material_request":
+                target = explicit.get("target")
+                if target in scope["readable"]:
+                    candidate_details[target] = ["admitted_explicit_target"]
+                from .review_relevance import concepts
+                topic.update(concepts(str(target).replace("-"," ")))
+            scope.update(owned=owned & set(candidate_details), readable=set(candidate_details),
+                         evidence=evidence,topic=topic,target_topics=candidate_details,viewed=set(),claims=[])
         from .approvals import change_fingerprint
         scope["pending"] = {change_fingerprint(item["operations"]): item["duplicate_of"] or item["id"]
                             for item in pending if item["state"] in {"pending", "duplicate"}}
         self.active[handle] = scope
         try:
             audience = "\nThis review is for the approved enterprise deployment. Generic skills may be reused inside this enterprise library; they are not public material. Never retain credentials, raw chat logs or unrelated personal details.\n" if enterprise_review else ""
-            yield review_prompt(review_memory=review_memory, review_skills=review_skills) + audience + "\nProject memory:\n" + "\n".join(entries) + "\nAvailable skills: " + ", ".join(sorted(scope["readable"])), entries
+            from .store import dumps
+            details = [{"name":item["name"],"description":item.get("description",""),
+                        "matching_concepts":candidate_details[item["name"]]}
+                       for item in context.get("skills",[]) if item["name"] in candidate_details]
+            prompt = review_prompt(review_memory=review_memory, review_skills=review_skills,
+                                   require_evidence=messages is not None)
+            yield prompt + audience + "\nProject memory:\n" + "\n".join(entries) + "\nAvailable skills: " + ", ".join(sorted(scope["readable"])) + "\nTask-relevant candidates: " + dumps(details), entries
         finally:
             self.active.pop(handle, None)
 
 
-def restrict(agent, prompt, entries, *, review_memory=True, review_skills=True):
+def restrict(agent, prompt, entries, *, require_evidence=False, review_memory=True, review_skills=True):
     agent._memory_manager = None
     if not review_memory:
         agent._memory_store = None
@@ -315,6 +396,9 @@ def restrict(agent, prompt, entries, *, review_memory=True, review_skills=True):
     if review_skills:
         allowed.add("skill_manage")
     agent.tools = [tool for tool in (agent.tools or []) if tool.get("function", {}).get("name") in allowed]
+    if require_evidence:
+        from .review_relevance import evidence_tools
+        agent.tools = evidence_tools(agent.tools)
     agent.valid_tool_names = {tool["function"]["name"] for tool in agent.tools}
     agent._cached_system_prompt = prompt
     agent._build_system_prompt = lambda *args, **kwargs: prompt
@@ -353,22 +437,34 @@ def install_semantic_policy(api, settings, ctx):
         from agent import background_review
         fork_original = background_review.build_cache_parity_fork
         selected = {"review_memory":intent["memory"], "review_skills":intent["skills"]}
-        with guard.scope(handle, **selected) as (prompt, entries):
+        with guard.scope(handle, messages, **selected) as (prompt, entries):
             parent = agent(handle, source)
             if isinstance(parent._memory_store, ScopedMemory):
                 parent._memory_store = parent._memory_store._native
             # Keep the cached parent eligible for future native memory/skill nudges.
             # The detached review fork advertises only this intent's selected writes.
-            restrict(parent, prompt, entries)
+            restrict(parent, prompt, entries, require_evidence=True)
             def fork(parent, *args, **kwargs):
+                if parent.session_id == handle and kwargs.get("conversation_history") is not None:
+                    # A routed native fork may digest again. Claims may cite only
+                    # the evidence that this fork actually receives.
+                    from .review_relevance import task_evidence
+                    delivered, _ = task_evidence(kwargs["conversation_history"])
+                    guard.active[handle]["evidence"] = delivered
                 result = fork_original(parent, *args, **kwargs)
                 if parent.session_id == handle:
-                    restrict(result[0], prompt, entries, **selected)
+                    restrict(result[0], prompt, entries, require_evidence=True, **selected)
                 return result
             background_review.build_cache_parity_fork = fork
             try:
-                return original_review(handle, source, messages, intent)
+                result = original_review(handle, source, messages, intent)
+                return {**result,"learning_candidates":guard.active[handle]["claims"]}
             finally:
                 background_review.build_cache_parity_fork = fork_original
+                store = Store(settings.state)
+                try:
+                    store.set("review-candidates:" + str(intent.get("id",handle)),guard.active[handle]["claims"])
+                finally:
+                    store.close()
     runtime.agent, runtime.review = agent, review
     return registration

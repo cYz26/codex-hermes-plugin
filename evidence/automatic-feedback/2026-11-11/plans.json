@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "scope": "Actual provider structured output in a controlled planning experiment; source types were planned, not queried.",
+  "task": "Compare workflow orchestration technologies for enterprise services.",
+  "existing_plan": "Consult public documentation and rank publicly documented alternatives.",
+  "cases": {
+    "baseline": {
+      "output": {
+        "sources": [
+          {
+            "kind": "public",
+            "planned": true,
+            "detail": "Consult public documentation for workflow orchestration technologies, compare enterprise-service capabilities, and rank publicly documented alternatives."
+          }
+        ],
+        "coverage_gaps": [
+          "Internal documentation and operational data are outside the existing plan, so organization-specific deployment experience will not inform the comparison.",
+          "Additional user or organization-specific requirements are not supplied or planned for collection, limiting how closely rankings can reflect a particular enterprise environment.",
+          "Undocumented capabilities and independently tested performance are not covered by a documentation-only comparison."
+        ],
+        "reason": "No recalled method was supplied, so retain the existing public-documentation plan unchanged. This response describes planned research only; it does not execute research or rank alternatives."
+      },
+      "completed": true,
+      "usage": {
+        "model": "ark:gpt-6-1-sol",
+        "provider": "custom",
+        "input_tokens": 151,
+        "output_tokens": 1206,
+        "cache_read_tokens": 0,
+        "api_calls": 1
+      }
+    },
+    "recalled": {
+      "output": {
+        "sources": [
+          {
+            "kind": "public",
+            "planned": true,
+            "detail": "Retain the existing consultation of public documentation for workflow orchestration alternatives, comparing documented capabilities against a common requirements baseline."
+          },
+          {
+            "kind": "user_requirements",
+            "planned": true,
+            "detail": "Clarify required capabilities, enterprise constraints, ranking priorities, and whether internal reuse is in scope. Apply the same baseline to every candidate."
+          },
+          {
+            "kind": "authorized_internal",
+            "planned": true,
+            "detail": "Conditionally add approved internal service inventories, architecture documentation, or capability summaries to identify reusable orchestration solutions. Consult them only after confirming scope and authorization, then incorporate their evidence before final ranking."
+          }
+        ],
+        "coverage_gaps": [
+          "Detailed requirements have not been supplied, so requirement fit and ranking cannot yet be established.",
+          "Internal scope, availability, and access are unconfirmed. Unauthorized or out-of-scope internal sources are excluded; unavailable internal capabilities remain unknown, not absent. A public-only ranking remains provisional when relevant internal options are unchecked.",
+          "Independent testing is not included in the documentation-based plan. Documented or reported capabilities will not be labeled independently verified."
+        ],
+        "reason": "The recalled candidate workflow changes the public-focused plan by adding requirements clarification and conditional internal-reuse discovery. No explicit public-only restriction was stated. Preserve the public comparison, but allow authorized internal evidence to change the ranking without automatically preferring reuse. This is planning only; no research or validation has been executed."
+      },
+      "completed": true,
+      "usage": {
+        "model": "ark:gpt-6-1-sol",
+        "provider": "custom",
+        "input_tokens": 660,
+        "output_tokens": 2314,
+        "cache_read_tokens": 0,
+        "api_calls": 1
+      }
+    },
+    "public_only": {
+      "output": {
+        "sources": [
+          {
+            "kind": "public",
+            "planned": true,
+            "detail": "Consult public documentation for workflow orchestration alternatives, compare documented capabilities against a common requirements baseline, and rank public candidates."
+          },
+          {
+            "kind": "user_requirements",
+            "planned": true,
+            "detail": "Use the user's enterprise-services scope and public-only constraint as planning inputs. Seek clarification of missing decisive requirements rather than inventing them; candidate evidence remains public-documentation-only."
+          }
+        ],
+        "coverage_gaps": [
+          "Internal systems and nonpublic documentation are excluded by the public-only constraint. No internal queries or internal capability inventory are planned; existing internal capabilities remain unknown, not absent.",
+          "Detailed enterprise-service requirements were not supplied, so requirement-dependent rankings must be qualified until the comparison baseline is sufficiently defined.",
+          "Public documentation supports documented capability claims, not independently verified requirement fit or measured superiority.",
+          "The ranking covers public alternatives only and remains provisional with respect to unexamined internal reuse options."
+        ],
+        "reason": "Retain the existing public-documentation plan. The recalled candidate guidance explicitly honors scope restrictions and adds a shared requirements baseline and coverage qualifications; it does not require internal discovery for this public-only task. This is planning only: no research or system queries are executed."
+      },
+      "completed": true,
+      "usage": {
+        "model": "ark:gpt-6-1-sol",
+        "provider": "custom",
+        "input_tokens": 679,
+        "output_tokens": 1636,
+        "cache_read_tokens": 0,
+        "api_calls": 1
+      }
+    }
+  },
+  "original_provider_record_sha256": "0ed2e6542cbffff96ea91d6a96bf7d052e70e3ef53df28f413646e010e5dc2b1",
+  "actual_app": false,
+  "source_queries_executed": false
+}

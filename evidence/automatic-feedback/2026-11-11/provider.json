@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "scope": "actual provider with synthetic feedback and controlled plan experiment; not App or executed research",
+  "exported_at": "2026-11-11T13:23:39.769594+00:00",
+  "passed": true,
+  "checks": {
+    "native_review_completed": true,
+    "csv_unchanged": true,
+    "published_research_candidate": true,
+    "cross_project_memory_empty": true,
+    "cross_project_recommended": true,
+    "plan_changed_to_include_internal": true,
+    "explicit_public_only_respected": true,
+    "all_plan_calls_completed": true,
+    "source_limits_in_skill": true
+  },
+  "configuration": {
+    "provider": "custom:ark",
+    "model": "ark:gpt-6-1-sol"
+  },
+  "native_reviews": [
+    {
+      "state": "completed",
+      "applied_entities": [
+        "memory:18f8f67e5064a8279cd4ae4ac2c88af96d894f6b8161bbd790c73950a7b14b61",
+        "skill:learned-enterprise-solution-evaluation"
+      ],
+      "usage": {
+        "model": "ark:gpt-6-1-sol",
+        "provider": "custom",
+        "api_calls": 3,
+        "input_tokens": 9,
+        "output_tokens": 5767,
+        "cache_read_tokens": 12199,
+        "cache_write_tokens": 9556,
+        "reasoning_tokens": 4648
+      },
+      "applied_operations": 2,
+      "staged_operations": 0
+    }
+  ],
+  "published_names": [
+    "learned-enterprise-solution-evaluation"
+  ],
+  "synthetic_dialogue": {
+    "GOAL": "Evaluate policy evaluation frameworks for enterprise services and recommend a shortlist.",
+    "BEFORE": "Reviewed public documentation only. Public Framework A ranked first; existing internal capabilities were not examined.",
+    "ADDITION": "Also check the existing internal solutions and compare their capabilities with the public choices.",
+    "AFTER": "The internal shared evaluation service already meets the requirements. Reusing that capability changes the preferred option; public Framework A is now a fallback."
+  },
+  "method": {
+    "path": "learned-method.md",
+    "sha256": "819d8e55f84fc6577b876c8dc5f9566e9e0180801ef7a1d60c8057d277bc7256"
+  },
+  "plans": "plans.json",
+  "original_record_sha256": "0ed2e6542cbffff96ea91d6a96bf7d052e70e3ef53df28f413646e010e5dc2b1",
+  "actual_app": false,
+  "source_queries_executed": false,
+  "production_knowledge_imported": false,
+  "production_activated": false,
+  "limitations": [
+    "Synthetic feedback and controlled plans; no real research or Desktop execution.",
+    "Lexical/citation checks and model-generated prose do not prove operational validity.",
+    "Native usage is not an invoice; cached-token counters can overlap native ledgers."
+  ],
+  "redactions": [
+    "Private learning-home paths, transcript IDs, full progress payloads and live delivery receipts are omitted."
+  ]
+}

@@ -29,6 +29,10 @@ class RetentionTests(unittest.TestCase):
                 store.db.commit()
                 source = {k:data["source"][k] for k in ("host","project","chat")}
                 store.set("chat-handles:"+digest(source), ["handle"])
+                proof = {"review_handle":"handle", "learning_evidence":{"state":"passed",
+                         "claims":[{"basis":[{"ref":"T1.request", "quote":"BODY-TO-EXPIRE"}]}]}}
+                store.set("semantic-skill-attestations", {"active":proof})
+                store.set("archived-skill-origins", {"archived":{"attestation":proof}})
                 api = SimpleNamespace(prune=lambda **kw: {"dry_run":kw["dry_run"]},
                                       read=lambda **kw: {"retired":True})
                 preview = run(settings,store,api,dry_run=True)
@@ -39,5 +43,8 @@ class RetentionTests(unittest.TestCase):
                 self.assertEqual(store.capture(event),event_id)
                 self.assertEqual(store.pending(),[])
                 self.assertNotIn("BODY-TO-EXPIRE",store.db.execute("SELECT payload FROM turns").fetchone()[0])
+                for key in ("semantic-skill-attestations", "archived-skill-origins"):
+                    self.assertNotIn("BODY-TO-EXPIRE", json.dumps(store.get(key)))
+                    self.assertIn("retired_source_quotes", json.dumps(store.get(key)))
             finally:
                 store.close()

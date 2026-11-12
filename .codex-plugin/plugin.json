@@ -1,6 +1,6 @@
 {
   "name": "hermes-learning",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Automatic Hermes native learning from Codex tasks, with visible feedback and learned skills.",
   "skills": "./skills/",
   "hooks": "./hooks/hooks.json",

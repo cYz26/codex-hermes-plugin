@@ -1,6 +1,6 @@
 # 文档索引
 
-主分支的外围版本为 **0.9.0**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
+主分支的外围版本为 **0.10.0**，同时包含本地 macOS 和云端 Linux／SSH 适配。固定原生版本及补丁以 [兼容清单](../patches/compatibility.json) 为准。真实验收记录保留当时的版本和范围。
 
 ## 平台入口
 
@@ -23,6 +23,9 @@
 | [待审记忆处理与验证](./PENDING-REVIEWS.zh-CN.md) | 项目范围内的差异、批准／丢弃、重复清理及 Mac 验收入口 |
 | [复盘恢复与重试](./REVIEW-RETRIES.zh-CN.md) | 自动复盘冷却、失败回执保留、手动提前与 schema 2 回退边界 |
 | [主动复盘与资料学习](./ACTIVE-LEARNING.zh-CN.md) | 显式请求、资料分批学习、查询与恢复 |
+| [0.10.0 发布说明](./RELEASE-0.10.0.zh-CN.md) | 自动反馈与原生维护的集成、验证和升级范围 |
+| [自动反馈学习](./AUTOMATIC-FEEDBACK-LEARNING.zh-CN.md) | 跨轮证据、预算、sidechat、技能相关性与分阶段进度 |
+| [自动反馈学习验证](./AUTOMATIC-FEEDBACK-VALIDATION.zh-CN.md) | 原生合同、真实模型合成实验与实际 Desktop 验收的边界 |
 | [企业专用环境学习](./ENTERPRISE-LEARNING.zh-CN.md) | 企业正文学习、配置绑定与企业内共享 |
 | [全局流程学习](./WORKFLOW-METADATA.zh-CN.md) | 固定流程投影、受限 review 和版本凭证 |
 | [更新流程](./UPDATES.zh-CN.md) | 候选验证、v0.23.1 适配、切换与回退 |

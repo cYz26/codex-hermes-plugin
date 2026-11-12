@@ -198,6 +198,11 @@ def main() -> int:
     service.add_argument("--replace", action="store_true")
     status = commands.add_parser("status")
     status.add_argument("--settings")
+    status.add_argument("--cwd")
+    status.add_argument("--chat")
+    status.add_argument("--turn")
+    status.add_argument("--limit",type=int,default=20)
+    status.add_argument("--after-cursor",type=int,default=0)
     stop = commands.add_parser("stop")
     stop.add_argument("--settings")
     login = commands.add_parser("login")
@@ -333,5 +338,6 @@ def main() -> int:
                               cwd=settings.source, env={**os.environ, **settings.native_environment()}).returncode
     from .ipc import request
     method = "shutdown" if args.command == "stop" else "learning_status"
-    print(json.dumps(request(Settings.load(args.settings), method), ensure_ascii=False, indent=2))
+    params = {key:getattr(args,key) for key in ("cwd","chat","turn","limit","after_cursor") if getattr(args,key,None) is not None} if args.command == "status" else {}
+    print(json.dumps(request(Settings.load(args.settings), method, params), ensure_ascii=False, indent=2))
     return 0

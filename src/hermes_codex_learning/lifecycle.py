@@ -182,6 +182,7 @@ def maintenance(bridge, **kwargs):
                     and published[name].get('check', {}).get('allowed')
                     for name, version in scope['source_versions'].items())
     bridge.store.set('state', 'maintaining')
+    bridge.store.set('loop-progress', {'phase':'maintaining', 'scope':'native_library', 'updated_at':time.time()})
     if bridge.native_capabilities.get('skill_lifecycle'):
         activity = max((row['activity'] for row in bridge.latest_turns()), default=None)
         if activity is not None:

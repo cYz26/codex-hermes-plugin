@@ -12,6 +12,21 @@ from hermes_codex_learning.daemon import Bridge
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_synchronous_native_maintenance_reports_its_worker_phase(self):
+        from hermes_codex_learning.lifecycle import maintenance
+        from hermes_codex_learning.progress import summarize
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            api = SimpleNamespace()
+            bridge = Bridge(Settings(root/'home', root, root, Path('/usr/bin/python3')), api)
+            self.addCleanup(bridge.store.close)
+            bridge.store.set('loop-progress', {'phase':'reviewing', 'updated_at':time.time()})
+            def native(**kwargs):
+                self.assertEqual(summarize(bridge.store)['worker_position']['phase'], 'maintaining')
+                return {'curator':None}
+            api.maintenance = native
+            self.assertEqual(maintenance(bridge), {'curator':None})
+
     def bridge(self, root, events):
         api = SimpleNamespace(read=lambda **kwargs: {
             'events': events, 'cursor': events[-1]['id'] if events else 'baseline',

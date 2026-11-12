@@ -61,6 +61,11 @@ def inspect(path: str | Path | None = None) -> dict:
         if result["build"]["matches"] is False or status.get("state") == "update-paused":
             result["status"] = "degraded"
         result["coverage"] = status.get("coverage", {})
+        progress = status.get("progress")
+        result["learning_progress"] = ({"state":"backlogged" if progress.get("backlog",{}).get("pending_events") else "positions_available",
+            "backlog":progress.get("backlog"),"worker_position":progress.get("worker_position"),
+            "review_queue":progress.get("review_queue"),"semantics":progress.get("semantics")} if progress else
+            {"state":"not_exposed_by_running_build"})
         result["retention"] = status.get("retention")
         # A responding service does not guarantee its last published snapshot is current.
         result["published_at"] = (status.get("snapshot") or {}).get("updated_at")

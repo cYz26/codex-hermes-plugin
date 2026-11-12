@@ -6,10 +6,30 @@ from unittest.mock import patch
 from types import SimpleNamespace
 from pathlib import Path
 
-from hermes_codex_learning.host_evidence import read_turn
+from hermes_codex_learning.host_evidence import read_turn, read_host_relation
 
 
 class HostEvidenceTests(unittest.TestCase):
+    def test_sidechat_relation_comes_from_verified_host_metadata(self):
+        header = {"type":"session_meta", "payload":{"id":"chat","cwd":str(self.project),
+                  "cli_version":"0.167.0","attached_thread":True,"forked_from_id":"parent",
+                  "forked_from_ordinal_exclusive":527,"timestamp":"2026-11-11T07:56:45.848Z",
+                  "history_base":{"thread_id":"parent","end_ordinal_exclusive":527,"end_byte_offset":2658609}}}
+        self.path.write_text(json.dumps(header) + "\n")
+        relation = read_host_relation(self.path,"chat",str(self.project),sessions_root=self.sessions)
+        self.assertEqual(relation["parent_chat"],"parent")
+        self.assertEqual(relation["fork_ordinal_exclusive"],527)
+        self.assertEqual(relation["kind"],"sidechat")
+        header["payload"]["history_base"]["thread_id"] = "unrelated"
+        self.path.write_text(json.dumps(header) + "\n")
+        self.assertEqual(read_host_relation(self.path,"chat",str(self.project),sessions_root=self.sessions)["status"],"unavailable")
+
+    def test_missing_host_relation_does_not_guess_a_parent_from_the_directory(self):
+        self.write([])
+        relation = read_host_relation(self.path,"chat",str(self.project),sessions_root=self.sessions)
+        self.assertEqual(relation["status"],"unavailable")
+        self.assertNotIn("parent_chat",relation)
+
     def test_pending_semantic_turn_recovers_from_verified_noncommand_terminal_items(self):
         from hermes_codex_learning.config import Settings
         from hermes_codex_learning.daemon import Bridge

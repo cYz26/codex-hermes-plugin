@@ -4,6 +4,7 @@ import json
 import os
 import socket
 import sys
+import time
 from pathlib import Path
 
 from .config import Settings
@@ -78,12 +79,20 @@ def hook(payload: dict, settings: Settings) -> dict:
         from .policy import admit
         # Reserved fields are produced by this bridge, never accepted from a hook body.
         payload = {key: value for key, value in payload.items() if not key.startswith('bridge_')}
+        host_context = {}
+        if payload.get("transcript_path") and payload.get("hook_event_name") in {"SessionStart","UserPromptSubmit"}:
+            from .host_evidence import read_host_relation
+            try:
+                host_context["relation"] = read_host_relation(Path(payload["transcript_path"]), payload["session_id"], project)
+            except (OSError, ValueError, TypeError, KeyError):
+                host_context["relation"] = {"status":"unavailable","reason":"host_relation_not_verified"}
+            payload["bridge_host_context"] = host_context
         transient_query = str(payload.get("prompt") or "")[:4000] if payload.get("hook_event_name") == "UserPromptSubmit" else ""
-        technical = {}
+        technical = {"bridge_host_context":host_context} if host_context else {}
         if settings.proactive:
             from .scheduling import annotate
             annotated = annotate(payload, store)
-            technical = {key:val for key,val in annotated.items() if key.startswith("bridge_")}
+            technical.update({key:val for key,val in annotated.items() if key.startswith("bridge_")})
         from .delivery import capture_delivery
         capture_delivery(store, payload, project)
         admission = admit(payload, settings.data_policy, project)
@@ -98,12 +107,21 @@ def hook(payload: dict, settings: Settings) -> dict:
         if not admission["allowed"]:
             if payload.get("session_id") and payload.get("turn_id"):
                 store.set("withheld-turn:" + digest([payload["session_id"], payload["turn_id"]]), admission["reason"])
+                store.set("capture-refusal:"+digest([payload["session_id"],payload["turn_id"]]),{
+                    "project":project,"chat":payload["session_id"],"turn":payload["turn_id"],"at":time.time(),
+                    "state":"withheld","reason":admission["reason"],"body_retained":False})
             gaps = store.get("coverage_gaps", [])
             store.set("coverage_gaps", (gaps + [{"event": payload.get("hook_event_name"),
                       "reason": admission["reason"], "body_retained": False}])[-100:])
             return {}
         payload = {**payload, **technical, "bridge_admission": admission,
                    'bridge_evidence_mode': payload.get('bridge_evidence_mode', 'full')}
+        if payload.get("prompt") and admission.get("body_retained") is not False:
+            from .evidence import selections
+            selected = selections(payload["prompt"])
+            if selected:
+                payload["bridge_host_context"] = {**host_context, "selections":selected,
+                                                   "selection_basis":"admitted_user_prompt"}
         payload = {**payload, "bridge_project": project, "bridge_host": store.get("host_id")}
         store.capture(payload)
         # Wake-up is best-effort; the durable outbox is polled after a restart.
@@ -134,7 +152,11 @@ def hook(payload: dict, settings: Settings) -> dict:
             cache = context_view(cache, project, store.get("recall-query:" + session, ""))
         version = cache.get("version")
         key = f"context-delivered:{session}:{project}" if settings.capture_scope == "global" else f"context-delivered:{session}"
-        if version and (cache.get("summary") or settings.capture_scope == "global") and store.get(key) != version:
+        returning_context = bool(version and (cache.get("summary") or settings.capture_scope == "global") and store.get(key) != version)
+        if event == "UserPromptSubmit" and payload.get("turn_id"):
+            store.set("recall-offer:"+digest([session,payload["turn_id"]]),{"project":project,"at":time.time(),
+                "names":cache.get("recommended_skills",[]),"context_returned":returning_context,"version":version})
+        if returning_context:
             text = model_context(cache.get("summary", ""), project if settings.capture_scope == "global" else None)
             store.set(key, version)
             return {

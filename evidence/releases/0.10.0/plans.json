@@ -1,0 +1,101 @@
+{
+  "scope": "actual provider with synthetic feedback and controlled plan experiment; not App or executed research",
+  "cases": {
+    "baseline": {
+      "output": {
+        "sources": [
+          {
+            "kind": "public",
+            "planned": true,
+            "detail": "Consult public documentation on workflow orchestration technologies and rank publicly documented alternatives for enterprise services."
+          }
+        ],
+        "coverage_gaps": [
+          "Authorized internal documentation and private operational evidence are outside the existing plan.",
+          "Additional organization-specific requirements will not be collected, so the ranking may not reflect particular deployment constraints or priorities.",
+          "Undocumented alternatives are excluded, and public documentation claims will not be independently tested."
+        ],
+        "reason": "No recalled method was supplied, so retain the existing public-documentation plan without expanding its sources. This is planning only; no research or ranking has been executed."
+      },
+      "completed": true,
+      "usage": {
+        "model": "ark:gpt-6-1-sol",
+        "provider": "custom",
+        "input_tokens": 151,
+        "output_tokens": 1483,
+        "cache_read_tokens": 0,
+        "api_calls": 1
+      }
+    },
+    "recalled": {
+      "output": {
+        "sources": [
+          {
+            "kind": "public",
+            "planned": true,
+            "detail": "Retain the existing plan to consult public documentation for workflow-orchestration alternatives and build a public shortlist and fallback."
+          },
+          {
+            "kind": "user_requirements",
+            "planned": true,
+            "detail": "Establish a requirements baseline from the brief and user clarification before ranking. Record unspecified requirements as unknown and compare every candidate against the same baseline."
+          },
+          {
+            "kind": "authorized_internal",
+            "planned": true,
+            "detail": "Review relevant existing internal orchestration services and reuse capabilities using authorized internal documentation or assessments, if available. Record supporting evidence and distinguish reported fit from independently verified fit."
+          }
+        ],
+        "coverage_gaps": [
+          "Unauthorized internal sources are excluded. Unavailable or unexamined internal information remains a coverage gap, not proof that no suitable internal solution exists; a public-only ranking would remain provisional for the broader enterprise decision.",
+          "Detailed enterprise requirements and internal capability evidence have not been supplied.",
+          "Hands-on testing and independent operational validation are outside this documentation-based plan; documented capabilities will not be presented as operationally verified.",
+          "The recalled method's demonstrated coverage is policy evaluation. Its application to workflow orchestration remains a candidate transfer."
+        ],
+        "reason": "Preserve the public-documentation work but expand candidate coverage as the recalled enterprise-shortlisting guidance recommends. The existing plan does not explicitly prohibit internal sources. Compare authorized internal reuse and public alternatives consistently, revise the preference if evidence warrants it, and identify a public fallback without assuming internal reuse wins. This response plans the work only; it does not execute research."
+      },
+      "completed": true,
+      "usage": {
+        "model": "ark:gpt-6-1-sol",
+        "provider": "custom",
+        "input_tokens": 548,
+        "output_tokens": 2291,
+        "cache_read_tokens": 0,
+        "api_calls": 1
+      }
+    },
+    "public_only": {
+      "output": {
+        "sources": [
+          {
+            "kind": "public",
+            "planned": true,
+            "detail": "Consult public documentation for workflow-orchestration technologies. Define candidate coverage, compare documented capabilities against a common requirements baseline, and rank publicly documented alternatives where the evidence supports an ordering. Identify a preferred public option and public fallback if justified."
+          },
+          {
+            "kind": "user_requirements",
+            "planned": true,
+            "detail": "Use the goal and public-only constraint already supplied in the brief. Establish the requirements baseline before ranking and record unspecified requirements as unknown rather than inventing criteria."
+          }
+        ],
+        "coverage_gaps": [
+          "Internal-system queries and nonpublic internal documentation are explicitly excluded. Internal reuse suitability remains unassessed; this is not evidence that no suitable internal capability exists.",
+          "Detailed functional and operational requirements have not been supplied, limiting the conclusiveness of any ranking.",
+          "Public documentation establishes documented or reported capabilities, not independently verified operational fitness. No implementation testing or internal capability audit is planned."
+        ],
+        "reason": "Retain the existing public-documentation-only plan. The recalled method allows internal coverage to be excluded when the brief explicitly restricts it, so it does not justify querying internal systems. Apply its requirements-first comparison, evidence tracking, and coverage-gap disclosure guidance. Any public-only recommendation is conditional on the known requirements and provisional for a broader enterprise decision. This is planning only; no research has been executed."
+      },
+      "completed": true,
+      "usage": {
+        "model": "ark:gpt-6-1-sol",
+        "provider": "custom",
+        "input_tokens": 567,
+        "output_tokens": 2862,
+        "cache_read_tokens": 0,
+        "api_calls": 1
+      }
+    }
+  },
+  "source_queries_executed": false,
+  "actual_app": false
+}

@@ -414,6 +414,60 @@
       "path": "evidence/updates/v0.3.1.json",
       "sha256": "dbeca8cbb38ba59360cb56627092e18670b534cbf384dff05c08e20934795d65",
       "visibility": "repository"
+    },
+    {
+      "original": "Automatic feedback learning checks validation",
+      "path": "evidence/automatic-feedback/2026-11-11/checks.json",
+      "sha256": "b72b68091c64f6c2437a26a3ff58ddde16f088f33928b5ab2081144fca502bdb",
+      "visibility": "repository"
+    },
+    {
+      "original": "Automatic feedback learning host validation",
+      "path": "evidence/automatic-feedback/2026-11-11/host.json",
+      "sha256": "171907449f906330a00764a05363b8c9934ea27067880ccfbf5d5170d0e1a82b",
+      "visibility": "repository"
+    },
+    {
+      "original": "Actual provider synthetic feedback method",
+      "path": "evidence/automatic-feedback/2026-11-11/learned-method.md",
+      "sha256": "819d8e55f84fc6577b876c8dc5f9566e9e0180801ef7a1d60c8057d277bc7256",
+      "visibility": "repository"
+    },
+    {
+      "original": "Automatic feedback learning plans validation",
+      "path": "evidence/automatic-feedback/2026-11-11/plans.json",
+      "sha256": "d3ce6af39a8f9bee8c7302e08afce6e9326cbeb0c52bdfda4d603dbea61d9b0d",
+      "visibility": "repository"
+    },
+    {
+      "original": "Automatic feedback learning provider validation",
+      "path": "evidence/automatic-feedback/2026-11-11/provider.json",
+      "sha256": "e49067eddbe5fe7867592d8274492b2b7d0a652604f4d93a07a41da34be5e2b7",
+      "visibility": "repository"
+    },
+    {
+      "original": "Hermes Learning native lifecycle 0.9.0 verification",
+      "path": "evidence/releases/native-lifecycle-0.9.0.json",
+      "sha256": "1f588c9e7d1d92f8525ce82a3496799bb82a8e262702488ab3a8b23158cbeda9",
+      "visibility": "repository"
+    },
+    {
+      "original": "Hermes Learning 0.10.0 0.10.0 verification",
+      "path": "evidence/releases/0.10.0.json",
+      "sha256": "f45f280dbdf51221246b2832aa01e5fad2d13f123d1cc2f309ad66f5a9b055d5",
+      "visibility": "repository"
+    },
+    {
+      "original": "Hermes Learning 0.10.0 learned-method verification",
+      "path": "evidence/releases/0.10.0/learned-method.md",
+      "sha256": "0e78ab77766bae9a187c24e2d9142c2a510d3b4ebd33ce19c56656bea5486749",
+      "visibility": "repository"
+    },
+    {
+      "original": "Hermes Learning 0.10.0 plans verification",
+      "path": "evidence/releases/0.10.0/plans.json",
+      "sha256": "d6c1f725ce948586d4bc4c193bfd120d46be11975a73971b2eda8895a7439f1b",
+      "visibility": "repository"
     }
   ],
   "private_records": "Retained locally under evidence/private and intentionally excluded from Git. Public summaries omit live delivery receipts."

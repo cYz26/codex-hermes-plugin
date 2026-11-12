@@ -25,6 +25,14 @@ class SemanticReviewScopeTests(unittest.TestCase):
         original_fork = background.build_cache_parity_fork
         observed, hooks = [], {}
         runtime = SimpleNamespace(agent=lambda *args: parent)
+        request = "Synthetic CSV header matching requires normalization."
+        answer = "Synthetic CSV header normalization follows a repeatable procedure."
+        messages = [{"role":"user", "content":request, "evidence_ref":"T1.request"},
+                    {"role":"assistant", "content":answer, "evidence_ref":"T1.result"}]
+        def proof(classification):
+            ref, quote = ("T1.result", answer) if classification == "procedure" else ("T1.request", request)
+            return {"classification":classification, "basis":[{"ref":ref, "quote":quote}],
+                    "rationale":"CSV header matching uses normalization; retain the supported synthetic rule."}
 
         def native_review(handle, source, messages, intent):
             fork = background.build_cache_parity_fork(runtime.agent(handle, source))[0]
@@ -34,10 +42,12 @@ class SemanticReviewScopeTests(unittest.TestCase):
                 "memory_enabled": fork._memory_enabled,
                 "memory_guard": hooks["pre_tool_call"](
                     session_id=handle, tool_name="memory",
-                    args={"action": "add", "target": "memory", "content": "Synthetic fact"}),
+                    args={"action": "add", "target": "memory", "content":request,
+                          "evidence":proof("project_fact")}),
                 "skills_guard": hooks["pre_tool_call"](
                     session_id=handle, tool_name="skill_manage",
-                    args={"action": "create", "name": "learned-synthetic", "content": "Synthetic rule"}),
+                    args={"action": "create", "name": "learned-synthetic", "content":answer,
+                          "evidence":proof("procedure")}),
             })
             if fail:
                 raise RuntimeError("synthetic review interruption")
@@ -63,10 +73,12 @@ class SemanticReviewScopeTests(unittest.TestCase):
                     for intent in intents:
                         if fail:
                             with self.assertRaisesRegex(RuntimeError, "synthetic review interruption"):
-                                runtime.review("scope", {"executor": "codex"}, [], intent)
+                                runtime.review("scope", {"executor": "codex"}, messages, intent)
                         else:
-                            self.assertEqual(runtime.review("scope", {"executor": "codex"}, [], intent),
-                                             {"run_status": "completed"})
+                            result = runtime.review("scope", {"executor": "codex"}, messages, intent)
+                            self.assertEqual(result["run_status"], "completed")
+                            expected = ({"memory"} if intent["memory"] else set()) | ({"skill_manage"} if intent["skills"] else set())
+                            self.assertEqual({claim["tool"] for claim in result["learning_candidates"] if claim["state"]=="accepted"}, expected)
                         self.assertIs(background.build_cache_parity_fork, original_fork)
                         self.assertEqual(parent.valid_tool_names, {"memory", "skill_manage", "skill_view"})
                         self.assertTrue(parent._memory_enabled)
@@ -81,7 +93,7 @@ class SemanticReviewScopeTests(unittest.TestCase):
         self.assertIn("skill_manage", result["prompt"])
         self.assertFalse(result["memory_enabled"])
         self.assertEqual(result["memory_guard"]["action"], "block")
-        self.assertIsNone(result["skills_guard"])
+        self.assertEqual(result["skills_guard"]["action"], "modify")
 
     def test_memory_review_does_not_advertise_skill_writes(self):
         result = self.exercise([{"memory": True, "skills": False}])[0]
@@ -89,7 +101,7 @@ class SemanticReviewScopeTests(unittest.TestCase):
         self.assertIn("Use native memory to add", result["prompt"])
         self.assertNotIn("skill_manage", result["prompt"])
         self.assertTrue(result["memory_enabled"])
-        self.assertIsNone(result["memory_guard"])
+        self.assertEqual(result["memory_guard"]["action"], "modify")
         self.assertEqual(result["skills_guard"]["action"], "block")
 
     def test_scope_changes_preserve_future_memory_and_skill_reviews(self):
@@ -99,8 +111,8 @@ class SemanticReviewScopeTests(unittest.TestCase):
         self.assertEqual([result["tools"] for result in results],
                          [{"skill_manage", "skill_view"}, {"memory", "skill_view"},
                           {"memory", "skill_manage", "skill_view"}])
-        self.assertIsNone(results[-1]["memory_guard"])
-        self.assertIsNone(results[-1]["skills_guard"])
+        self.assertEqual(results[-1]["memory_guard"]["action"], "modify")
+        self.assertEqual(results[-1]["skills_guard"]["action"], "modify")
 
     def test_interrupted_review_restores_the_native_fork_builder(self):
         self.exercise([{"memory": False, "skills": True}], fail=True)

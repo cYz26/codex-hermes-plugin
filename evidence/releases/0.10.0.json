@@ -1,0 +1,111 @@
+{
+  "version": "0.10.0",
+  "recorded_at": "2026-11-12T04:02:40.058252+00:00",
+  "state": "validated_for_release",
+  "build": {
+    "version": "0.10.0",
+    "digest": "97df2fb0c451d50e503b9ac1775bba7ebafd0a8bec85a580affbc63859761d20"
+  },
+  "merged_changes": [
+    "Automatic feedback evidence, budget, sidechat, relevance and progress",
+    "Native Curator, lineage, archive/restore, artifact retention and selected write scopes",
+    "Cached tool schema stability, archived quote retirement and accurate synchronous worker phases"
+  ],
+  "native": {
+    "tag": "v0.23.0",
+    "commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "recipe": "aba8b09293356a5d287d7fe648b28be6827bd8935a564f3478cab354619cd4ef",
+    "gates": [
+      "git-init",
+      "fetch",
+      "checkout",
+      "patch-check",
+      "patch",
+      "native-contracts",
+      "site-clone",
+      "site-checkout",
+      "site-patch",
+      "site-contracts",
+      "bridge-contracts",
+      "runtime-smoke"
+    ]
+  },
+  "verification": {
+    "native": {
+      "files": 21,
+      "passed": 354,
+      "failed": 0,
+      "log_sha256": "5f27db22cacd844f3cc679cf73ac615b435b82e597dfb2826cabee4f171ae4eb"
+    },
+    "site": {
+      "files": 46,
+      "passed": 664,
+      "failed": 0,
+      "log_sha256": "5fb188544e7db2b170697aab9fc6660837c3137776ec965e22773b1c5dd5411e"
+    },
+    "bridge": {
+      "passed": 334,
+      "failed": 0,
+      "skipped": 0,
+      "log_sha256": "95f9d7a845722b8318ca07cb243dd1f05f6788d339a085f18bdbbc0839c58958"
+    },
+    "portable": {
+      "tests": 334,
+      "skipped": 11,
+      "exit_code": 0,
+      "log_sha256": "72a76dd7245a1a34343db4db5e85c8b7d30178e64521fd31d4abdcd9de47fff8"
+    },
+    "isolated_worker_smoke": "passed"
+  },
+  "real_provider_fixture": {
+    "scope": "actual provider with synthetic feedback and controlled plan experiment; not App or executed research",
+    "passed": true,
+    "checks": {
+      "native_review_completed": true,
+      "csv_unchanged": true,
+      "published_research_candidate": true,
+      "cross_project_memory_empty": true,
+      "cross_project_recommended": true,
+      "plan_changed_to_include_internal": true,
+      "explicit_public_only_respected": true,
+      "all_plan_calls_completed": true,
+      "source_limits_in_skill": true
+    },
+    "provider": "custom:ark",
+    "model": "ark:gpt-6-1-sol",
+    "reviews": [
+      {
+        "state": "completed",
+        "usage": {
+          "model": "ark:gpt-6-1-sol",
+          "provider": "custom",
+          "api_calls": 3,
+          "input_tokens": 9,
+          "output_tokens": 5892,
+          "cache_read_tokens": 12379,
+          "reasoning_tokens": 4884
+        }
+      }
+    ],
+    "published_names": [
+      "learned-enterprise-solution-evaluation"
+    ],
+    "method": "evidence/releases/0.10.0/learned-method.md",
+    "plans": "evidence/releases/0.10.0/plans.json",
+    "raw_result_sha256": "74840166359ffe163fef1da780c84bdd73553ecbc1cfa0d2f3ad6dbcc4ccdc68",
+    "actual_app": false,
+    "source_queries_executed": false
+  },
+  "deployment": {
+    "state": "pending"
+  },
+  "release": {
+    "state": "pending",
+    "tag": "v0.10.0"
+  },
+  "limitations": [
+    "Real-provider evidence uses synthetic feedback and controlled plans, not business queries.",
+    "Production Curator quality and real Desktop cross-chat learning are not established by these gates.",
+    "macOS compilation and multi-version CI are checked by the tag workflow before Release creation."
+  ]
+}

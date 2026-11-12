@@ -30,9 +30,9 @@ def pending(store):
 def messages_for(value, store):
     if value["mode"] == "refine":
         messages = []
-        for data in value["snapshot"]:
+        for number,data in enumerate(value["snapshot"],1):
             body = observation(data)
-            messages.append({"role": "user", "content": body["user"]})
+            messages.append({"role": "user", "content": body["user"],"evidence_source":body["source"],"evidence_ref":f"F{number}.request"})
             for tool in body["tools"]:
                 call_id = "evidence-" + digest([body["source"], tool["call_id"]])[:24]
                 messages.extend([
@@ -40,7 +40,7 @@ def messages_for(value, store):
                         "function": {"name": tool["name"], "arguments": dumps(tool.get("arguments", {}))}}]},
                     {"role": "tool", "tool_call_id": call_id, "content": dumps({"status":tool["status"], "result":tool["result"]})}])
             if body.get("assistant"):
-                messages.append({"role": "assistant", "content": body["assistant"]})
+                messages.append({"role": "assistant", "content": body["assistant"],"evidence_source":body["source"],"evidence_ref":f"F{number}.result"})
         bounded = bound_review_history(messages, 60 * 1024)
         value["evidence"]["truncated"] = bounded != messages
         return bounded, value["focus"]
