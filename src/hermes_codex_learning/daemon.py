@@ -822,6 +822,8 @@ class Bridge:
                 self.stop.wait(0.2)
                 continue
             try:
+                from .review_resolution import process as resolve_reviews
+                resolve_reviews(self)
                 self.ingest()
                 self.retry_completed_inputs()
                 self.recover_context()
@@ -902,6 +904,12 @@ class Bridge:
             if not self.resume.is_set() or self.drain.is_set():
                 raise RuntimeError("Learning runtime is paused; retry after the update")
             with StoreConnection(self.settings) as store:
+                if params.get('inspection') is not None:
+                    if not params.get('close_without_retry') or not self.native_capabilities.get('review_inspection'):
+                        raise ValueError('Native inspection capability and explicit close-without-retry are required')
+                    from .review_resolution import submit
+                    return submit(store, self.request_project({'cwd': params['cwd']}), params['inspection'],
+                                  dry_run=params.get('dry_run', True))
                 queue = ReviewRetryQueue(self.settings, store)
                 if params.get("close_without_retry") is True:
                     return queue.close_without_retry(params.get("attempt_id"), note=params.get("note"),

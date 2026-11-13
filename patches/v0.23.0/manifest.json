@@ -3,17 +3,17 @@
   "tag": "v0.23.0",
   "base_commit": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
   "patch_file": "native-learning-api-v1.patch",
-  "patch_sha256": "f8709cae0305497285a07a0f100d097e08394a0076073644fcbcd4fc0fa361a8",
+  "patch_sha256": "0ad8fe21c456156800b3c7df583ce4669e6438d31b1b9a7b9e36399f2a30d362",
   "replay_matches_working_source": true,
   "files": {
     "agent/background_review.py": "611f892375f747ad159938310051ef59ddbb6c86a786b9da8433ed876eaa3b95",
     "agent/codex_runtime.py": "3fc26a08e43138012b3750458b6dcf652070bcd1bc95d129790bd4826af8a051",
-    "agent/learning_api.py": "17c1f20286780c28c887cf210422f6d1c99278714a86debc998e1e5233cd918c",
+    "agent/learning_api.py": "0ab0b488a268e14b83385c8e4c5af410337db8034bb31ef1f66aeb9c8699ccf8",
     "agent/learning_artifacts.py": "b7d6d3a95fa4310fadb78bd45dfb58e89b08d27d651678c52f437d25f4ac51f7",
     "agent/learning_policy.py": "261d9e0ea1d5e09dc36687b931f8a8982fd95a911c5d32c11a7d674c8d6e67be",
-    "agent/learning_results.py": "ad4443d06b67ae0b89123c7f60ebdc6d1f4c89e8b50e1c198e4178be9d907d03",
+    "agent/learning_results.py": "b7f72d16f0244e827b3953601a8293a7c27a1c44c17bef6f04b5647eeb0131a9",
     "agent/learning_runtime.py": "bc278e3b4fd387ce0871abd98a27abbd71438fe1f596ebcce319e3d4d57241bc",
-    "agent/learning_service.py": "c1045e679f5739e19cc1c909d989ce96959ade924f8f2b84c11231a4e0a025d5",
+    "agent/learning_service.py": "48cf623842a5ad11a1d7e07fa97128a192f26c994b0bc319738f220b47d24438",
     "hermes_cli/plugin_isolation.py": "d58a128c34834185bb9903a85bcd33754867ac63084fe0f37329b8907a57c35b",
     "hermes_cli/plugins_capability_ctx.py": "aef315e73dd95d8887808e428856a148e91ad38732bf5c96db6a81f774dad86e",
     "tests/agent/test_learning_cloud_contracts.py": "666b7e48bcef66318a10723d32a0efbc889344eeb09b7bf6f974b7f0a990c7bd",
@@ -31,7 +31,12 @@
     "reason": "Reuse native Curator policies and tools through synchronous maintenance, expose native ledger lineage and graph metadata, and add reference-aware retention for external delivery artifacts. Native memory approvals, review prompts, ledger storage and archive/restore semantics remain owned by Hermes.",
     "agreed_plan": "docs/NATIVE-LIFECYCLE.zh-CN.md",
     "approved_on": "2026-11-11",
-    "source_tree": "89c3e51d6579e5bbab5fb45ba84f10e35d39799c"
+    "source_tree": "89c3e51d6579e5bbab5fb45ba84f10e35d39799c",
+    "inspection_extension": {
+      "classification": "compatible",
+      "agreed_plan": "docs/NATIVE-FIRST-OPTIMIZATION.zh-CN.md",
+      "reason": "Add explicit evidence-bound no-retry disposition for inspected skill-only outcomes; retain original attempt and every existing unknown-write/retry guard. Expose native exit reason without reclassifying success."
+    }
   },
   "native_updater": {
     "protocol": "resolve_source_target-v1",

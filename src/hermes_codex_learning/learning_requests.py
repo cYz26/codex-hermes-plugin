@@ -202,6 +202,12 @@ def rpc(store, settings, project, method, params):
                 if not materials(store, value["request_id"]):
                     raise ValueError("Add at least one material chunk before starting")
                 value["state"] = "queued"
+            elif (value['state'] == 'failed' and not value.get('intent_id') and not value.get('results')
+                  and value.get('reason') == 'An uncertain review in this scope requires inspection before another request'):
+                # The native request was never admitted. Reuse its sealed material and
+                # stable identity after inspection; the native guard remains authoritative.
+                value['state'] = 'queued'
+                value.pop('reason', None)
         elif method == "cancel_learning":
             if value["state"] not in TERMINAL:
                 value["state"] = "cancel_requested" if value.get("intent_id") else "cancelled"

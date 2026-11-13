@@ -21,6 +21,8 @@ def add_parsers(commands):
     retry.add_argument("--close-without-retry", action="store_true")
     retry.add_argument("--note", help="Reason for closing a blocked review without retry")
     retry.add_argument("--evidence", help="Audit evidence for the closure")
+    retry.add_argument('--inspection', type=Path, help='Exact native outcome and artifact inspection JSON for an explicit request')
+    retry.add_argument('--cwd', help='Original project workspace for an explicit request inspection')
     enterprise=commands.add_parser("enterprise-config",help="Bind operator-authorized enterprise learning to this host and model configuration")
     enterprise.add_argument("--settings")
     enterprise.add_argument("--apply",action="store_true")
@@ -120,6 +122,15 @@ def execute(args):
         params = {"attempt_id": args.attempt, "dry_run": not args.apply}
         if args.close_without_retry:
             params.update(close_without_retry=True, note=args.note, evidence=args.evidence)
+            if args.inspection:
+                if not args.cwd:
+                    raise ValueError('--inspection requires the original project --cwd')
+                inspection = json.loads(args.inspection.read_text())
+                if inspection.get('attempt_id') != args.attempt:
+                    raise ValueError('--attempt differs from the inspected attempt')
+                params.update(inspection=inspection, cwd=args.cwd)
+        elif args.inspection:
+            raise ValueError('--inspection requires --close-without-retry')
         elif args.note is not None or args.evidence is not None:
             raise ValueError("Closure notes require --close-without-retry")
         return request(Settings.load(args.settings), "review_retry", params, timeout=5)

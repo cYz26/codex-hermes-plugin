@@ -62,7 +62,7 @@ def collect(home, previous, day, deadline, timezone, audit_chats, acceptance_cha
                 tracked = {key for key, item in result["attempts"].items()
                            if item["state"] not in {"completed", "failed", "interrupted"}} | set(receipt_updates)
                 # JSON_each avoids SQLite variable limits on a long-running library.
-                for row in db.execute("""SELECT a.*,s.source FROM attempts a
+                for row in db.execute("""SELECT a.*,s.source,json_extract(i.payload,'$.resolution') resolution FROM attempts a
                         LEFT JOIN intents i ON a.intent=i.id LEFT JOIN scopes s ON s.id=i.handle
                         WHERE a.rowid>? OR a.id IN (SELECT value FROM json_each(?))""", (position, json.dumps(sorted(tracked)))):
                     if time.monotonic() >= deadline:
@@ -77,6 +77,8 @@ def collect(home, previous, day, deadline, timezone, audit_chats, acceptance_cha
                         "project": source.get("project"), "chat": source.get("chat"),
                         "writes": {key: len(value.get(key) or []) for key in ("applied", "staged", "refused", "uncertain")},
                         "error": redact(value.get("error")), "usage": value.get("usage"),
+                        "turn_exit_reason": value.get("turn_exit_reason"),
+                        "inspection": json.loads(row['resolution'] or 'null'),
                         "paid_cost": None, "finished_at": None, "time_basis": "unknown",
                     }
             else:
@@ -131,12 +133,13 @@ def issues(attempts, retries):
             continue
         retry = next((r for r in retries if item['intent'] in
                       {r.get('root_intent'), r.get('parent_intent'), r.get('child_intent')}), {})
-        state = retry.get('state') or ('running' if item['state'] == 'running' else
+        inspection = item.get('inspection') or {}
+        state = inspection.get('state') or retry.get('state') or ('running' if item['state'] == 'running' else
             'historical_operation_check' if item['state'] == 'completed' and not item['writes']['uncertain'] else 'needs_review')
         result.append({'id': 'review:' + item['intent'], 'attempt': item['id'], 'state': state,
                        'root_intent': retry.get('root_intent', item['intent']),
                        'first_report_date': item['first_report_date'],
-                       'native_state': item['state'], 'disposition': retry.get('disposition'),
+                       'native_state': item['state'], 'disposition': inspection or retry.get('disposition'),
                        'successor_intent': retry.get('child_intent'), 'reason': retry.get('reason', item['error'])})
     return result
 

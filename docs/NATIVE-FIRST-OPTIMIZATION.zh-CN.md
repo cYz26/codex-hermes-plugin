@@ -54,6 +54,30 @@ scripts/bridge publication-preview --cwd /absolute/source-project --review /abso
 可执行资源、生命周期和失败验证检查。新版本不继承审查结论，候选拒绝时旧发布保持可用。
 没有新增 MCP 工具或知识库表；审查历史保存在桥接 meta 中，原生知识及账本不变。
 
+## 原生未完成复盘的核对结案
+
+实际整理中，原生 16 轮上限返回 `completed=false`，Learning API 将终态保留为 `unknown`。
+该作用域随后拒绝新的显式学习，即使已确认的写入全部核对完成。适配补丁现保留原生
+`turn_exit_reason`，并提供严格限定的 `close_review_without_retry`：只接受原作用域的显式
+技能复盘、完整结果摘要及全部当前产物版本；存在 uncertain、待审、拒绝或记忆操作时不接受。
+原 attempt 内容和 unknown 状态保留，intent 记录结案处置，旧请求仍不可重放。
+
+操作员逐项核对后，用已有 `review-retry` 命令提交检查文件（默认预览）：
+
+```sh
+scripts/bridge review-retry --attempt EXACT_ATTEMPT --close-without-retry \
+  --cwd /absolute/original-project --inspection /absolute/inspection.json --apply
+```
+
+JSON 包含 `request_id`、`attempt_id`、`outcome_hash`（原生结果 payload 的 fingerprint）、
+`artifact_versions`、`note` 和 `evidence`。由串行 worker 调用原生结案方法并记录回读；
+文件变化、证据身份不符、同一结案被改写都会拒绝。该能力是 Learning API 补丁适配，
+不是上游无补丁功能。没有调高原生轮次或复盘总时限，也没有放宽未知写入保护。
+
+只有因上述作用域保护而在原生准入前失败、没有 intent 或执行结果的 `learn` 请求，才可在
+结案后再次调用既有 `start_learning`，复用原请求 ID 和已封存材料。已有执行或未知写入的
+请求不能通过这个入口重跑。历史 unknown 不会因升级自动结案或被改写为成功。
+
 ## 只读日审与完成记录
 
 使用 [现有日审方案](./SELF-EVOLUTION-REVIEW-PLAN.zh-CN.md) 的窗口和指标口径：

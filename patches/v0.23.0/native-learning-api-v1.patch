@@ -47,10 +47,10 @@ index cfc3b9c6..f47e2f1e 100644
          _call_guarded(getattr(agent, "_sync_external_memory_for_turn", None), "external memory sync raised", kwargs=dict(
 diff --git a/agent/learning_api.py b/agent/learning_api.py
 new file mode 100644
-index 00000000..75fb6ff4
+index 0000000..c27b23f
 --- /dev/null
 +++ b/agent/learning_api.py
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,68 @@
 +"""Supported plugin-facing Learning API v1; all method results are serializable values."""
 +from __future__ import annotations
 +
@@ -81,6 +81,11 @@ index 00000000..75fb6ff4
 +
 +    def cancel_request(self, request_id: str) -> dict:
 +        return self._service.cancel_request(request_id)
++    def close_review_without_retry(self, handle: str, intent_id: str, *, attempt_id: str,
++                                  outcome_hash: str, artifact_versions: dict, note: str, evidence: str) -> dict:
++        return self._service.close_review_without_retry(handle, intent_id, attempt_id=attempt_id,
++            outcome_hash=outcome_hash, artifact_versions=artifact_versions, note=note, evidence=evidence)
++
 +    def retry_review(self, handle: str, intent_id: str, *, failed_attempt_id: str,
 +                     max_retries: int = 3) -> dict:
 +        return self._service.retry_review(handle, intent_id, failed_attempt_id=failed_attempt_id,
@@ -400,10 +405,10 @@ index 00000000..18052db3
 +    return due
 diff --git a/agent/learning_results.py b/agent/learning_results.py
 new file mode 100644
-index 00000000..f9f2fe23
+index 0000000..789f385
 --- /dev/null
 +++ b/agent/learning_results.py
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,70 @@
 +"""Machine-readable facts from native review tool results, independent of UI summaries."""
 +from __future__ import annotations
 +
@@ -459,6 +464,9 @@ index 00000000..f9f2fe23
 +        else:
 +            outcome["applied"].append(fact)
 +    result = state.result or {}
++    reason = result.get("turn_exit_reason")
++    if isinstance(reason, str) and len(reason) <= 200:
++        outcome["turn_exit_reason"] = reason
 +    if error or result.get("failed") or result.get("error"):
 +        outcome["run_status"] = "failed"
 +        outcome["error"] = error or result.get("error")
@@ -647,10 +655,10 @@ index 00000000..32e3d45a
 +                db.close()
 diff --git a/agent/learning_service.py b/agent/learning_service.py
 new file mode 100644
-index 00000000..3b84f23a
+index 0000000..f80b79b
 --- /dev/null
 +++ b/agent/learning_service.py
-@@ -0,0 +1,600 @@
+@@ -0,0 +1,648 @@
 +"""Learning API v1: profile-bound values, native execution, durable admission receipts.
 +
 +The learning journal owns admission/counters atomically. Native transcript projection is
@@ -955,6 +963,54 @@ index 00000000..3b84f23a
 +        return {**outcome, "id": attempt_id, "intent_id": intent_id}
 +
 +    @_bound
++    def close_review_without_retry(self, handle: str, intent_id: str, *, attempt_id: str,
++                                  outcome_hash: str, artifact_versions: dict, note: str, evidence: str) -> dict:
++        """Record a checked explicit skill-only outcome without replaying or rewriting it.
++
++        This does not declare success. Unknown/pending writes and memory changes require
++        their own native reconciliation; current artifact inspection cannot resolve them.
++        """
++        from agent.learning_artifacts import skill
++        if not all(isinstance(v, str) and 0 < len(v.strip()) <= 2000
++                   for v in (handle, intent_id, attempt_id, outcome_hash, note, evidence)):
++            raise ValueError("Inspection requires bounded identities, note and evidence")
++        if not isinstance(artifact_versions, dict) or not artifact_versions or not all(
++                isinstance(k, str) and isinstance(v, str) and k and v for k, v in artifact_versions.items()):
++            raise ValueError("Inspect all affected current artifact versions")
++        inspection = dict(attempt_id=attempt_id, outcome_hash=outcome_hash,
++                          artifact_versions=artifact_versions, note=note, evidence=evidence)
++        with self.lock, self.db:
++            row = self.db.execute("SELECT * FROM intents WHERE id=? AND handle=?", (intent_id, handle)).fetchone()
++            attempt = self.db.execute("SELECT * FROM attempts WHERE id=? AND intent=?", (attempt_id, intent_id)).fetchone()
++            if row is None or attempt is None:
++                raise ValueError("Inspection must match the original scope and attempt")
++            intent, outcome = json.loads(row["payload"]), json.loads(attempt["payload"])
++            if intent.get("resolution"):
++                prior = intent["resolution"]
++                if prior["inspection"] != inspection:
++                    raise ValueError("An existing inspection cannot be replaced")
++                return prior
++            if (row["status"] != "unknown" or attempt["status"] != "unknown"
++                    or intent.get("reason") != "user_request" or intent.get("memory")
++                    or fingerprint(outcome) != outcome_hash):
++                raise ValueError("Only the exact inspected unknown explicit skill review may be closed")
++            applied = outcome.get("applied") or []
++            if (any(outcome.get(key) for key in ("uncertain", "staged", "refused")) or not applied
++                    or any(item.get("tool") != "skill_manage" or not changed_skill_name(item) for item in applied)):
++                raise ValueError("Unconfirmed, staged, refused or non-skill operations require native reconciliation")
++            names = {changed_skill_name(item) for item in applied}
++            if names != set(artifact_versions) or any(skill(self.home, name)["version"] != artifact_versions[name] for name in names):
++                raise ValueError("Affected artifacts changed or the inspection is incomplete")
++            result = {"state": "closed_without_retry", "inspection": inspection,
++                      "original_status": "unknown", "at": time.time()}
++            intent["resolution"] = result
++            # Preserve the complete attempt verbatim. Only the intent disposition changes;
++            # run_review still returns its original outcome and retry_review still refuses it.
++            self.db.execute("UPDATE intents SET status='closed_without_retry',payload=? WHERE id=?",
++                            (json.dumps(intent), intent_id))
++            return result
++
++    @_bound
 +    def retry_review(self, handle: str, intent_id: str, *, failed_attempt_id: str,
 +                     max_retries: int = 3) -> dict:
 +        """Queue an idempotent successor; never erase or replay the old attempt."""
@@ -1008,7 +1064,7 @@ index 00000000..3b84f23a
 +             after_cursor: int = 0) -> dict:
 +        if kind == "capabilities":
 +            return {"version":1, "artifact_preview":True, "bounded_status":True, "retention":True,"snapshot_delivery":True,
-+                    "explicit_reviews":True, "review_retry":True, "skill_lifecycle":True, "artifact_retention":True}
++                    "explicit_reviews":True, "review_retry":True, "review_inspection":True, "skill_lifecycle":True, "artifact_retention":True}
 +        if kind == "skill_lifecycle":
 +            from agent.learning_maintenance import history
 +            return history(name)

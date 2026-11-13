@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.daemon import Bridge
@@ -206,6 +207,30 @@ class ActiveLearningTests(unittest.TestCase):
         intent["status"] = "unknown"
         self.cycle()
         self.assertEqual(self.status()["state"], "unknown")
+        self.assertEqual(api.calls, 0)
+
+    def test_only_scope_blocked_unadmitted_learning_can_resume_with_the_same_identity(self):
+        api = self.bridge.api = ScriptedAPI()
+        self.request(mode='learn', skill_name='learned-fixture')
+        self.bridge.rpc('add_learning_material', {'cwd': str(self.project), 'request_id': 'request-a',
+            'chunk_id': 'source', 'source': 'fixture://source', 'content': 'Preserve exact receipts'})
+        params = {'cwd': str(self.project), 'request_id': 'request-a'}
+        self.bridge.rpc('start_learning', params)
+        with patch.object(api, 'request_review', side_effect=ValueError(
+                'An uncertain review in this scope requires inspection before another request')):
+            learning_dispatch.prepare(self.bridge)
+        failed = self.status()
+        self.assertEqual(failed['state'], 'failed')
+        self.assertEqual(failed['results'], [])
+        resumed = self.bridge.rpc('start_learning', params)
+        self.assertEqual(resumed['state'], 'queued')
+        self.assertEqual(resumed['materials'], failed['materials'])
+        learning_dispatch.prepare(self.bridge)
+        intent = next(iter(api.intents.values()))
+        api.attempts[intent['id']] = {'id': 'unknown', 'run_status': 'unknown', 'applied': [], 'uncertain': ['missing']}
+        intent['status'] = 'unknown'
+        self.cycle()
+        self.assertEqual(self.bridge.rpc('start_learning', params)['state'], 'unknown')
         self.assertEqual(api.calls, 0)
         self.cycle()
         self.assertEqual(api.calls, 0)

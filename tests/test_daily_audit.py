@@ -156,6 +156,16 @@ class DailyAuditTests(unittest.TestCase):
         self.assertEqual(report['issues'][0]['state'], 'historical_operation_check')
         self.assertEqual(report['attempts']['protected']['state'], 'completed')
 
+    def test_native_inspection_tracks_closure_without_relabeling_unknown_attempt(self):
+        self.attempt('inspected', 'unknown')
+        self.run_export()
+        with self.native:
+            self.native.execute('UPDATE intents SET payload=? WHERE id=?',
+                (json.dumps({'resolution': {'state': 'closed_without_retry', 'inspection': {'evidence': 'audit'}}}), 'inspected'))
+        report = self.run_export()
+        self.assertEqual(report['issues'][0]['state'], 'closed_without_retry')
+        self.assertEqual(report['attempts']['inspected']['state'], 'unknown')
+
     def test_review_completion_is_bound_to_snapshot_and_latest_does_not_regress(self):
         import hashlib
         self.run_export('2026-11-14')
