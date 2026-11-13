@@ -38,6 +38,9 @@ def collect(home, previous, day, deadline, timezone, audit_chats, acceptance_cha
               "cursors": dict(previous.get("cursors", {})), "artifacts": {}, "retries": [],
               "input_coverage": {}, "applications": [], "metrics": {}, "complete": True}
     receipt_updates = []
+    for item in result['attempts'].values():
+        # Early local exports used an ambiguous name for the first report date.
+        item.setdefault('first_report_date', item.pop('first_observed_date', day))
     for name, relative in (("bridge", "bridge/bridge.sqlite"), ("native", "learning/journal.sqlite")):
         path = home / relative
         db = None
@@ -88,7 +91,7 @@ def collect(home, previous, day, deadline, timezone, audit_chats, acceptance_cha
                         "intent_id", "project", "source_chat", "run_status", "started_at", "finished_at", "usage")}
                     result["notices"][identity]["notice_at"] = row["created"]
                 metadata = {row["key"]: json.loads(row["value"]) for row in db.execute(
-                    "SELECT key,value FROM meta WHERE key IN ('artifact-read-cache','publications-v1','publication-decisions','loop-progress')")}
+                    "SELECT key,value FROM meta WHERE key IN ('artifact-read-cache','publications-v1','publication-decisions','loop-progress','native-lifecycle-status','native-curator-status')")}
                 for skill, item in metadata.get("artifact-read-cache", {}).items():
                     artifact = item.get("artifact", {})
                     published = metadata.get("publications-v1", {}).get(skill, {}).get("artifact", {})
@@ -96,6 +99,8 @@ def collect(home, previous, day, deadline, timezone, audit_chats, acceptance_cha
                     result["artifacts"][skill].update(published_version=published.get("version"),
                         publication=metadata.get("publication-decisions", {}).get(skill))
                 result["worker_snapshot"] = metadata.get("loop-progress")
+                result['lifecycle_snapshot'] = metadata.get('native-lifecycle-status')
+                result['curator_snapshot'] = metadata.get('native-curator-status')
                 result["retries"] = [{**json.loads(row['payload']), 'state': row['state']}
                                      for row in db.execute("SELECT payload,state FROM review_retries ORDER BY id")]
                 result["applications"] = [json.loads(row[0]) for row in db.execute("SELECT payload FROM application_evidence ORDER BY created,id")]
@@ -122,11 +127,12 @@ def collect(home, previous, day, deadline, timezone, audit_chats, acceptance_cha
 def issues(attempts, retries):
     result = []
     for item in attempts.values():
-        if item['state'] == 'completed' and not item['writes']['uncertain']:
+        if item['state'] == 'completed' and not any(item['writes'][key] for key in ('uncertain', 'staged', 'refused')):
             continue
         retry = next((r for r in retries if item['intent'] in
                       {r.get('root_intent'), r.get('parent_intent'), r.get('child_intent')}), {})
-        state = retry.get('state') or ('running' if item['state'] == 'running' else 'needs_review')
+        state = retry.get('state') or ('running' if item['state'] == 'running' else
+            'historical_operation_check' if item['state'] == 'completed' and not item['writes']['uncertain'] else 'needs_review')
         result.append({'id': 'review:' + item['intent'], 'attempt': item['id'], 'state': state,
                        'root_intent': retry.get('root_intent', item['intent']),
                        'first_report_date': item['first_report_date'],
@@ -199,10 +205,13 @@ def export(home, output, day, timezone="Asia/Shanghai", *, now=None, timeout=600
         before = previous.get("artifacts", {}).get(name)
         if before and before.get("version") != item.get("version"):
             old = changes.get(name, {}).get("previous_version", before.get("version"))
+            changed = set(changes.get(name, {}).get('changed_files', []))
+            changed.update(key for key in set(before.get('files') or {}) | set(item.get('files') or {})
+                           if (before.get('files') or {}).get(key) != (item.get('files') or {}).get(key))
             changes[name] = {"name": name, "previous_version": old, "version": item.get("version"),
                              "observed_at": current, "basis": "snapshot_comparison_not_historical_write_time",
-                             "changed_files": sorted(key for key in set(before.get("files") or {}) | set(item.get("files") or {})
-                                 if (before.get("files") or {}).get(key) != (item.get("files") or {}).get(key))}
+                             "changed_files_basis": "union_of_observed_changes_in_report",
+                             "changed_files": sorted(changed)}
     result["artifact_changes"] = list(changes.values())
     result['issues'] = issues(result['attempts'], result['retries'])
     output.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -90,6 +90,33 @@ class DailyAuditTests(unittest.TestCase):
         self.assertFalse(missing.exists())
         self.assertTrue((self.out / "2026-11-13.md").exists())
 
+    def test_multiple_versions_in_one_day_retain_all_observed_file_changes(self):
+        def version(number, files):
+            self.store.set('artifact-read-cache', {'example': {'artifact': {'version': number, 'files': files}}})
+        version('v1', {'SKILL.md': 'old', 'references/a.md': 'old'})
+        self.run_export()
+        version('v2', {'SKILL.md': 'new', 'references/a.md': 'old'})
+        self.run_export('2026-11-14')
+        version('v3', {'SKILL.md': 'new', 'references/a.md': 'new'})
+        report = self.run_export('2026-11-14')
+        change = report['artifact_changes'][0]
+        self.assertEqual((change['previous_version'], change['version']), ('v1', 'v3'))
+        self.assertEqual(change['changed_files'], ['SKILL.md', 'references/a.md'])
+
+    def test_no_activity_and_truncated_input_are_distinct(self):
+        empty = self.run_export()
+        self.assertEqual(empty['state'], 'collected')
+        self.assertEqual(empty['window_attempts'], [])
+        self.attempt('trimmed')
+        self.notice('trimmed', self.now - 86400, finished_at=self.now - 86400)
+        self.store.set('review-input:trimmed', {'budget': {'truncated': True},
+            'coverage_gaps': ['older tool output omitted'], 'native_digest': {'state': 'partial'}})
+        report = self.run_export()
+        coverage = report['attempts']['trimmed']['input_coverage']
+        self.assertTrue(coverage['budget']['truncated'])
+        self.assertEqual(coverage['review_gaps'], ['older tool output omitted'])
+        self.assertEqual(coverage['native_digest']['state'], 'partial')
+
     def test_deadline_produces_partial_report_without_advancing_success_cursor(self):
         self.attempt("pending", "running")
         self.run_export()
@@ -120,6 +147,15 @@ class DailyAuditTests(unittest.TestCase):
         self.assertEqual(report['issues'][0]['state'], 'closed_without_retry')
         self.assertEqual(report['attempts']['old']['state'], 'interrupted')
 
+    def test_completed_attempt_with_staged_or_refused_operations_is_still_reviewable(self):
+        self.attempt('protected')
+        with self.native:
+            self.native.execute('UPDATE attempts SET payload=? WHERE id=?',
+                (json.dumps({'staged': [{'tool': 'memory'}], 'refused': [{'tool': 'skill_manage'}]}), 'protected'))
+        report = self.run_export()
+        self.assertEqual(report['issues'][0]['state'], 'historical_operation_check')
+        self.assertEqual(report['attempts']['protected']['state'], 'completed')
+
     def test_review_completion_is_bound_to_snapshot_and_latest_does_not_regress(self):
         import hashlib
         self.run_export('2026-11-14')
@@ -137,3 +173,18 @@ class DailyAuditTests(unittest.TestCase):
         self.assertEqual(state['reviews']['2026-11-14']['snapshot_sha256'], checksum)
         self.assertEqual(latest['date'], '2026-11-14')
         self.assertTrue((self.out / 'snapshots' / (checksum + '.json')).exists())
+
+    def test_source_reset_rebuilds_baseline_and_imports_early_report_dates(self):
+        self.attempt('old')
+        self.run_export()
+        checkpoint = self.out / 'collection.json'
+        state = json.loads(checkpoint.read_text())
+        state['attempts']['old']['first_observed_date'] = state['attempts']['old'].pop('first_report_date')
+        checkpoint.write_text(json.dumps(state))
+        report = self.run_export()
+        self.assertEqual(report['attempts']['old']['first_report_date'], '2026-11-13')
+        with self.native:
+            self.native.execute('DELETE FROM attempts')
+        reset = self.run_export()
+        self.assertEqual(reset['attempts'], {})
+        self.assertTrue(any(g['reason'] == 'source_reset_baseline_rebuilt' for g in reset['gaps']))
