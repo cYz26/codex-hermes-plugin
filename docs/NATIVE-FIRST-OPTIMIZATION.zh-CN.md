@@ -4,6 +4,9 @@
 写入保护、归档与恢复；Codex 负责实际宿主证据、项目边界、结果审查和应用验证。
 当前 Learning API 是插件对 Hermes 的适配补丁，不是无补丁的上游 API。
 
+本轮交付、原生知识整理、异常处置和未完成门槛见
+[2026-11-14 实施审查](./SELF-EVOLUTION-IMPLEMENTATION-2026-11-14.zh-CN.md)。
+
 ## 执行顺序
 
 1. 通过现有显式学习队列整理 `codebase-inspection`，核对所有资源、来源和具体版本，再做
