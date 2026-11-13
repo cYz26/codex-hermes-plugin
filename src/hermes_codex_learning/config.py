@@ -41,6 +41,7 @@ class Settings:
     review_retry_limit: int = 3
     review_retry_delay: float = 300
     review_retry_max_delay: float = 3600
+    review_timeout_seconds: float = 900
 
     def __post_init__(self):
         if any(not isinstance(value, bool) for value in (self.proactive,self.quality_checks,self.retention_enabled,
@@ -53,6 +54,9 @@ class Settings:
                 raise ValueError("Review retry delays must be finite values between one second and one day")
         if self.review_retry_max_delay < self.review_retry_delay:
             raise ValueError("Maximum retry delay must cover the initial delay")
+        timeout = self.review_timeout_seconds
+        if type(timeout) not in (int, float) or not 1 <= timeout <= 3600:
+            raise ValueError("Learning review timeout must be between 1 and 3600 seconds")
         if self.capture_scope not in {"project", "global"}:
             raise ValueError("capture_scope must be project or global")
         if any(not Path(path).is_absolute() for path in self.excluded_projects):
@@ -168,4 +172,5 @@ class Settings:
             review_retry_limit=data.get("learning", {}).get("retries", {}).get("max_retries", 3),
             review_retry_delay=data.get("learning", {}).get("retries", {}).get("initial_delay_seconds", 300),
             review_retry_max_delay=data.get("learning", {}).get("retries", {}).get("max_delay_seconds", 3600),
+            review_timeout_seconds=data.get("learning", {}).get("review_timeout_seconds", 900),
         )

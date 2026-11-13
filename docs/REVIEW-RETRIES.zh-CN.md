@@ -17,11 +17,17 @@
 
 HTTP 429、500/502/503/504、暂时性连接故障、超时，以及原生已明确记录终态的中断，可进入重试队列。默认冷却 5、10、20 分钟，最多重试三次；原始尝试与重试合计最多四次。等待时 worker 继续处理其他执行证据和复盘，计时保存在桥接 SQLite 中，重启后不重新计算已有冷却期限。
 
+Codex 首个流事件超时（`Codex stream produced no parsed stream event … (TTFB threshold: …)`）归为暂时性连接故障，即使错误文本没有 `timeout`。新版 worker 重扫原生记录时会重判旧的错误分类；不改原收据，也不会因同一记录反复发现而重置冷却时间。
+
 新 worker 分页读取原生日志中尚未恢复的失败记录，因此部署前的失败也能被发现。每页最多 50 条，游标持久保存并循环核对，避免遗漏迟到终态。下一次执行通过原生 API 创建带 `retry_of`、`retry_root` 和 `retry_index` 的后续意图；原意图与原尝试保持原来的失败状态，每个意图仍只执行一次。相同恢复请求返回相同后续意图，不重复排队。
 
 重试使用原意图的相同执行证据版本，并携带此前已生效写入和待批准提案的摘要。原生提示词要求先检查当前可访问的技能和记忆，再继续仍需要的工作；已有技能不重新创建，已存在记忆不重复添加，待批准提案不重复提交。当前库中的后续修改保持有效，不用旧快照覆盖。
 
 HTTP 401/403、权限拒绝、输入预算耗尽，以及结果为 `unknown` 或存在未确认写入的尝试停止自动重试。进程被强制结束后留下的 `unknown` 需要核对执行结果，不能换一个 ID 当作从未执行。达到重试上限后保留所有记录并显示停止原因。后续成功复盘已覆盖相同或更新的证据版本时，旧重试被标记为 `superseded`。
+
+## 整次复盘总时限
+
+学习 worker 为每次原生复盘设置一个总墙钟时限，默认 **900 秒（15 分钟）**。该时限覆盖同一次尝试中的全部模型请求、内部重试和工具步骤，包括后台复盘、恢复尝试和显式学习的每个批次。Curator 与候选构建各自使用原有调度。到时记录 `review_deadline` 并请求原生取消；最多再给 **10 秒**收尾。复盘或取消仍未退出时，结束当前学习 worker，由现有监督进程重新启动。原生已落盘的终态和写入保留；尚未提交结果的尝试由原生记为 `unknown`。耗尽整次时限的尝试不会进入自动恢复，以免逐层重试把时间预算再次放大。原生取消后的已确认写入不回滚。
 
 本次仅自动恢复 observation 产生的后台复盘。`user_request`、`attended` 和带 request_id 的主动学习意图不进入自动重试；`hermes-refine`／`hermes-learn` 继续保留其原材料、focus、结果绑定和取消流程，见 [主动学习合同](./ACTIVE-LEARNING.zh-CN.md)。
 
@@ -37,13 +43,21 @@ scripts/bridge review-retry --settings /absolute/path/bridge.json --attempt FAIL
 
 手动入口默认预览。`--apply` 将已经发现、仍在等待的可重试任务提前到当前时间，由同一个 owner 循环执行；不直接调用模型、不解除未确认结果的限制、不重置累计重试次数。`eligible: false` 表示该任务没有进入执行队列。
 
+对于已核对且无需重跑的阻塞项，可记录处置理由与证据路径。先预览；加 `--apply` 才将队列项登记为 `closed_without_retry`。该处置只关闭桥接恢复队列项，保留原生的执行状态、未确认工具调用和原通知，不产生后继意图。
+
+```sh
+scripts/bridge review-retry --settings /absolute/path/bridge.json --attempt FAILED_ATTEMPT_ID \
+  --close-without-retry --note '说明已核对的实际变更和关闭依据' --evidence /absolute/path/audit.md
+```
+
 ## 配置
 
-只合并 `bridge.json` 中的 `learning.retries`，保留其他配置：
+只合并 `bridge.json` 中的 `learning` 对应字段，保留其他配置：
 
 ```json
 {
   "learning": {
+    "review_timeout_seconds": 900,
     "retries": {
       "enabled": true,
       "max_retries": 3,
@@ -54,7 +68,7 @@ scripts/bridge review-retry --settings /absolute/path/bridge.json --attempt FAIL
 }
 ```
 
-未配置时采用以上默认值。重试上限只能为 1–10 次，延迟必须是 1 秒至 1 天内的有限值，最大延迟不能小于初始延迟。配置在 worker 启动时读取；关闭重试不删除已有记录。
+未配置时采用以上默认值。总时限为 1–3600 秒的有限数值；可通过 `learning_status` 的 `effective_policy.review_timeout_seconds` 回读。重试上限只能为 1–10 次，延迟必须是 1 秒至 1 天内的有限值，最大延迟不能小于初始延迟。配置在 worker 启动时读取；关闭重试不删除已有记录。
 
 ## 存储与回退
 

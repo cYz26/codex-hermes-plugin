@@ -36,6 +36,7 @@ def learning_policy(settings: Settings) -> dict:
         "checked_publication": settings.checked_publication,
         "quality_checks": settings.quality_checks,
         "retention_enabled": settings.retention_enabled,
+        "review_timeout_seconds": settings.review_timeout_seconds,
         "executable_validation": {
             "backend": backend,
             "state": ("disabled" if not settings.quality_checks else

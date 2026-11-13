@@ -18,6 +18,7 @@ from .knowledge import context_view, memory_entries, reconcile
 from .learning_health import native_policy, record_capacity_refusal, snapshot as learning_health
 from .normalize import merge_event, observation
 from .notify import macos_notification, message, should_notify
+from .review_deadline import run_review
 from .review_receipt import ReviewWrites, receipt_text
 from .review_summary import capture_review_summary
 from .review_retries import ReviewRetryQueue
@@ -369,7 +370,7 @@ class Bridge:
                 "revision":intent.get("revision"),"reason":intent.get("reason"),"started_at":started_at})
             with self.review_writes.capture(intent["handle"]) as calls, \
                     capture_review_summary(self.api, intent["handle"]) as summary:
-                result = self.api.run_review(intent["handle"], intent["id"], attempt_id=attempt_id)
+                result = run_review(self.settings, self.api, intent["handle"], intent["id"], attempt_id)
             curator_management = learning_dispatch.mark_user_taught(self, intent, result)
             if curator_management is not None:
                 result = {**result, "curator_management": curator_management}
@@ -889,8 +890,11 @@ class Bridge:
             if not self.resume.is_set() or self.drain.is_set():
                 raise RuntimeError("Learning runtime is paused; retry after the update")
             with StoreConnection(self.settings) as store:
-                return ReviewRetryQueue(self.settings, store).request(params.get("attempt_id"),
-                                                                     dry_run=params.get("dry_run", True))
+                queue = ReviewRetryQueue(self.settings, store)
+                if params.get("close_without_retry") is True:
+                    return queue.close_without_retry(params.get("attempt_id"), note=params.get("note"),
+                                                     evidence=params.get("evidence"), dry_run=params.get("dry_run", True))
+                return queue.request(params.get("attempt_id"), dry_run=params.get("dry_run", True))
         if method == "artifact_read":
             return native_reads.skill(self.api,name=params["name"])
         if method == "retention":

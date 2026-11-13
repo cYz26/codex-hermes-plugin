@@ -14,10 +14,13 @@ def add_parsers(commands):
     curator = commands.add_parser('curator-config', help='Preview or enable native Curator consolidation')
     curator.add_argument('--settings')
     curator.add_argument('--apply', action='store_true')
-    retry = commands.add_parser("review-retry", help="Preview or request a bounded retry of a discovered review attempt")
+    retry = commands.add_parser("review-retry", help="Preview, retry or close a discovered review attempt")
     retry.add_argument("--settings")
     retry.add_argument("--attempt", required=True)
     retry.add_argument("--apply", action="store_true")
+    retry.add_argument("--close-without-retry", action="store_true")
+    retry.add_argument("--note", help="Reason for closing a blocked review without retry")
+    retry.add_argument("--evidence", help="Audit evidence for the closure")
     enterprise=commands.add_parser("enterprise-config",help="Bind operator-authorized enterprise learning to this host and model configuration")
     enterprise.add_argument("--settings")
     enterprise.add_argument("--apply",action="store_true")
@@ -106,8 +109,12 @@ def execute(args):
         return request(Settings.load(args.settings), 'configure_curator', {'dry_run': not args.apply}, timeout=5)
     if args.command == "review-retry":
         from .ipc import request
-        return request(Settings.load(args.settings), "review_retry",
-                       {"attempt_id": args.attempt, "dry_run": not args.apply}, timeout=5)
+        params = {"attempt_id": args.attempt, "dry_run": not args.apply}
+        if args.close_without_retry:
+            params.update(close_without_retry=True, note=args.note, evidence=args.evidence)
+        elif args.note is not None or args.evidence is not None:
+            raise ValueError("Closure notes require --close-without-retry")
+        return request(Settings.load(args.settings), "review_retry", params, timeout=5)
     if args.command=="enterprise-config":
         from .enterprise import make_boundary
         from .updates import exclusive, Updater

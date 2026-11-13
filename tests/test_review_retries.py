@@ -1,9 +1,12 @@
 """Recovery must execute a new native attempt and retain earlier receipts."""
 import contextlib
 import json
+import os
 import re
+import subprocess
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -215,6 +218,28 @@ class NativeRetryContracts(unittest.TestCase):
         recovered.sync(self.service, force=True)
         self.assertEqual(recovered.summary()["counts"], {"completed": 1})
 
+    def test_stored_ttfb_failure_enters_cooldown_without_replaying_the_attempt(self):
+        error = "Codex stream produced no parsed stream event within 497s (TTFB threshold: 300s)"
+        self.fail_review(error=error)
+        queue = self.queue()
+        # Reproduce the queue row created by the previous worker build.
+        with patch("hermes_codex_learning.review_retries.retry_reason", return_value="non_transient"):
+            queue.sync(self.service)
+        self.assertEqual(queue.summary()["counts"], {"blocked": 1})
+
+        queue.sync(self.service, force=True)
+        retry, = queue.summary()["items"]
+        self.assertEqual((retry["state"], retry["reason"], retry["next_retry_at"]),
+                         ("waiting", "connection", 1300.0))
+        self.assertEqual(queue.process(self.service), [])
+        self.now = 1300.0
+        successor, = queue.process(self.service)
+        self.assertEqual(queue.process(self.service), [])
+        self.assertNotEqual(successor["intent_id"], self.intent)
+        original = self.service.run_review(self.handle, self.intent, attempt_id="failed-1")
+        self.assertEqual((original["run_status"], original["error"]), ("failed", error))
+        self.assertEqual(len(self.service.runtime.reviews), 1)
+
     def test_three_retries_back_off_and_then_stop(self):
         self.fail_review()
         queue = self.queue()
@@ -245,20 +270,104 @@ class NativeRetryContracts(unittest.TestCase):
         self.assertEqual(queue.process(self.service), [])
         self.assertEqual(queue.summary()["items"][0]["reason"], "unconfirmed_outcome")
 
-    def bridge(self):
+    def test_reviewed_unknown_write_stays_closed_without_changing_native_history(self):
+        fact = {"tool": "skill_manage", "call_id": "missing-result"}
+        self.fail_review(status="interrupted", error=None, uncertain=[fact])
+        bridge = self.bridge()
+        bridge.reviews()
+        params = {"attempt_id": "failed-1", "close_without_retry": True,
+                  "note": "The expected changes are already present.",
+                  "evidence": "/audit/attempt-reconciliation.md"}
+        preview = bridge.rpc("review_retry", params)
+        self.assertTrue(preview["can_close_without_retry"])
+        self.assertEqual(preview["state"], "blocked")
+        applied = bridge.rpc("review_retry", {**params, "dry_run": False})
+        self.assertEqual(applied["state"], "closed_without_retry")
+        self.assertTrue(applied["applied"])
+        bridge.retry_queue.sync(self.service, force=True)
+        self.assertEqual(bridge.retry_queue.summary()["counts"], {"closed_without_retry": 1})
+        self.assertEqual(bridge.retry_queue.process(self.service), [])
+        original = self.service.run_review(self.handle, self.intent, attempt_id="failed-1")
+        self.assertEqual((original["run_status"], original["uncertain"]), ("interrupted", [fact]))
+        self.assertEqual(len(self.service.runtime.reviews), 1)
+
+    def bridge(self, **settings_overrides):
         from hermes_codex_learning.daemon import Bridge
         def read(**kwargs):
             if kwargs["kind"] == "context":
                 return {"version": "fixture", "summary": "", "memories": {}, "skills": []}
             return self.service.read(**kwargs)
         api = types.SimpleNamespace(version=1, read=read, retry_review=self.service.retry_review,
-                                    run_review=self.service.run_review)
-        settings = Settings(self.home, self.home, self.home, Path("/usr/bin/python3"))
+                                    run_review=self.service.run_review, cancel=self.service.cancel)
+        settings = Settings(self.home, self.home, self.home, Path("/usr/bin/python3"), **settings_overrides)
         bridge = Bridge(settings, api)
         self.addCleanup(bridge.store.close)
         self.now = 1000.0
         bridge.retry_queue.clock = lambda: self.now
         return bridge
+
+    def test_review_deadline_cancels_the_whole_attempt_and_keeps_confirmed_writes(self):
+        cancelled = threading.Event()
+        write = {"tool": "skill_manage", "action": "patch", "name": "fixture-skill",
+                 "call_id": "confirmed-before-timeout", "result": {"success": True}}
+
+        def review(*_):
+            state = "interrupted" if cancelled.wait(3) else "completed"
+            return {"run_status": state, "applied": [write], "uncertain": []}
+
+        self.service.runtime.review = review
+        self.service.runtime.cancel = cancelled.set
+        bridge = self.bridge(review_timeout_seconds=1)
+        bridge.reviews()
+
+        attempt, = self.service.read(kind="status")["attempts"]
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual((attempt["run_status"], attempt["applied"]), ("interrupted", [write]))
+        for _ in range(2):
+            bridge.retry_queue.sync(self.service, force=True)
+        retry, = bridge.retry_queue.summary()["items"]
+        self.assertEqual((retry["state"], retry["reason"], retry["next_retry_at"]),
+                         ("blocked", "review_deadline", None))
+        self.assertEqual(bridge.retry_queue.process(self.service), [])
+
+    def test_hard_deadline_recovers_an_unacknowledged_review_as_unknown(self):
+        self.service.close()
+        # Run a separate owner so the real hard stop cannot kill the test runner.
+        script = '''
+from pathlib import Path
+import sys
+import time
+from test_review_retries import NativeRetryContracts
+
+fixture = NativeRetryContracts()
+fixture.setUp()
+service_type = type(fixture.service)
+fixture.service.close()
+fixture.service = service_type(Path(sys.argv[1]), "fixture")
+fixture.home = fixture.service.home
+fixture.service.runtime.review = lambda *_: time.sleep(7)
+fixture.service.runtime.cancel = lambda: time.sleep(7)
+from hermes_codex_learning import review_deadline
+review_deadline.CANCEL_GRACE_SECONDS = 0.5
+fixture.bridge(review_timeout_seconds=1).reviews()
+'''
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run([sys.executable, "-B", "-c", script, str(self.home)],
+                                env={**os.environ, "PYTHONPATH": os.pathsep.join(map(str, (root / "src", root / "tests")))},
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 124, result.stderr)
+        service_type = type(self.service)
+        self.service = service_type(self.home, "fixture")
+        self.addCleanup(self.service.close)
+        attempt, = self.service.read(kind="status")["attempts"]
+        self.assertEqual(attempt["run_status"], "unknown")
+        self.assertEqual(attempt["id"], self.service.run_review(self.handle, self.intent, attempt_id=attempt["id"])["id"])
+        queue = self.queue()
+        queue.sync(self.service, force=True)
+        retry, = queue.summary()["items"]
+        self.assertEqual((retry["state"], retry["reason"], retry.get("failure_reason")),
+                         ("blocked", "unconfirmed_outcome", "review_deadline"))
+        self.assertEqual(queue.process(self.service), [])
 
     def test_owner_loop_runs_the_due_retry_and_reports_its_completion(self):
         self.fail_review()
