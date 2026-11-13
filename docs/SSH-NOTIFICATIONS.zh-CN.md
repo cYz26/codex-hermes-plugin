@@ -50,7 +50,7 @@ python3 desktop/install_macos.py --host YOUR_SSH_HOST \
 
 若安装报告中的 `authorization.allowed=false`、`authorization_status=1`，本次安装停在新版授权步骤。可双击 `desktop/recover_macos_notification.command`，或在终端运行 `python3 desktop/refresh_macos_notification.py --recover-authorization`。脚本先读取授权；仍被拒绝时，使用[通知设置的应用入口](https://neat.software/blog/swift-go-to-apps-notification-settings-on-macos)打开新标识对应的页面。开启「允许通知」后返回终端按回车，脚本重新读取一次系统结果，再决定是否继续迁移。重新检查仍被拒绝时保留原 App，不发送测试。报告记录生成时间、各次授权结果和失败后的实际发送方，不能以旧的 `before` 快照判断当前安装。
 
-接收器每五秒查询通知，同一 scope 的连续结果合并显示。点击横幅打开独立、只读 AppKit 明细窗口，并显示对应范围。状态、回执和本地投递记录位于 `~/Library/Application Support/HermesLearningSSH/`；不修改 Codex 的 provider、模型或 SSH 配置。
+接收器每五秒查询通知，按项目和通知类别合并。同一项目的待审批提案会在独立的「Hermes 待审批」横幅中显示。点击横幅打开只读明细，记忆提案还可用「查看当前待审」打开项目审批页。此功能需要同时更新学习服务和桌面接收器。状态、回执和本地投递记录位于 `~/Library/Application Support/HermesLearningSSH/`。
 
 断线后补收，系统已接受的记录不会重复发送。进程在系统确认前中断的投递保留为不确定状态，先核对记录再处理，不能盲目重复通知。
 

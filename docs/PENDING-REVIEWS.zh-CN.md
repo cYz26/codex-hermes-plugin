@@ -31,11 +31,15 @@ scripts/bridge approvals prune --settings /absolute/learning/bridge.json --cwd /
 
 ## Mac 桌面入口
 
+后台复盘保存新提案后，macOS 会单独显示「Hermes 待审批」，并列出项目和本次提案数量。一轮复盘有多条提案时发一条提醒。若复盘同时有生效变更、失败或重试结果，学习回执另外送达。提醒按复盘结果去重，升级前已生成的回执不会重发。
+
+记忆提案可从提醒的「查看当前待审」操作进入项目审批页。技能和用户档案提案的提醒明细给出原生 Hermes 的 `/skills pending` 或 `/memory pending` 入口。技能共享候选的验证通知继续按原有发布流程发送。
+
 通知窗口的「查看当前待审」打开该项目的浏览器审批页。页面展示完整差异，支持逐条批准或丢弃，也可核对并清理重复与过期提案。审批页只监听本机回环地址，并绑定当前浏览器会话、项目与提案版本。历史回执保留生成时的结果，当前待审状态与最近处理结果以审批页为准。
 
 ### 本机学习服务
 
-运行 `scripts/bridge install-notifier` 更新通知 App 和随包安装的审批页。打开本机回执时，审批页使用现有 Hermes 学习 LaunchAgent 的配置，读取该回执所属项目的待审记忆。
+按[安装与更新](./INSTALL.zh-CN.md#更新现有学习服务)更新本机学习服务，再运行 `scripts/bridge install-notifier` 更新通知 App 和随包安装的审批页。审批页使用 Hermes 学习 LaunchAgent 的配置，读取回执所属项目的待审记忆。
 
 ### SSH 接收器
 

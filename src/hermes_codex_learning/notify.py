@@ -5,6 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from .approvals import pending_proposal_id
 from .review_input import BUDGET_EXHAUSTED
 from .review_receipt import receipt_text
 from .review_summary import summary_text
@@ -12,14 +13,62 @@ from .store import atomic_json, digest
 from .macos_bundle import (APP_NAME, APP_ID, APP_EXECUTABLE, LEGACY_APP_ID,
                            bundle_identifier, legacy_notifier_app, notifier_app)
 
+APPROVAL_REQUIRED = "approval.required"
+
+
+def approval_notice(settings, event: dict) -> dict | None:
+    project = event.get("project")
+    if (event["kind"] != "review.finished" or not event.get("staged")
+            or not project or settings.project_for(project) != project):
+        return None
+
+    proposals = {"memory": set(), "user": set(), "skills": set()}
+    for fact in event["staged"]:
+        identifier = pending_proposal_id(fact)
+        if not identifier or fact.get("tool") not in ("memory", "skill_manage"):
+            continue
+        subsystem = "memory" if fact["tool"] == "memory" else "skills"
+        path = settings.home / "pending" / subsystem / (identifier + ".json")
+        if path.is_symlink() or not path.is_file():
+            continue
+        target = "user" if subsystem == "memory" and fact.get("target") == "user" else subsystem
+        proposals[target].add(identifier)
+
+    counts, details, entities = [], [], []
+    for target, label, instruction in (
+        ("memory", "记忆", "请在项目审批页查看差异。"),
+        ("user", "用户档案", "请在学习实例的 Hermes 中运行 /memory pending。"),
+        ("skills", "技能", "请在学习实例的 Hermes 中运行 /skills pending。"),
+    ):
+        identifiers = sorted(proposals[target])
+        if identifiers:
+            counts.append(f"{len(identifiers)} 项{label}提案")
+            details.append(f"{label}提案 {'、'.join(identifiers)}。{instruction}")
+            entities.extend(f"{target}:{identifier}" for identifier in identifiers)
+    if not entities:
+        return None
+
+    summary = f"[{Path(project).name or project}] {'、'.join(counts)}待审批"
+    return {"id": event["id"] + ":approval", "kind": APPROVAL_REQUIRED, "project": project,
+            "message": summary, "receipt": "\n\n".join([summary, *details]),
+            "pending_entities": entities, "project_approval": bool(proposals["memory"])}
+
 
 def should_notify(event: dict) -> bool:
-    if event["kind"] in {"update.notice", "publication.applied", "publication.pending", "review.retry_scheduled"}:
+    if event["kind"] in {APPROVAL_REQUIRED, "update.notice", "publication.applied", "publication.pending", "review.retry_scheduled"}:
         return True
     return event["kind"] == "review.finished" and bool(
-        event.get("applied_entities", event.get("applied")) or event.get("staged") or event.get("run_status") != "completed"
+        event.get("applied_entities", event.get("applied")) or event.get("run_status") != "completed"
+        or (event.get("refused") if event.get("approval_notice") else event.get("staged"))
         or (event.get("retry") or {}).get("retry_index")
     )
+
+
+def notification_events(event: dict):
+    if reminder := event.get("approval_notice"):
+        yield reminder
+    if should_notify(event):
+        yield event
 
 
 def message(event: dict) -> str:
@@ -50,7 +99,7 @@ def _message(event: dict) -> str:
         return f"本轮已加载 Hermes 技能：{event.get('name', '')}"
     from .notices import entities
     applied = event.get("applied_entities", entities(event.get("applied", [])))
-    staged = entities(event.get("staged", []))
+    staged = [] if event.get("approval_notice") else entities(event.get("staged", []))
     if event.get("run_status") in {"failed", "interrupted", "unknown"}:
         reason = ("Hermes 复盘输入超出预算" if event.get("failure_reason") == BUDGET_EXHAUSTED
                   else "Hermes 本次学习未完成")
@@ -71,8 +120,11 @@ def persist_receipt(state: Path, event: dict) -> Path:
     path = state / "receipts" / (digest(event["id"]) + ".json")
     if not path.exists():
         detail = event.get("receipt") or receipt_text(event, {}, event.get("created", time.time()))
-        atomic_json(path, {"id": event["id"], "scope": event.get("scope") or event.get("project") or "global",
-                          "summary": event["message"], "text": detail})
+        receipt = {"id": event["id"], "scope": event.get("scope") or event.get("project") or "global",
+                   "summary": event["message"], "text": detail}
+        if event.get("kind") == APPROVAL_REQUIRED:
+            receipt.update(kind=APPROVAL_REQUIRED, project_approval=event["project_approval"])
+        atomic_json(path, receipt)
     return path
 
 

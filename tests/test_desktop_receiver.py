@@ -52,3 +52,47 @@ class DesktopReceiverTests(unittest.TestCase):
             a = json.loads(Path(next(path for scope, path in rows if scope == "/a")).read_text())
             self.assertIn("1 项经验生效", a["summary"])
             client.db.close()
+
+    def test_approval_reminders_stay_separate_in_both_receiver_protocols(self):
+        for protocol in (1, 2):
+            with self.subTest(protocol=protocol), tempfile.TemporaryDirectory() as directory:
+                client = receiver.Receiver({"state": directory, "host": "devbox", "bridge": "/bridge",
+                                            "settings": "/settings", "notifier": "/notifier"})
+                self.addCleanup(client.db.close)
+                review = {"id": "review", "scope": "/project", "summary": "普通学习回执",
+                          "text": "review detail", "applied_entities": ["skill:one"], "pending_entities": []}
+                approval = {**review, "id": "approval", "kind": "approval.required", "text": "memory detail",
+                            "project_approval": True, "applied_entities": [], "pending_entities": ["memory:11111111"]}
+                skill_approval = {**approval, "id": "skills", "text": "skill detail", "project_approval": False,
+                                  "pending_entities": ["skills:22222222"]}
+                items = {item["id"]: item for item in (review, approval, skill_approval)}
+                posted = []
+
+                def remote(action, *args, body=None):
+                    if action == "capabilities":
+                        return {"protocol_version": protocol}
+                    if action == "poll":
+                        return list(items.values())
+                    if action == "detail":
+                        return items[args[1]]
+                    if action == "sync":
+                        return {"items": list(items.values()) if body["after"] == 0 else [], "cursor": 3}
+                    self.assertEqual(action, "ack")
+                    return {}
+
+                def post(argv, **_):
+                    path = Path(argv[2])
+                    posted.append(json.loads(path.read_text()))
+                    path.with_suffix(".json.sent").write_text("accepted")
+                    return SimpleNamespace(returncode=0)
+
+                with patch.object(client, "remote", side_effect=remote), \
+                     patch.object(receiver.subprocess, "run", side_effect=post):
+                    client.poll()
+                    client.poll()
+
+                self.assertEqual(len(posted), 2)
+                self.assertEqual(posted[0], {"summary": review["summary"], "scope": "/project", "text": review["text"]})
+                self.assertEqual(posted[1], {"summary": "[project] 2 项提案待审批", "scope": "/project",
+                                             "text": "memory detail\n\nskill detail", "kind": "approval.required",
+                                             "project_approval": True})

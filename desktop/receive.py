@@ -15,6 +15,9 @@ import time
 from pathlib import Path
 
 
+APPROVAL_REQUIRED = "approval.required"
+
+
 def identity(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -80,6 +83,30 @@ class Receiver:
             with self.db:
                 self.db.execute("UPDATE batches SET state=? WHERE id=?", (target, identifier))
 
+    def write_batch(self, scope, group, text):
+        ids = sorted(item["id"] for item in group)
+        identifier = identity([scope, ids])
+        receipt = {"summary": group[0]["summary"], "scope": scope, "text": text}
+        approval = group[0].get("kind") == APPROVAL_REQUIRED
+        if len(group) > 1:
+            pending = {proposal for item in group for proposal in item["pending_entities"]}
+            project = Path(scope).name or scope
+            if approval:
+                receipt["summary"] = f"[{project}] {len(pending)} 项提案待审批"
+            else:
+                applied = {entity for item in group for entity in item["applied_entities"]}
+                receipt["summary"] = (f"[{project}] {len(applied)} 项经验生效，"
+                                      f"{len(pending)} 项待处理；{len(group)} 条回执")
+        if approval:
+            receipt.update(kind=APPROVAL_REQUIRED,
+                           project_approval=any(item.get("project_approval") is True for item in group))
+        path = self.state / (identifier + ".json")
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(receipt, ensure_ascii=False))
+        temporary.chmod(0o600)
+        temporary.replace(path)
+        return identifier, ids, path
+
     def poll(self):
         if self.protocol is None:
             self.protocol = self.remote("capabilities").get("protocol_version", 1)
@@ -91,21 +118,10 @@ class Receiver:
         known = {item for row in self.db.execute("SELECT ids FROM batches") for item in json.loads(row[0])}
         for item in items:
             if item["id"] not in known:
-                groups.setdefault(item["scope"], []).append(item)
-        for scope, group in groups.items():
-            ids = sorted(item["id"] for item in group)
-            identifier = identity([scope, ids])
+                groups.setdefault((item["scope"], item.get("kind") == APPROVAL_REQUIRED), []).append(item)
+        for (scope, _), group in groups.items():
             receipts = [self.remote("detail", "--id", item["id"], "--scope", scope) for item in group]
-            applied = set().union(*(set(item["applied_entities"]) for item in group))
-            pending = set().union(*(set(item["pending_entities"]) for item in group))
-            summary = group[0]["summary"] if len(group) == 1 else (
-                f"[{Path(scope).name}] {len(applied)} 项经验生效，{len(pending)} 项待处理；{len(group)} 条回执")
-            path = self.state / (identifier + ".json")
-            temporary = path.with_suffix(".tmp")
-            temporary.write_text(json.dumps({"summary": summary, "scope": scope,
-                                 "text": "\n\n".join(item["text"] for item in receipts)}, ensure_ascii=False))
-            temporary.chmod(0o600)
-            temporary.replace(path)
+            identifier, ids, path = self.write_batch(scope, group, "\n\n".join(item["text"] for item in receipts))
             with self.db:
                 self.db.execute("INSERT INTO batches VALUES (?,?,?,?,?)", (identifier, scope, json.dumps(ids), str(path), "dispatching"))
             result = subprocess.run([notifier_binary(self.config["notifier"]), "--post", str(path)], capture_output=True, timeout=15)
@@ -139,20 +155,9 @@ class Receiver:
         groups = {}
         for raw, in self.db.execute("SELECT payload FROM received WHERE batch IS NULL ORDER BY rowid LIMIT 100"):
             item = json.loads(raw)
-            groups.setdefault(item["scope"], []).append(item)
-        for scope, group in groups.items():
-            ids = sorted(item["id"] for item in group)
-            identifier = identity([scope, ids])
-            applied = set().union(*(set(item["applied_entities"]) for item in group))
-            pending = set().union(*(set(item["pending_entities"]) for item in group))
-            summary = group[0]["summary"] if len(group) == 1 else (
-                f"[{Path(scope).name}] {len(applied)} 项经验生效，{len(pending)} 项待处理；{len(group)} 条回执")
-            path = self.state / (identifier + ".json")
-            temporary = path.with_suffix(".tmp")
-            temporary.write_text(json.dumps({"summary": summary, "scope": scope,
-                                             "text": "\n\n".join(item["text"] for item in group)}, ensure_ascii=False))
-            temporary.chmod(0o600)
-            temporary.replace(path)
+            groups.setdefault((item["scope"], item.get("kind") == APPROVAL_REQUIRED), []).append(item)
+        for (scope, _), group in groups.items():
+            identifier, ids, path = self.write_batch(scope, group, "\n\n".join(item["text"] for item in group))
             with self.db:
                 self.db.execute("INSERT INTO batches VALUES (?,?,?,?,?)",
                                 (identifier, scope, json.dumps(ids), str(path), "dispatching"))

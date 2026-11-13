@@ -17,7 +17,7 @@ from .delegation import exclude_internal, register_delegation, task_input
 from .knowledge import context_view, memory_entries, reconcile
 from .learning_health import native_policy, record_capacity_refusal, snapshot as learning_health
 from .normalize import merge_event, observation
-from .notify import macos_notification, message, should_notify
+from .notify import approval_notice, macos_notification, message, notification_events, should_notify
 from .review_deadline import run_review
 from .review_receipt import ReviewWrites, receipt_text
 from .review_summary import capture_review_summary
@@ -49,11 +49,15 @@ class Bridge:
             self.resume.set()
         self.store.set("state", "starting")
 
-    def emit(self, event: dict) -> None:
+    def emit(self, event: dict, *, calls: dict | None = None) -> None:
+        reminder = approval_notice(self.settings, event)
+        if reminder:
+            event = {**event, "approval_notice": reminder}
         event = {**event, "message": message(event)}
-        self.store.notice(event)
+        if calls is not None and (reminder or should_notify(event)):
+            event["receipt"] = receipt_text(event, calls, event["finished_at"], started_at=event["started_at"])
         from .notices import publish
-        publish(self.settings, event)
+        publish(self.settings, self.store.notice(event))
 
     def handle_for(self, source: dict) -> str:
         result = self.api.open({**{k: source[k] for k in ("host", "project", "chat")}, "executor": "Codex App"})
@@ -439,10 +443,7 @@ class Bridge:
                          "applied_entities": sorted(set(applied_entities)), "review_summary": summary["text"]}
                 if retry_available:
                     event["retry"] = self.retry_queue.record(intent, {**result, "id": attempt_id}, local)
-                if should_notify(event):
-                    event["receipt"] = receipt_text({**event, "message": message(event)}, calls, finished_at,
-                                                    started_at=started_at)
-                self.emit(event)
+                self.emit(event, calls=calls)
             self.store.set("state", "publishing")
             if result["run_status"] in {"completed","failed","interrupted","unknown","superseded"}:
                 self.clear_reviewed_priority(intent,started_at)
@@ -790,9 +791,9 @@ class Bridge:
         if not self.settings.notifications or sys.platform != "darwin":
             return
         for event in self.store.consume("os-notification", 20):
-            if should_notify(event):
-                result = macos_notification(self.settings.state, event)
-                self.store.set("notification:" + event["id"], result)
+            for notice in notification_events(event):
+                result = macos_notification(self.settings.state, notice)
+                self.store.set("notification:" + notice["id"], result)
 
     def loop(self) -> None:
         if self.resume.is_set():

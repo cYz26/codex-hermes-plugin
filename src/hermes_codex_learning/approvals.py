@@ -17,6 +17,14 @@ STATES = ("pending", "duplicate", "stale", "already_applied", "unsupported")
 ID_PATTERN = re.compile(r"[a-f0-9]{8}")
 
 
+def pending_proposal_id(fact):
+    result = fact.get("result") if isinstance(fact, dict) else None
+    identifier = result.get("pending_id") if isinstance(result, dict) else None
+    if isinstance(identifier, str) and ID_PATTERN.fullmatch(identifier):
+        return identifier
+    return None
+
+
 def change_fingerprint(changes):
     return digest([{key: change[key] for key in ("action", "before", "after")} for change in changes])
 
@@ -109,8 +117,7 @@ class PendingReviews:
             for fact in json.loads(row[0]).get("staged", []):
                 if not isinstance(fact, dict) or fact.get("tool") != "memory":
                     continue
-                identifier = fact.get("result", {}).get("pending_id")
-                if isinstance(identifier, str) and ID_PATTERN.fullmatch(identifier):
+                if identifier := pending_proposal_id(fact):
                     identifiers.add(identifier)
         return sorted(identifiers)
 

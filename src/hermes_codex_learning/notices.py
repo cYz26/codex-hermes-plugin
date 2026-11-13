@@ -54,20 +54,26 @@ class NoticeQueue:
         self.db.close()
 
     def publish(self, event: dict) -> None:
-        from .notify import should_notify, persist_receipt
-        if not should_notify(event):
-            return
+        from .notify import notification_events
+        with self.db:
+            for notice in notification_events(event):
+                self._publish(notice)
+
+    def _publish(self, event: dict) -> None:
+        from .notify import APPROVAL_REQUIRED, persist_receipt
         if event["kind"] == "publication.applied":
             event = {"id": event["id"], "kind": event["kind"], "name": event["name"],
                      "message": "Hermes 已发布 1 项通用技能：" + event["name"],
                      "receipt": "通用技能：" + event["name"] + "\n共享检查与发布：通过"}
         scope = event.get("project") or ("global" if event["kind"] == "publication.applied" else "system")
         applied = event.get("applied_entities", entities(event.get("applied", [])))
-        staged = entities(event.get("staged", []))
+        staged = [] if event.get("approval_notice") else entities(event.get("staged", []))
         if event["kind"] == "publication.applied":
             applied = ["skill:" + event["name"]]
         elif event["kind"] == "publication.pending":
             staged = ["skill:" + event["name"]]
+        elif event["kind"] == APPROVAL_REQUIRED:
+            staged = event["pending_entities"]
         incomplete = event.get("run_status") in {"failed", "interrupted", "unknown"}
         status = "partial" if incomplete and applied else "failed" if incomplete else "applied" if applied else "pending"
         path = persist_receipt(self.state, {**event, "scope": scope})
@@ -76,9 +82,10 @@ class NoticeQueue:
                    "receipt": str(path), "stage": "queued", "visibility": "unknown"}
         if event.get("retry"):
             payload["retry"] = event["retry"]
-        with self.db:
-            self.db.execute("INSERT OR IGNORE INTO notices VALUES (?,?,?,?)", (event["id"], scope, dumps(payload), time.time()))
-            self.db.execute("INSERT OR IGNORE INTO notice_order(id) VALUES (?)", (event["id"],))
+        if event["kind"] == APPROVAL_REQUIRED:
+            payload.update(kind=APPROVAL_REQUIRED, project_approval=event["project_approval"])
+        self.db.execute("INSERT OR IGNORE INTO notices VALUES (?,?,?,?)", (event["id"], scope, dumps(payload), time.time()))
+        self.db.execute("INSERT OR IGNORE INTO notice_order(id) VALUES (?)", (event["id"],))
 
     def sync(self, consumer: str, *, after: int = 0, acknowledgements=None, limit: int = 20) -> dict:
         if type(after) is not int or after < 0:

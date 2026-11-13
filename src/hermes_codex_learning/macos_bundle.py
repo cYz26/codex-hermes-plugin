@@ -172,7 +172,7 @@ def install_notification_app(root: Path, app: Path | None = None) -> dict:
         (contents / "Info.plist").write_bytes(plistlib.dumps({
             "CFBundleIdentifier": APP_ID, "CFBundleExecutable": APP_EXECUTABLE,
             "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "6", "LSMinimumSystemVersion": "12.0",
+            "CFBundlePackageType": "APPL", "CFBundleVersion": "7", "LSMinimumSystemVersion": "12.0",
             "HermesReviewProtocolVersion": 1,
             "HermesReviewPython": sys.executable,
             "HermesReviewSourceSHA256": hashlib.sha256((root / "macos/HermesLearningNotifier.swift").read_bytes()).hexdigest(),

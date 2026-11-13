@@ -6,6 +6,20 @@ private struct Receipt: Decodable {
     let summary: String
     let text: String
     let scope: String?
+    let kind: String?
+    let projectApproval: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case summary, text, scope, kind
+        case projectApproval = "project_approval"
+    }
+
+    var requiresApproval: Bool { kind == "approval.required" }
+
+    var reviewScope: String? {
+        guard let scope, scope.hasPrefix("/"), projectApproval != false else { return nil }
+        return scope
+    }
 
     init(at url: URL) throws {
         self = try JSONDecoder().decode(Self.self, from: Data(contentsOf: url))
@@ -16,6 +30,8 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
     private let center = UNUserNotificationCenter.current()
     private let openAction = "view-learning-receipt"
     private let category = "learning-receipt"
+    private let reviewAction = "open-pending-reviews"
+    private let approvalCategory = "learning-approval"
     private var window: NSWindow?
     private var reviewTarget: (receipt: URL, scope: String)?
     private var reviewProcesses: [Process] = []
@@ -23,7 +39,11 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
     func applicationWillFinishLaunching(_ notification: Notification) {
         center.delegate = self
         let view = UNNotificationAction(identifier: openAction, title: "查看学习明细", options: .foreground)
-        center.setNotificationCategories([UNNotificationCategory(identifier: category, actions: [view], intentIdentifiers: [])])
+        let review = UNNotificationAction(identifier: reviewAction, title: "查看当前待审", options: .foreground)
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: category, actions: [view], intentIdentifiers: []),
+            UNNotificationCategory(identifier: approvalCategory, actions: [review], intentIdentifiers: []),
+        ])
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -91,9 +111,11 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                     return
                 }
                 let content = UNMutableNotificationContent()
-                content.title = "学习回执"
+                content.title = receipt.requiresApproval ? "Hermes 待审批" : "学习回执"
                 content.body = receipt.summary
-                content.categoryIdentifier = self.category
+                content.categoryIdentifier = receipt.requiresApproval && receipt.reviewScope != nil
+                    ? self.approvalCategory : self.category
+                content.threadIdentifier = receipt.requiresApproval ? self.approvalCategory : self.category
                 content.userInfo = ["receiptPath": url.path]
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
                 let request = UNNotificationRequest(identifier: url.deletingPathExtension().lastPathComponent,
@@ -119,13 +141,19 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
-        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier || response.actionIdentifier == openAction,
-              let path = response.notification.request.content.userInfo["receiptPath"] as? String else {
+        let action = response.actionIdentifier
+        guard let path = response.notification.request.content.userInfo["receiptPath"] as? String else {
             completionHandler()
             return
         }
         DispatchQueue.main.async {
-            self.showReceipt(URL(fileURLWithPath: path))
+            let url = URL(fileURLWithPath: path)
+            if action == self.reviewAction, let receipt = try? Receipt(at: url), receipt.requiresApproval,
+               let scope = receipt.reviewScope {
+                self.openReviews(receipt: url, scope: scope)
+            } else if action == UNNotificationDefaultActionIdentifier || action == self.openAction || action == self.reviewAction {
+                self.showReceipt(url)
+            }
             completionHandler()
         }
     }
@@ -138,7 +166,7 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         scroll.hasVerticalScroller = true
         let text = NSTextView(frame: scroll.bounds)
         let receipt = try? Receipt(at: url)
-        if let scope = receipt?.scope, scope.hasPrefix("/") {
+        if let scope = receipt?.reviewScope {
             reviewTarget = (url, scope)
         } else {
             reviewTarget = nil
@@ -154,7 +182,7 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         text.textContainer?.widthTracksTextView = true
         scroll.documentView = text
         content.addSubview(scroll)
-        let review = NSButton(title: "查看当前待审", target: self, action: #selector(openReviews))
+        let review = NSButton(title: "查看当前待审", target: self, action: #selector(openCurrentReviews))
         review.frame = NSRect(x: 22, y: 12, width: 145, height: 28)
         review.bezelStyle = .rounded
         review.isEnabled = reviewTarget != nil
@@ -169,7 +197,7 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         let viewer = window ?? NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable, .miniaturizable],
                                         backing: .buffered, defer: false)
         viewer.isReleasedWhenClosed = false
-        viewer.title = "Hermes 学习明细"
+        viewer.title = receipt?.requiresApproval == true ? "Hermes 待审批" : "Hermes 学习明细"
         viewer.contentView = content
         if window == nil { viewer.center() }
         window = viewer
@@ -180,11 +208,15 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         }
     }
 
-    @objc private func openReviews() {
+    @objc private func openCurrentReviews() {
         guard let target = reviewTarget else { return }
+        openReviews(receipt: target.receipt, scope: target.scope)
+    }
+
+    private func openReviews(receipt: URL, scope: String) {
         let receiver = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/HermesLearningSSH", isDirectory: true)
-        let receiptDirectory = target.receipt.resolvingSymlinksInPath().deletingLastPathComponent()
+        let receiptDirectory = receipt.resolvingSymlinksInPath().deletingLastPathComponent()
         let process = Process()
         if receiptDirectory.path == receiver.resolvingSymlinksInPath().path {
             let helper = receiver.appendingPathComponent("review.command")
@@ -200,7 +232,7 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                 return
             }
             process.executableURL = helper
-            process.arguments = [target.scope]
+            process.arguments = [scope]
         } else {
             guard let script = Bundle.main.url(forResource: "review", withExtension: "py"),
                   let python = Bundle.main.object(forInfoDictionaryKey: "HermesReviewPython") as? String else {
@@ -211,7 +243,7 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                 return
             }
             process.executableURL = URL(fileURLWithPath: python)
-            process.arguments = ["-I", "-B", script.path, "--receipt", target.receipt.path]
+            process.arguments = ["-I", "-B", script.path, "--receipt", receipt.path]
         }
         process.standardOutput = FileHandle.nullDevice
         let errors = Pipe()

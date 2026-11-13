@@ -115,10 +115,13 @@ class Store:
     def pending(self) -> list[dict]:
         return [dict(r) for r in self.db.execute("SELECT * FROM events WHERE delivered IS NULL ORDER BY created,id LIMIT 100")]
 
-    def notice(self, event: dict) -> None:
+    def notice(self, event: dict) -> dict:
         with self.db:
-            self.db.execute("INSERT OR IGNORE INTO notices(id,payload,created) VALUES (?,?,?)",
-                            (event["id"], dumps(event), time.time()))
+            inserted = self.db.execute("INSERT OR IGNORE INTO notices(id,payload,created) VALUES (?,?,?)",
+                                       (event["id"], dumps(event), time.time()))
+            if inserted.rowcount:
+                return event
+            return json.loads(self.db.execute("SELECT payload FROM notices WHERE id=?", (event["id"],)).fetchone()[0])
 
     def consume(self, consumer: str, limit: int = 3, *, project: str | None = None,
                 chat: str | None = None, legacy_project: str | None = None) -> list[dict]:
