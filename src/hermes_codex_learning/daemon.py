@@ -624,6 +624,7 @@ class Bridge:
         if not isinstance(context.get("skills"), list):
             raise ValueError("Native skill catalog is unavailable; keep the previous publication")
         publications = self.store.get("publications-v1", {})
+        publication_reviews = self.store.get("publication-reviews-v1", {})
         aliases = self.store.get("publication-aliases", {})
         present = {item["name"] for item in context.get("skills", [])}
         native_aliases = self.store.get('native-skill-aliases', {})
@@ -636,7 +637,7 @@ class Bridge:
                                   self.settings.quality_checks, verifier_hash() if self.settings.quality_checks else None,
                                   native_aliases, self.store.get('lifecycle-withheld', {}),
                                   self.store.get('native-candidate-intents', {}),
-                                  self.store.get('native-lifecycle-status', {}).get('state'),
+                                  self.store.get('native-lifecycle-status', {}).get('state'), publication_reviews,
                                   [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]])
         if self.store.get("publication-context-version") != publication_key:
             index = context.get("bridge_provenance", {})
@@ -673,6 +674,11 @@ class Bridge:
                         resources = {name: (artifact_root / name).read_text() for name in value["files"]}
                         assessment = admit({"kind": "shared_candidate", "resources": resources, "source_projects": origins},
                                            self.settings.data_policy or {"enabled": True}, origins[0], purpose="share")
+                        from .publication_review import matches
+                        reviewed = publication_reviews.get(name)
+                        if not self.settings.data_policy and matches(reviewed, value, origins):
+                            assessment = {"allowed": True, "basis": "version_bound_operator_review"}
+                            decision = {**decision, "review_hash": reviewed["review_hash"]}
                         from .workflow import PROJECT as WORKFLOW_PROJECT
                         attestation = self.store.get('workflow-skill-attestations', {}).get(name, {})
                         if (origins == [WORKFLOW_PROJECT] and name.startswith('workflow-')
@@ -864,6 +870,11 @@ class Bridge:
 
     def rpc(self, method: str, params: dict) -> dict:
         from .learning_requests import METHODS, rpc as learning_rpc
+        if method == "review_publication":
+            from .publication_review import submit
+            project = self.request_project({"cwd": params["cwd"]})
+            with StoreConnection(self.settings, read_only=params.get("dry_run", True)) as store:
+                return submit(self.settings, store, project, params.get("review"), dry_run=params.get("dry_run", True))
         if method in METHODS:
             if "cwd" not in params:
                 raise ValueError("Learning requests require the current workspace cwd")

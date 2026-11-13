@@ -53,6 +53,9 @@ def add_parsers(commands):
         preview.add_argument("--cwd", required=True)
         if name == "memory-preview":
             preview.add_argument("--proposals", type=Path, help="JSON with revision and replacements by entry ID")
+        elif name == "publication-preview":
+            preview.add_argument("--review", type=Path, help="Operator-reviewed exact version, files, sources and evidence JSON")
+            preview.add_argument("--apply", action="store_true", help="Queue this exact classification for worker publication checks")
         elif name == "review-metrics":
             preview.add_argument("--date", required=True)
             preview.add_argument("--timezone", default="UTC")
@@ -78,6 +81,11 @@ def execute(args):
     if args.command in {"memory-preview", "publication-preview"}:
         from .ipc import request
         params = {"cwd": args.cwd}
+        if args.command == "publication-preview" and args.review:
+            return request(Settings.load(args.settings), "review_publication",
+                           {**params, "review": json.loads(args.review.read_text()), "dry_run": not args.apply})
+        if args.command == "publication-preview" and args.apply:
+            raise ValueError("--apply requires an exact-version --review file")
         if args.command == "memory-preview" and args.proposals:
             params["proposals"] = json.loads(args.proposals.read_text())
         return request(Settings.load(args.settings), args.command.replace("-", "_"), params)
