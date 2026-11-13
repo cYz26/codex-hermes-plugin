@@ -152,6 +152,16 @@ def recover_archived(bridge, context):
             store.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (key, dumps(value)))
 
 
+def curator_inputs(status):
+    from agent.curator import get_disabled_skill_names
+    from tools import skill_usage
+
+    disabled = get_disabled_skill_names()
+    return {name for name in status.get('managed_skills', [])
+            if name not in disabled and not skill_usage.is_bundled(name)
+            and not skill_usage.get_record(name).get('pinned')}
+
+
 def maintenance(bridge, **kwargs):
     # Snapshot the native ledger cursor before any native writer runs.
     page = synchronize(bridge)
@@ -165,13 +175,13 @@ def maintenance(bridge, **kwargs):
         due = (last and datetime.now(timezone.utc).timestamp() - datetime.fromisoformat(last).timestamp()
                >= status['interval_hours'] * 3600)
         if status.get('enabled') and status.get('consolidate') and not status.get('paused') and due:
-            reason = curation_admission(bridge, status.get('managed_skills', []))
+            inputs = curator_inputs(status)
+            reason = curation_admission(bridge, sorted(inputs))
             if reason:
                 bridge.store.set('native-curator-status', {**status, 'deferred_reason': reason})
                 return {'curator': None, 'reason': reason}
             if bridge.settings.data_policy:
-                scope = {'owned': set(status.get('managed_skills', [])),
-                         'inputs': set(status.get('managed_skills', [])),
+                scope = {'owned': set(inputs), 'inputs': inputs,
                          'present': {s['name'] for s in bridge.api.read(kind='context').get('skills', [])}}
                 scope['before'] = {s['name']: s['version'] for s in bridge.api.read(kind='context').get('skills', [])}
                 from .native_reads import skill

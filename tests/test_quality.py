@@ -1,12 +1,12 @@
 import hashlib
 import json
-import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from hermes_codex_learning.quality import sandbox_backend
 
 class QualityTests(unittest.TestCase):
     def test_new_verifier_rechecks_a_withheld_candidate_with_an_unchanged_catalog(self):
@@ -45,7 +45,7 @@ class QualityTests(unittest.TestCase):
         content = (
             "---\nname: learned-native-notifications\n---\n"
             "## When to Use\nRepair native notification senders.\n"
-            "## Limitations\nOffline tests do not establish GUI acceptance.\n"
+            "## Scope\nActual GUI acceptance is outside its scope.\n"
             "## Verification and reporting\nCheck the actual sender and a fresh visible notification.\n"
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -57,7 +57,7 @@ class QualityTests(unittest.TestCase):
             self.assertEqual(proof["state"], "passed", proof)
             self.assertEqual(proof["kind"], "content_contract")
 
-    @unittest.skipUnless(shutil.which("bwrap"), "Linux sandbox is unavailable")
+    @unittest.skipUnless(sandbox_backend(), "Executable sandbox is unavailable")
     def test_script_contract_runs_in_isolation_and_proof_binds_version(self):
         from hermes_codex_learning.quality import verify, proof_valid
         with tempfile.TemporaryDirectory() as directory:
@@ -74,7 +74,7 @@ class QualityTests(unittest.TestCase):
             (root/"normalize.py").write_text("raise RuntimeError('changed')")
             self.assertFalse(proof_valid(value, proof))
 
-    @unittest.skipUnless(shutil.which("bwrap"), "Linux sandbox is unavailable")
+    @unittest.skipUnless(sandbox_backend(), "Executable sandbox is unavailable")
     def test_program_cannot_read_host_home(self):
         from hermes_codex_learning.quality import verify
         with tempfile.TemporaryDirectory() as directory:
@@ -91,3 +91,22 @@ class QualityTests(unittest.TestCase):
             result = verify(value)
             self.assertEqual(result["state"], "failed")
             self.assertNotIn("synthetic-private-marker", json.dumps(result))
+
+    @unittest.skipUnless(sandbox_backend() == "sandbox-exec", "Requires macOS executable sandbox")
+    def test_mac_shell_runs_with_no_network_and_no_child_process_contract(self):
+        from hermes_codex_learning.quality import verify
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            content = ("---\nvalidation_suite: normalize-headers-v1\nvalidation_entry: check.sh\n"
+                       "---\nApplicability\nLimits\nVerification\n")
+            (root / "SKILL.md").write_text(content)
+            # A Shell fixture may use builtins, but the confinement probe
+            # independently checks that a subprocess cannot be started.
+            (root / "check.sh").write_text('IFS= read -r input\ncase "$input" in\n'
+                                           '  *ｕｓｅｒ*) printf \'%s\\n\' \'["user_id", "name"]\' ;;\n'
+                                           '  *ﬁeld*) printf \'%s\\n\' \'["Å", "field", ""]\' ;;\n'
+                                           '  *CaseSensitive*) printf \'%s\\n\' \'["CaseSensitive", "spaced", "1"]\' ;;\n'
+                                           '  *) exit 3 ;;\nesac\n')
+            files = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in root.iterdir()}
+            proof = verify({"version": "shell-fixture", "resource_dir": directory, "content": content, "files": files})
+            self.assertEqual((proof["state"], proof["backend"]), ("passed", "sandbox-exec"), proof)

@@ -122,6 +122,8 @@ def main():
         bridge.publish()
         assert bridge.store.get('knowledge-index-v1')['skills']['learned-b']['projects'] == [str(workspace/'b')]
         assert load(settings, 'learned-b', str(workspace/'consumer'))['name'] == 'learned-b'
+        assert 'learned-combined' not in bridge.store.get('publications-v1')
+        assert 'learned-combined' not in bridge.store.get('knowledge-index-v1')['skills']
         print(json.dumps({'passed': True, 'native_consolidations': len(calls),
             'checks': ['native_prompt', 'scheduled_completion', 'pinned_package', 'merge_origins',
                        'failed_candidate_keeps_old_publication', 'alias_and_resource_read', 'recall', 'restore_scope',

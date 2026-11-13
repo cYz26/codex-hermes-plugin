@@ -10,6 +10,40 @@ from .config import Settings
 from .ipc import request
 
 
+def data_admission(settings: Settings) -> dict:
+    from .enterprise import MODE, boundary
+
+    policy = settings.data_policy
+    result = {
+        "workflow_projection": policy.get("workflow_projection") is True,
+        "assessment_configured": bool(policy.get("assessment_command") or policy.get("source_manifest")),
+        "unassessed_body": "withheld" if policy else "allowed_by_legacy_configuration",
+        "semantic_evidence_checks": bool(policy),
+    }
+    if policy.get("mode") == MODE:
+        approved = boundary(policy)
+        result.update(mode=MODE, boundary_valid=bool(approved), assessment_configured=True,
+                      unassessed_body="ordinary_enterprise_authorized" if approved else "withheld")
+    return result
+
+
+def learning_policy(settings: Settings) -> dict:
+    from .quality import sandbox_backend
+
+    backend = sandbox_backend()
+    return {
+        "proactive": settings.proactive,
+        "checked_publication": settings.checked_publication,
+        "quality_checks": settings.quality_checks,
+        "retention_enabled": settings.retention_enabled,
+        "executable_validation": {
+            "backend": backend,
+            "state": ("disabled" if not settings.quality_checks else
+                      "available_for_verification" if backend else "backend_unavailable"),
+        },
+    }
+
+
 def inspect(path: str | Path | None = None) -> dict:
     result = {"status": "unconfigured", "configuration": {"valid": False},
               "service": {"reachable": False}, "snapshot": None, "model_probe": None}
@@ -20,20 +54,11 @@ def inspect(path: str | Path | None = None) -> dict:
         return result
     result["configuration"] = {"valid": True, "home": str(settings.home), "project": str(settings.project),
                                "source_exists": settings.source.is_dir(), "interpreter_exists": settings.python.is_file()}
-    result['data_admission'] = {'workflow_projection': settings.data_policy.get('workflow_projection') is True,
-                                'assessment_configured': bool(settings.data_policy.get('assessment_command') or settings.data_policy.get('source_manifest')),
-                                'unassessed_body': 'withheld' if settings.data_policy else 'allowed_by_legacy_configuration'}
-    if settings.data_policy.get("mode")=="trusted_enterprise":
-        from .enterprise import boundary
-        approved=boundary(settings.data_policy)
-        result["data_admission"].update(mode="trusted_enterprise",boundary_valid=bool(approved),
-                                       assessment_configured=True,
-                                       unassessed_body="ordinary_enterprise_authorized" if approved else "withheld")
+    result["data_admission"] = data_admission(settings)
     from .identity import build_identity
     result["build"] = {"client":build_identity(),"running":None,"matches":None}
     result["configuration"]["selected_file"] = str(Settings.configuration_path(path))
-    result["learning_policy"] = {"proactive":settings.proactive,"quality_checks":settings.quality_checks,
-                                 "retention_enabled":settings.retention_enabled}
+    result["learning_policy"] = learning_policy(settings)
     try:
         result["provider"] = native_auth_status(settings)
     except Exception as exc:
@@ -51,7 +76,7 @@ def inspect(path: str | Path | None = None) -> dict:
             result["snapshot"] = {"stale": True, "error": "invalid_snapshot"}
     result["status"] = "unavailable"
     try:
-        status = request(settings, "learning_status", timeout=2)
+        status = request(settings, "learning_status", {"limit": 1}, timeout=2)
         result["service"] = {"reachable": True, "state": status.get("state"), "error": status.get("error")}
         result["build"]["running"] = status.get("build")
         if status.get("build"):
@@ -67,6 +92,9 @@ def inspect(path: str | Path | None = None) -> dict:
             "review_queue":progress.get("review_queue"),"semantics":progress.get("semantics")} if progress else
             {"state":"not_exposed_by_running_build"})
         result["retention"] = status.get("retention")
+        result["running_policy"] = status.get("effective_policy")
+        result["memory_capacity"] = status.get("memory_capacity")
+        result["sharing"] = status.get("sharing")
         # A responding service does not guarantee its last published snapshot is current.
         result["published_at"] = (status.get("snapshot") or {}).get("updated_at")
         if result["snapshot"] and result["snapshot"].get("age_seconds") is not None:

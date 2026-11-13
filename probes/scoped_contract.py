@@ -34,6 +34,7 @@ def main():
     rounds, references = {}, []
     marker = "SYNTHETIC_FOREIGN_MEMORY_MUST_NOT_ENTER_REVIEW"
     body = "---\nname: learned-nfkc-checks\ndescription: Normalize synthetic header identifiers.\nlearning_scope: global_candidate\n---\nApplicability: Unicode header validation.\nLimits: only the observed CSV contract.\nVerification: test full-width and ASCII duplicate identifiers.\n"
+    material_skill = "learned-source-rules"
     def supported_write(tool_name, arguments, request):
         if tool_name not in {"memory","skill_manage"}:
             return arguments
@@ -82,20 +83,26 @@ def main():
                 "batch1" if "Batch 1/2" in serialized else "batch2" if "Batch 2/2" in serialized else "initial")
             turn = rounds.get(phase, 0)
             rounds[phase] = turn + 1
-            if phase != "initial" and turn < 2:
+            if phase != "initial" and turn < (3 if phase == "batch1" else 2):
                 import re
-                if turn == 0:
-                    operations = [("skill_view", {"name":"learned-nfkc-checks"})]
+                if phase == "batch1" and turn == 0:
+                    operations = [("skill_manage", {"operations": [{
+                        "action": "create", "name": material_skill,
+                        "content": body.replace("learned-nfkc-checks", material_skill),
+                    }]})]
+                elif turn == (1 if phase == "batch1" else 0):
+                    operations = [("skill_view", {"name": material_skill})]
                 else:
                     operations = []
                     if phase != "reconcile":
                         path = re.search(r"distill this topic into (references/[a-f0-9]{16}\.md)", serialized).group(1)
                         if path not in references:
                             references.append(path)
-                        operations.append({"action":"write_file","name":"learned-nfkc-checks", "file_path":path,
+                        operations.append({"action":"write_file","name":material_skill, "file_path":path,
                                            "file_content":"Synthetic source rule, with applicability and verification.\n"})
-                    content = body + "\n" + "\n".join(f"Load [{path}]({path}) for the matching source topic." for path in references)
-                    operations.append({"action":"patch", "name":"learned-nfkc-checks", "content":content})
+                    content = body.replace("learned-nfkc-checks", material_skill) + "\n" + "\n".join(
+                        f"Load [{path}]({path}) for the matching source topic." for path in references)
+                    operations.append({"action":"patch", "name":material_skill, "content":content})
                     operations = [("skill_manage", {"operations":operations})]
                 calls = [{"index":i,"id":phase+"-"+str(turn)+"-"+str(i),"type":"function",
                           "function":{"name":name,"arguments":json.dumps(supported_write(name,arguments,request))}} for i,(name,arguments) in enumerate(operations)]
@@ -127,7 +134,8 @@ def main():
         "model":{"provider":"custom","default":"gpt-4.1","base_url":f"http://127.0.0.1:{server.server_port}/v1"},
         "agent":{"reasoning_effort":"max"},
         "memory":{"memory_enabled":True,"user_profile_enabled":True},
-        "auxiliary":{"background_review":{"enabled":not args.explicit,"provider":"auto","model":""}},
+        "auxiliary":{"background_review":{"enabled":not args.explicit,"provider":"auto","model":""},
+                     "title_generation":{"enabled":False}},
         "plugins":{"isolation":"in_process","enabled":["codex-learning-bridge"],
                    "entries":{"codex-learning-bridge":{"enabled":True,"settings":{"learning":{"enabled":True}}}}},
     }
@@ -198,7 +206,7 @@ def main():
         if args.explicit:
             refine = bridge.rpc("learning_request_status", {"cwd":str(project),"request_id":"explicit-refine"})
             request = {"cwd":str(project),"request_id":"explicit-materials","chat_id":"fixture-chat",
-                       "mode":"learn","skill_name":"learned-nfkc-checks","focus":"Preserve both synthetic source rules."}
+                       "mode":"learn","skill_name":material_skill,"focus":"Preserve both synthetic source rules."}
             bridge.rpc("request_learning",request)
             for chunk in ("one","two"):
                 bridge.rpc("add_learning_material", {"cwd":str(project),"request_id":"explicit-materials",
@@ -233,11 +241,18 @@ def main():
             "review_summary_not_in_native_status":summary not in json.dumps(api.read(kind="status")),
         }
         if args.explicit:
+            from tools import skill_usage
+            excluded_until_adoption = not skill_usage.is_curator_managed(material_skill)
+            adopted, _ = skill_usage.adopt_skill(material_skill)
             result.update(explicit_refine_completed=refine["state"]=="completed",
                           manual_focus_delivered="Retain the NFKC normalization fact" in json.dumps(requests[0]),
                           material_learning_completed=learned["state"]=="completed",
                           reference_index_verified=learned.get("reference_check",{}).get("passed",False),
-                          three_batches_completed=len(learned["results"])==3)
+                          three_batches_completed=len(learned["results"])==3,
+                          material_skill_user_managed=excluded_until_adoption and any(
+                              row.get("curator_management") == "user_taught" for row in learned["results"]),
+                          explicit_curator_adoption=adopted and skill_usage.is_curator_managed(material_skill),
+                          refine_skill_curator_managed=skill_usage.is_curator_managed("learned-nfkc-checks"))
             if not args.live_settings:
                 material_requests = requests[summary_review_requests:]
                 result["material_scope_matches_tool_schema"] = bool(material_requests) and all(

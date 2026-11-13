@@ -9,7 +9,7 @@ from hermes_codex_learning.config import Settings
 from hermes_codex_learning.daemon import Bridge
 from hermes_codex_learning.delegation import register_delegation, task_input
 from hermes_codex_learning.knowledge import ENTRY_DELIMITER, context_view, reconcile
-from hermes_codex_learning.store import Store, atomic_json
+from hermes_codex_learning.store import Store, atomic_json, digest
 
 
 class GlobalTests(unittest.TestCase):
@@ -122,6 +122,7 @@ class GlobalTests(unittest.TestCase):
 
     def test_hook_bounds_all_injected_utf8_bytes_for_long_multilingual_memory(self):
         context = self.context()
+        context["skills"][0]["artifact_version"] = "test-body"
         context["memories"]["MEMORY.md"] += ENTRY_DELIMITER + "经验😀e\u0301「x=0x9f」" * 120
         context["bridge_provenance"] = reconcile(context["bridge_provenance"], context, project=str(self.b),
                                                  result={"applied": [{"tool": "memory"}]})
@@ -130,15 +131,24 @@ class GlobalTests(unittest.TestCase):
         self.assertLessEqual(len(output.encode("utf-8")), 256)
         self.assertIn(str(self.b), output)
         self.assertIn("hermes_learning.context", output)
+        self.assertIn("regression-tests", output)
         self.assertNotIn("\ufffd", output)
+        offer = self.store.get("recall-offer:" + digest(["b", "turn-b"]))
+        self.assertEqual(offer["offered_skills"], ["regression-tests"])
+        self.assertEqual(offer["offered_versions"], {"regression-tests": ["test-body"]})
+        self.assertEqual(hook(self.event(self.b, "b"), self.settings), {})
+        self.assertEqual(self.store.get("recall-offer:" + digest(["b", "turn-b"]))["offered_skills"],
+                         ["regression-tests"])
 
     def test_overlong_project_path_keeps_recall_hint_without_partial_path(self):
         long_project = self.root / ("长" * 65) / ("路径" * 35)
         long_project.mkdir(parents=True)
+        atomic_json(self.settings.state / "context.json", self.context())
         result = hook(self.event(long_project, "long-path"), self.settings)
         output = result["hookSpecificOutput"]["additionalContext"]
         self.assertLessEqual(len(output.encode("utf-8")), 256)
         self.assertIn("hermes_learning.context", output)
+        self.assertIn("regression-tests", output)
         self.assertNotIn("长" * 8, output)
 
     def test_foreign_tool_workdir_cannot_switch_an_existing_chat_scope(self):
@@ -182,11 +192,18 @@ class GlobalTests(unittest.TestCase):
         self.store.set("knowledge-index-v1", self.context()["bridge_provenance"])
         bridge = Bridge(self.settings, API())
         try:
-            bridge.cache_artifacts(self.context())
+            atomic_json(self.settings.state / "context.json", bridge.cache_artifacts(self.context()))
             self.assertFalse(bridge.rpc("context", {})["memories"])
             self.assertFalse(bridge.rpc("context", {"cwd": str(self.b)})["memories"])
             self.assertTrue(bridge.rpc("context", {"cwd": str(self.a)})["memories"])
-            loaded = bridge.rpc("skill_load", {"name": "regression-tests", "cwd": str(self.b)})
+            context = bridge.rpc("context", {"cwd": str(self.b), "query": "regression"})
+            recalled = next(item for item in context["skills"] if item["name"] == "regression-tests")
+            self.assertEqual(recalled["artifact_version"], "immutable-version")
+            args = {"name": "regression-tests", "cwd": str(self.b), "artifact_version": recalled["artifact_version"]}
+            loaded = bridge.rpc("skill_load", args)
+            self.assertEqual(loaded["version"], recalled["artifact_version"])
+            with self.assertRaisesRegex(ValueError, "refresh context"):
+                bridge.rpc("skill_load", {**args, "artifact_version": "old"})
             self.assertTrue(loaded["delivery_token"].startswith("read-v1."))
             self.assertEqual(loaded["source_projects"], [str(self.a)])
             self.assertEqual(loaded["request_project"], str(self.b))

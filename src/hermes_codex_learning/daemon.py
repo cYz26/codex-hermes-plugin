@@ -15,6 +15,7 @@ from pathlib import Path
 from .config import Settings
 from .delegation import exclude_internal, register_delegation, task_input
 from .knowledge import context_view, memory_entries, reconcile
+from .learning_health import native_policy, record_capacity_refusal, snapshot as learning_health
 from .normalize import merge_event, observation
 from .notify import macos_notification, message, should_notify
 from .review_receipt import ReviewWrites, receipt_text
@@ -42,6 +43,7 @@ class Bridge:
         self.build = build_identity()
         self.last_publish = 0.0
         self.native_capabilities = {}
+        self.native_policy = None
         if os.environ.get("HERMES_LEARNING_START_PAUSED") != "1":
             self.resume.set()
         self.store.set("state", "starting")
@@ -118,9 +120,10 @@ class Bridge:
         if not enriched.get("user") or data["status"] in {"completed", "interrupted", "incomplete"}:
             from .host_evidence import supplement
             enriched = supplement(self.store, enriched, settings=self.settings)
+        projected = observation(enriched)
         if self.settings.data_policy:
             from .policy import admit
-            assessment = admit(observation(enriched), self.settings.data_policy, data["source"]["project"])
+            assessment = admit(projected, self.settings.data_policy, data["source"]["project"])
             if not assessment["allowed"]:
                 self.store.set("turn-admission:"+key,{"state":"withheld","reason":assessment.get("reason"),"at":time.time()})
                 return
@@ -154,7 +157,7 @@ class Bridge:
             self.store.set("enterprise-scope:"+handle,assessment["boundary_id"])
         self.bind_chat_handle(enriched["source"], handle)
         self.store.set("assessment:" + handle, {key:value for key,value in assessment.items() if key != "payload"})
-        admitted = assessment.get("payload", observation(enriched))
+        admitted = assessment.get("payload", projected)
         if enriched.get("learning_basis"):
             admitted = {**admitted,"status":enriched["status"],"learning_basis":enriched["learning_basis"],"coverage":enriched["coverage"]}
         receipt = self.api.observe(handle, admitted, event_id=event_id)
@@ -329,7 +332,7 @@ class Bridge:
         from . import learning_dispatch
         intents = status["intents"] + learning_dispatch.recover_intents(self, status["intents"])
         self.store.set("review-queue",{"updated_at":time.time(),"intents":[{key:intent[key] for key in
-                       ("id","handle","revision","status") if key in intent} for intent in intents]})
+                       ("id","handle","revision","status","reason") if key in intent} for intent in intents]})
         for intent in ordered_intents(self.store, intents):
             if self.drain.is_set():
                 break
@@ -362,15 +365,21 @@ class Bridge:
                        "retry_index": intent.get("retry_index", 0)})
             self.store.set("state", "reviewing")
             self.store.set("loop-progress",{**self.store.get("loop-progress",{}),"phase":"reviewing","updated_at":started_at,"handle":intent["handle"],"intent":intent["id"]})
-            self.store.set("review-progress:"+intent["handle"],{"state":"running","intent":intent["id"],"revision":intent.get("revision"),"started_at":started_at})
+            self.store.set("review-progress:"+intent["handle"],{"state":"running","intent":intent["id"],
+                "revision":intent.get("revision"),"reason":intent.get("reason"),"started_at":started_at})
             with self.review_writes.capture(intent["handle"]) as calls, \
                     capture_review_summary(self.api, intent["handle"]) as summary:
                 result = self.api.run_review(intent["handle"], intent["id"], attempt_id=attempt_id)
+            curator_management = learning_dispatch.mark_user_taught(self, intent, result)
+            if curator_management is not None:
+                result = {**result, "curator_management": curator_management}
             finished_at = time.time()
+            record_capacity_refusal(self.store, result, provenance["project"], finished_at)
             after_context = self.api.read(kind="context")
             after_versions = self.skill_versions(after_context)
             self.store.set("review-progress:"+intent["handle"],{"state":result["run_status"],"intent":intent["id"],
                 "revision":intent.get("revision"),"started_at":started_at,"finished_at":finished_at,
+                "reason":intent.get("reason"), "usage":result.get("usage"),
                 "input":self.store.get("review-input:"+intent["id"],{}),"versions":{name:version for name,version in after_versions.items() if before_versions.get(name) != version},
                 "candidates":result.get("learning_candidates",self.store.get("review-candidates:"+intent["id"],[])),
                 "staged_count":len(result.get("staged",[])),"applied_count":len(result.get("applied",[]))})
@@ -425,6 +434,7 @@ class Bridge:
                     previous_entries = {key for key, _, _ in memory_entries(before_context)}
                     applied_entities += ["memory:" + key for key, _, _ in memory_entries(after_context) if key not in previous_entries]
                 event = {**result, "id": attempt_id + ":result", "kind": "review.finished", **provenance,
+                         "started_at": started_at, "finished_at": finished_at,
                          "applied_entities": sorted(set(applied_entities)), "review_summary": summary["text"]}
                 if retry_available:
                     event["retry"] = self.retry_queue.record(intent, {**result, "id": attempt_id}, local)
@@ -547,12 +557,13 @@ class Bridge:
         if page and page.get('has_more'):
             return  # Finish native history replay before replacing the recall view.
         context = self.api.read(kind="context")
+        self.refresh_native_policy()
         from .lifecycle import recover_archived, reconcile_interrupted_curation
         reconcile_interrupted_curation(self, context)
         recover_archived(self, context)
         if self.settings.capture_scope == "global" or self.settings.data_policy.get("mode")=="trusted_enterprise":
             context = self.update_knowledge(context)
-        self.cache_artifacts(context)
+        context = self.cache_artifacts(context)
         if self.settings.checked_publication:
             context = self.publish_checked(context)
         from .enterprise import scope_view
@@ -582,7 +593,7 @@ class Bridge:
             try:
                 artifact=native_reads.skill(self.api,name=name)
                 current[name]={"artifact":{key:value for key,value in artifact.items() if key!="delivery_token"},
-                               "catalog_version":item.get("version")}
+                               "catalog_version":item.get("version"), "cached_at":time.time()}
             except (OSError,ValueError):
                 continue
         for name, record in previous.items():
@@ -591,6 +602,18 @@ class Bridge:
                 retired.setdefault(version, time.time())
         self.store.set('artifact-retired-at', retired)
         self.store.set("artifact-read-cache",current)
+        if "skills" not in context:
+            return context
+        return {**context, "skills": [
+            {**item, "artifact_version": current.get(item["name"], {}).get("artifact", {}).get("version")}
+            for item in context["skills"]
+        ]}
+
+    def refresh_native_policy(self):
+        try:
+            self.native_policy = native_policy()
+        except (ImportError, OSError, TypeError, ValueError):
+            self.native_policy = None
 
     def publish_checked(self, context: dict) -> dict:
         from .policy import admit, sharing_check
@@ -741,10 +764,8 @@ class Bridge:
                            "receipt": f"通用技能：{name}\n版本：{version}\n共享检查：通过"})
                 self.store.set(key, version)
         # Only the small catalog belongs in hook caches, never whole skill bodies.
-        visible = {name: {"catalog_entry": {**item["catalog_entry"],"aliases":[key for key,target in aliases.items() if target == name]},
-                          "version": item["artifact"]["version"],"audience":item.get("check",{}).get("audience","public"),
-                          "boundary_id":item.get("check",{}).get("boundary_id")}
-                   for name, item in publications.items()}
+        from .policy import publication_catalog
+        visible = publication_catalog(publications, aliases)
         withheld = {(row[0],row[1]) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")}
         catalog = []
         for item in context.get("skills", []):
@@ -754,14 +775,14 @@ class Bridge:
             current_version = self.store.get("skill-versions-v1", {}).get(name, {}).get("version")
             if (name,current_version) in withheld:
                 if name in publications:
-                    catalog.append(publications[name]["catalog_entry"])
+                    catalog.append(visible[name]["catalog_entry"])
             else:
                 catalog.append(item)
         # The old immutable version remains usable until the replacement passes
         # the same publication checks. A native archive does not invalidate it.
-        for name, item in publications.items():
+        for name in publications:
             if name not in present:
-                catalog.append(item['catalog_entry'])
+                catalog.append(visible[name]["catalog_entry"])
         return {**context, "skills":catalog, "checked_publication": True, "publications": visible}
 
     def notifications(self) -> None:
@@ -779,6 +800,7 @@ class Bridge:
             # Validate native reads without publishing candidate-derived provenance
             # into the live hook outbox before the activation commits.
             self.startup_context = self.api.read(kind="context")
+            self.refresh_native_policy()
             if self.settings.capture_scope == "global":
                 self.startup_context = self.update_knowledge(self.startup_context, persist=False)
             self.startup_status = native_reads.status(self.api)
@@ -885,6 +907,31 @@ class Bridge:
             with StoreConnection(self.settings) as store:
                 return record(store, params["delivery_token"], self.request_project(params),
                               params["stage"], params.get("source_events", []))
+        if method == "feedback_status":
+            from .feedback import status
+            project = self.request_project({"cwd": params["cwd"]})
+            with StoreConnection(self.settings, read_only=True) as store:
+                return status(store, project, params["chat"], params.get("turn"), params.get("receipt_id"))
+        if method == "skill_requirements":
+            from .skill_reads import load
+            project = self.request_project({"cwd": params["cwd"]})
+            if not params.get("artifact_version"):
+                raise ValueError("Use the artifact version returned by recall or skill_load")
+            return load(self.settings, params["name"], project, artifact_version=params["artifact_version"],
+                        requirements_only=True)
+        if method in {"memory_preview", "publication_preview"}:
+            project = self.request_project({"cwd": params["cwd"]})
+            path = self.settings.state / "context.json"
+            context = self.startup_context if not self.resume.is_set() else (
+                json.loads(path.read_text()) if path.is_file() else None)
+            required_field = "memories" if method == "memory_preview" else "skills"
+            if context is None or required_field not in context:
+                return {"state": "snapshot_unavailable", "project": project}
+            from .learning_health import memory_preview, publication_preview
+            if method == "memory_preview":
+                return memory_preview(self.settings, context, project, self.native_policy or {}, params.get("proposals"))
+            with StoreConnection(self.settings, read_only=True) as store:
+                return publication_preview(self.settings, store, context, project)
         if method == "quiesce_for_update":
             self.drain.set()
             return {"accepted": True, "mode": "finish_current_review"}
@@ -902,10 +949,15 @@ class Bridge:
             with StoreConnection(self.settings, read_only=True) as store:
                 snapshot = self.startup_status if not self.resume.is_set() else (
                     json.loads(status.read_text()) if status.exists() else None)
+                context_path = self.settings.state / "context.json"
+                context = self.startup_context if not self.resume.is_set() else (
+                    json.loads(context_path.read_text()) if context_path.exists() else None)
+                project = self.request_project(params) if "cwd" in params else None
                 from .progress import summarize
-                progress = summarize(store,project=self.request_project(params) if "cwd" in params else None,
+                progress = summarize(store,project=project,
                     chat=params.get("chat"),turn=params.get("turn"),limit=params.get("limit",20),after_cursor=params.get("after_cursor",0))
                 return {"snapshot": snapshot,
+                        **learning_health(self.settings, store, context, project, self.native_policy),
                         "progress":progress,
                         "review_retries": ReviewRetryQueue(self.settings, store).summary(),
                         "build": self.build,
@@ -955,7 +1007,8 @@ class Bridge:
             if not self.resume.is_set():
                 raise RuntimeError("Learning runtime is paused for an update; retry shortly")
             from .skill_reads import load
-            return load(self.settings,params["name"],self.request_project(params),params.get("file_path"))
+            return load(self.settings, params["name"], self.request_project(params), params.get("file_path"),
+                        artifact_version=params.get("artifact_version"))
         raise ValueError("Unknown bridge method")
 
     def request_project(self, params: dict) -> str | None:

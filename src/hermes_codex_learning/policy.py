@@ -118,6 +118,14 @@ def sharing_check(value: dict, origins: list[str], private_markers: list[str], *
             "version": value["version"], "manifest_hash": digest(files)}
 
 
+def publication_catalog(publications, aliases):
+    return {name: {"catalog_entry": {**item["catalog_entry"], "artifact_version": item["artifact"]["version"],
+                                     "aliases": [key for key, target in aliases.items() if target == name]},
+                   "version": item["artifact"]["version"], "audience": item.get("check", {}).get("audience", "public"),
+                   "boundary_id": item.get("check", {}).get("boundary_id")}
+            for name, item in publications.items()}
+
+
 def published_resource(record: dict, file_path: str | None = None) -> dict:
     value = record["artifact"]
     relative = file_path or "SKILL.md"

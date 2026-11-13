@@ -41,6 +41,23 @@ def add_parsers(commands):
     retention = commands.add_parser("retention", help="Inspect retention or queue a bounded cleanup")
     retention.add_argument("--settings")
     retention.add_argument("--apply",action="store_true")
+    for name, description in (("memory-preview", "Inspect project memory and preview compaction"),
+                              ("publication-preview", "Inspect which skill versions pass strict visibility"),
+                              ("review-metrics", "Summarize one day of recorded review costs and changes"),
+                              ("skill-readiness", "Check an exact skill version on this execution host")):
+        preview = commands.add_parser(name, help=description)
+        preview.add_argument("--settings")
+        preview.add_argument("--cwd", required=True)
+        if name == "memory-preview":
+            preview.add_argument("--proposals", type=Path, help="JSON with revision and replacements by entry ID")
+        elif name == "review-metrics":
+            preview.add_argument("--date", required=True)
+            preview.add_argument("--timezone", default="UTC")
+            preview.add_argument("--acceptance-chat", action="append", default=[])
+            preview.add_argument("--audit-chat", action="append", default=[])
+        elif name == "skill-readiness":
+            preview.add_argument("--name", required=True)
+            preview.add_argument("--artifact-version", required=True)
     quality = commands.add_parser("quality", help="Verify an immutable native skill artifact")
     quality.add_argument("--settings")
     quality.add_argument("--name",required=True)
@@ -55,6 +72,35 @@ def add_parsers(commands):
 
 
 def execute(args):
+    if args.command in {"memory-preview", "publication-preview"}:
+        from .ipc import request
+        params = {"cwd": args.cwd}
+        if args.command == "memory-preview" and args.proposals:
+            params["proposals"] = json.loads(args.proposals.read_text())
+        return request(Settings.load(args.settings), args.command.replace("-", "_"), params)
+    if args.command == "skill-readiness":
+        from .ipc import request
+        from .skill_reads import check_requirements
+        value = request(Settings.load(args.settings), "skill_requirements",
+                        {"cwd": args.cwd, "name": args.name, "artifact_version": args.artifact_version})
+        return {"name": value["name"], "version": value["version"],
+                **check_requirements(value["requirements"], scope="execution_host")}
+    if args.command == "review-metrics":
+        from zoneinfo import ZoneInfoNotFoundError
+        from .review_metrics import daily
+        from .store import ReadStore
+        settings = Settings.load(args.settings)
+        project = settings.project_for(args.cwd)
+        if project is None:
+            raise ValueError("Review metrics require an in-scope absolute working directory")
+        store = ReadStore(settings.state)
+        try:
+            return daily(store, project, args.date, args.timezone,
+                         acceptance_chats=args.acceptance_chat, audit_chats=args.audit_chat)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError("Use a valid IANA time zone") from exc
+        finally:
+            store.close()
     if args.command == 'curator-config':
         from .ipc import request
         return request(Settings.load(args.settings), 'configure_curator', {'dry_run': not args.apply}, timeout=5)

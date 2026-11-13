@@ -5,35 +5,26 @@ import re
 import time
 
 from .store import digest
-from .workflow import action
 
 CORRECTION = re.compile(r"(?im)^\s*(?:correction\s*:|actually\b|更正[：:]?|纠正[：:]?|不对[，,：:]|应该改为)")
 
 
-def annotate(payload: dict, store) -> dict:
-    payload = dict(payload)
+def record_dialogue_signals(payload: dict, store) -> None:
     chat, turn = payload.get("session_id"), payload.get("turn_id")
-    if chat and turn and payload.get("hook_event_name") == "UserPromptSubmit":
-        previous = store.db.execute("SELECT 1 FROM events WHERE json_extract(payload,'$.session_id')=? "
-                                    "AND json_extract(payload,'$.turn_id')<>? "
-                                    "AND json_extract(payload,'$.hook_event_name')='UserPromptSubmit' LIMIT 1", (chat,turn)).fetchone()
-        relation = payload.get("bridge_host_context", {}).get("relation", {})
+    if not chat or not turn:
+        return
+    previous = store.db.execute("SELECT 1 FROM events WHERE json_extract(payload,'$.session_id')=? "
+                                "AND json_extract(payload,'$.turn_id')<>? "
+                                "AND json_extract(payload,'$.hook_event_name')='UserPromptSubmit' LIMIT 1",
+                                (chat, turn)).fetchone()
+    relation = payload.get("bridge_host_context", {}).get("relation", {})
+    with store.db:
         if previous or relation.get("status") == "verified":
-            # Every addition is a candidate. The native review decides whether it
-            # changes an approach; wording only affects queue priority.
-            with store.db:
-                store.db.execute("INSERT OR IGNORE INTO learning_signals VALUES (?,?,?,?)",
-                                 (chat, turn, "user_followup", time.time()))
+            store.db.execute("INSERT OR IGNORE INTO learning_signals VALUES (?,?,?,?)",
+                             (chat, turn, "user_followup", time.time()))
         if CORRECTION.search(str(payload.get("prompt", ""))[:65536]):
-            with store.db:
-                store.db.execute("INSERT OR IGNORE INTO learning_signals VALUES (?,?,?,?)",
-                                 (chat, turn, "user_correction", time.time()))
-    if payload.get("hook_event_name") in {"PreToolUse", "PostToolUse"}:
-        payload["bridge_action"] = action(payload)
-        args = payload.get("tool_input")
-        if payload["bridge_action"] == "test" and isinstance(args, dict):
-            payload["bridge_test_key"] = digest([payload.get("cwd"), args.get("cmd") or args.get("command")])
-    return payload
+            store.db.execute("INSERT OR IGNORE INTO learning_signals VALUES (?,?,?,?)",
+                             (chat, turn, "user_correction", time.time()))
 
 
 def enqueue(store, data: dict, handle: str):

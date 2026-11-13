@@ -10,23 +10,34 @@ from pathlib import Path
 from .config import Settings
 from .delegation import exclude_internal
 from .knowledge import context_view
-from .store import Store, digest
+from .store import Store, digest, dumps
 
 ADDITIONAL_CONTEXT_LIMIT = 256
 
 
-def model_context(summary: str, project: str | None) -> str:
-    """Bound the complete payload by bytes, an upper bound for byte-level BPE tokens."""
-    head = "Hermes 学习经验\n"
-    tail = "\n参考。按需查 hermes_learning.context(cwd=聊天项目路径)"
+def model_context(memory: str, project: str | None, recommended: list[str]) -> tuple[str, list[str]]:
+    """Fit whole skill names before allocating the remaining UTF-8 bytes to memory."""
+    head = "Hermes 全局自动学习\n" if project else "Hermes 学习经验\n"
+    tail = "按需查 hermes_learning.context(cwd=聊天工作区)"
+    skills, offered = "", []
+    for name in recommended:
+        if not name or not name.isprintable() or name in offered:
+            continue
+        candidate = "相关技能 " + "、".join([*offered, name]) + "\n"
+        if len((head + candidate + tail).encode("utf-8")) <= ADDITIONAL_CONTEXT_LIMIT:
+            skills = candidate
+            offered.append(name)
+        if len(offered) == 3:
+            break
     if project and project.isprintable():
-        scoped_head = f"Hermes 全局自动学习已启用；当前项目：{project}\n"
-        scoped_tail = "\n参考。按需查 hermes_learning.context(cwd=上方路径)"
-        if len((scoped_head + scoped_tail).encode("utf-8")) <= ADDITIONAL_CONTEXT_LIMIT:
-            head, tail = scoped_head, scoped_tail
-    room = ADDITIONAL_CONTEXT_LIMIT - len((head + tail).encode("utf-8"))
-    preview = summary.encode("utf-8", errors="replace")[:room].decode("utf-8", errors="ignore")
-    return head + preview + tail
+        scoped_head = head + f"项目 {project}\n"
+        if len((scoped_head + skills + tail).encode("utf-8")) <= ADDITIONAL_CONTEXT_LIMIT:
+            head = scoped_head
+    room = ADDITIONAL_CONTEXT_LIMIT - len((head + skills + tail).encode("utf-8"))
+    preview = memory.encode("utf-8", errors="replace")[:max(0, room - 1)].decode("utf-8", errors="ignore").rstrip()
+    if preview:
+        preview += "\n"
+    return head + skills + preview + tail, offered
 
 
 def chat_workspace(store: Store, payload: dict) -> str | None:
@@ -87,12 +98,18 @@ def hook(payload: dict, settings: Settings) -> dict:
             except (OSError, ValueError, TypeError, KeyError):
                 host_context["relation"] = {"status":"unavailable","reason":"host_relation_not_verified"}
             payload["bridge_host_context"] = host_context
-        transient_query = str(payload.get("prompt") or "")[:4000] if payload.get("hook_event_name") == "UserPromptSubmit" else ""
+        event = payload.get("hook_event_name")
+        transient_query = str(payload.get("prompt") or "")[:4000] if event == "UserPromptSubmit" else ""
         technical = {"bridge_host_context":host_context} if host_context else {}
-        if settings.proactive:
-            from .scheduling import annotate
-            annotated = annotate(payload, store)
-            technical.update({key:val for key,val in annotated.items() if key.startswith("bridge_")})
+        if event in {"PreToolUse", "PostToolUse"}:
+            from .workflow import action
+            technical["bridge_action"] = action(payload)
+            if settings.proactive and technical["bridge_action"] == "test":
+                arguments = payload["tool_input"]
+                technical["bridge_test_key"] = digest([command_cwd, arguments.get("command") or arguments.get("cmd")])
+        if settings.proactive and event == "UserPromptSubmit":
+            from .scheduling import record_dialogue_signals
+            record_dialogue_signals(payload, store)
         from .delivery import capture_delivery
         capture_delivery(store, payload, project)
         admission = admit(payload, settings.data_policy, project)
@@ -146,19 +163,55 @@ def hook(payload: dict, settings: Settings) -> dict:
                 # Local retrieval can select public catalog names without persisting
                 # the unassessed query or sending it to the learning model.
                 matches = context_view(cache, project, transient_query)
-                query = " ".join(item["name"] for item in matches["skills"] if item.get("scope") == "global")
+                shared = {item["name"] for item in matches["skills"] if item.get("scope") == "global"}
+                query = " ".join(name for name in matches["recommended_skills"] if name in shared)
             store.set("recall-query:" + session, query)
-        if settings.capture_scope == "global" or requires_scoping(cache,settings.data_policy):
-            cache = context_view(cache, project, store.get("recall-query:" + session, ""))
+        scoped = settings.capture_scope == "global" or requires_scoping(cache, settings.data_policy)
+        query = store.get("recall-query:" + session, "")
+        if scoped:
+            cache = context_view(cache, project, query)
+        recommended = cache.get("recommended_skills", [])
+        if not scoped and cache.get("skills"):
+            recommended = context_view(cache, project, query)["recommended_skills"]
+        memory = ("\n".join(cache["memories"].values())[:340] if "memories" in cache
+                  else cache.get("summary", ""))
+        text, offered = model_context(memory, project if settings.capture_scope == "global" else None, recommended)
         version = cache.get("version")
+        has_context = memory or offered or settings.capture_scope == "global"
+        delivery_version = digest([version, text]) if version and has_context else None
         key = f"context-delivered:{session}:{project}" if settings.capture_scope == "global" else f"context-delivered:{session}"
-        returning_context = bool(version and (cache.get("summary") or settings.capture_scope == "global") and store.get(key) != version)
-        if event == "UserPromptSubmit" and payload.get("turn_id"):
-            store.set("recall-offer:"+digest([session,payload["turn_id"]]),{"project":project,"at":time.time(),
-                "names":cache.get("recommended_skills",[]),"context_returned":returning_context,"version":version})
+        turn = payload.get("turn_id")
+        if not delivery_version or (event != "UserPromptSubmit" and store.get(key) == delivery_version):
+            return {}
+        with store.db:
+            store.db.execute("BEGIN IMMEDIATE")
+            returning_context = bool(delivery_version and store.get(key) != delivery_version)
+            records = {key: delivery_version} if returning_context else {}
+            if turn and (event == "UserPromptSubmit" or returning_context):
+                offer_key = "recall-offer:" + digest([session, turn])
+                previous = store.get(offer_key, {})
+                offered_skills = previous.get("offered_skills")
+                offered_versions = previous.get("offered_versions") or {}
+                if returning_context:
+                    offered_skills = list(dict.fromkeys([*(offered_skills or []), *offered]))
+                    for skill in cache.get("skills", []):
+                        artifact = skill.get("artifact_version")
+                        if artifact and skill["name"] in offered:
+                            versions = offered_versions.setdefault(skill["name"], [])
+                            if artifact not in versions:
+                                versions.append(artifact)
+                elif not previous.get("context_returned"):
+                    offered_skills = []
+                records[offer_key] = {
+                    "project": project, "at": time.time(), "names": recommended,
+                    "context_returned": returning_context or previous.get("context_returned", False),
+                    "offered_skills": offered_skills, "offered_versions": offered_versions, "version": version,
+                }
+            store.db.executemany(
+                "INSERT INTO meta VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                ((name, dumps(value)) for name, value in records.items()),
+            )
         if returning_context:
-            text = model_context(cache.get("summary", ""), project if settings.capture_scope == "global" else None)
-            store.set(key, version)
             return {
                 "hookSpecificOutput": {
                     "hookEventName": event,

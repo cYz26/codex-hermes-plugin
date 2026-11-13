@@ -71,9 +71,17 @@ def _salient_preview(text: str, limit: int, anchors: str = "") -> str:
 
 
 def _review_message(message: dict, limit: int | None = None, *, tool_limit: int = 4096, anchors: str = "") -> dict:
+    from .normalize import LEARNING_STATUS_TOOLS, compact_learning_result
+
     result = dict(message)
     content = message.get("content")
     if isinstance(content, str):
+        if message["role"] == "tool" and message.get("tool_name") in LEARNING_STATUS_TOOLS:
+            try:
+                value = json.loads(content)
+            except (ValueError, RecursionError):
+                value = None
+            content = dumps(compact_learning_result(value))
         field_limit = tool_limit if message["role"] == "tool" else 12 * 1024
         result["content"] = (_without_media(content) if limit is None else
                              _preview(content, min(field_limit, limit // 4)) if message["role"] == "tool" else
@@ -83,6 +91,13 @@ def _review_message(message: dict, limit: int | None = None, *, tool_limit: int 
         for call in message["tool_calls"]:
             function = call["function"]
             arguments = function["arguments"]
+            if function.get("name") in LEARNING_STATUS_TOOLS:
+                try:
+                    values = json.loads(arguments)
+                except (ValueError, TypeError, RecursionError):
+                    values = {}
+                arguments = dumps({key: value for key, value in values.items()
+                                   if key != "delivery_token"} if isinstance(values, dict) else {})
             if limit is None:
                 arguments = _without_media(arguments)
             else:
@@ -146,6 +161,7 @@ def bound_review_history_with_report(messages: list[dict], limit: int = MAX_HIST
     if limit < 512:
         return [], {**report, "reason":BUDGET_EXHAUSTED, "retained_messages":0}
     cleaned = [_review_message(message) for message in messages]
+    report["compacted_bytes"] = len(dumps(cleaned).encode())
     groups, invalid = _groups(cleaned)
     report["unmatched_exchanges"] = invalid
     flat = [message for group in groups for message in group]

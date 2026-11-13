@@ -119,10 +119,11 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
             if required or publication.get("audience")=="enterprise":
                 item.update(audience="enterprise",boundary_id=required or publication.get("boundary_id"))
         eligible.append((item, origins, score))
-    # Native related_skills links are hints, never permission to cross a scope.
-    matched = {item['name'] for item, _, score in eligible if score}
+    # Only eligible endpoints participate, even when an edge points out of scope.
+    matched = {item["name"] for item, _, score in eligible if score}
+    neighbors = {name for item, _, score in eligible if score for name in item.get("related_skills", [])}
     for item, origins, score in eligible:
-        related = bool(set(item.get('related_skills', [])) & matched)
+        related = item["name"] in neighbors or not matched.isdisjoint(item.get("related_skills", []))
         if not origins or project in origins or score or related:
             catalog.append(item)
         if score or related or (not terms and project in origins):

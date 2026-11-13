@@ -60,8 +60,18 @@ MCP `learning_status` 同样接受 `cwd`、`chat`、`turn`、`limit` 和 `after_
 - 准入或拒收原因、正文覆盖和缺失输入重试；
 - 原生 revision、复盘 intent、复盘状态及是否包括本回合；
 - 实际候选声明、原生写入／暂存数量、候选和发布版本；
-- 召回推荐、宿主确认的正文交付、应用声明及已有宿主测试验证；
+- 召回推荐、hook 实际提供的技能名、宿主确认的正文交付、应用声明及已有宿主测试验证；
 - 父上下文和复盘预算的覆盖缺口、worker 阶段与队列快照年龄。
+
+Hook 在 256 UTF-8 字节内优先放入至多三个完整技能名。召回按当前项目和发布范围筛选，再补充直接相关技能的双向关联。`offered_skills` 记录该回合由 hook 提供的技能名。`offered_versions` 给出当时可读取的正文版本，旧回合可能缺少该字段。按项目和聊天查状态时，`mcp_recommendations` 列出该回合保留的 MCP 召回记录。`context.skills[].artifact_version` 可传给 `skill_load`，确认读取的是召回时的版本。原生目录指纹仍由 `context.skills[].version` 提供。
+
+应用验证根据宿主保留的命令和终态核对，反馈优先调度关闭时也会工作。识别常用的 Python、包管理器测试入口及本项目的发布检查。旧回合保留了命令时可按同一规则识别。
+
+提交反馈时，向 `feedback_status` 传入 `cwd` 和 `chat`，可选指定 `turn`。把对应的 `test_references[].source_event` 原样放进 `record_application.source_events`。完整诊断 `learning_status` 继续在 `execution.test_references` 返回同样的引用。已采集的测试可以先提交，worker 随后核对终态。保存返回的回执 ID，可用 `feedback_status` 的 `receipt_id` 读取结果。
+
+反馈回执会区分待消费、待宿主终态、找不到引用、引用非测试以及终态无退出码。针对同次交付和同一批回合提交更正后，错误引用的旧回执可以标为 `superseded`，并记录替代回执 ID。已确认的测试结果可追溯至 Hook 退出码、宿主 transcript 或工作流投影。发往原生复盘的状态工具结果保留状态与版本等字段，完整状态仍可通过原入口读取。
+
+`effective_policy` 显示运行中 worker 的准入、共享、质量检查、留存、复盘与 Curator 配置。`memory_capacity` 显示原生记忆文件的用量、配置上限、各项目条目及字符数和待审数量。传入 `cwd` 可读取该项目的明细及最近记录的容量拒绝。`sharing` 根据已保存的发布版本估算开启严格共享后该项目可见的目录数量。
 
 分页游标枚举已采集回合组；查询某回合当前状态应使用其聊天／回合身份。服务 `ready`、`idle` 和旧 snapshot 只说明各自组件状态，进度记录用于判断是否仍有等待阶段。
 

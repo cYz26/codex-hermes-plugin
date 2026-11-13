@@ -101,7 +101,8 @@ def main():
     configuration={'_config_version':DEFAULT_CONFIG['_config_version'],
         'model':{'provider':'custom','default':'gpt-4.1','base_url':f'http://127.0.0.1:{server.server_port}/v1'},
         'agent':{'reasoning_effort':'max'},'memory':{'memory_enabled':True,'user_profile_enabled':True},
-        'auxiliary':{'background_review':{'enabled':True,'provider':'auto','model':''}},
+        'auxiliary':{'background_review':{'enabled':True,'provider':'auto','model':''},
+                     'title_generation':{'enabled':False}},
         'plugins':{'isolation':'in_process','enabled':['codex-learning-bridge'],
                    'entries':{'codex-learning-bridge':{'enabled':True,'settings':{'learning':{'enabled':True}}}}}}
     if args.live_settings:

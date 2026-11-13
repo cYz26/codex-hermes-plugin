@@ -50,6 +50,22 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(result["status"], "incomplete")
         self.assertIn("unrecognized_execution_result:start", result["coverage"])
 
+    def test_status_and_feedback_details_are_compacted_only_for_native_observation(self):
+        self.event("PostToolUse", tool_name="mcp__hermes_learning__learning_status", tool_use_id="status",
+                   tool_response={"structuredContent": {"state": "idle", "build": {"digest": "current"},
+                                                        "progress": {"large": "synthetic" * 1000}}})
+        self.event("PostToolUse", tool_name="mcp__hermes_learning__record_application", tool_use_id="feedback",
+                   tool_input={"delivery_token": "synthetic-receipt", "stage": "verified"},
+                   tool_response={"structuredContent": {"validation": "host_test_passed", "version": "v1"}})
+        data = self.event("Stop", last_assistant_message="Done")
+        projected = {tool["call_id"]: tool for tool in observation(data)["tools"]}
+        self.assertEqual(projected["status"]["result"], {"state": "idle", "build_digest": "current",
+                                                        "retained_detail": "learning_status_metadata_only"})
+        self.assertEqual(projected["feedback"]["arguments"], {"stage": "verified"})
+        self.assertEqual(projected["feedback"]["result"]["version"], "v1")
+        self.assertEqual(projected["feedback"]["result"]["validation"], "host_test_passed")
+        self.assertIn("progress", data["tools"]["status"]["result"]["structuredContent"])
+
     def test_tool_failure_is_terminal_but_preserved_as_failure(self):
         self.event("PostToolUse", tool_name="exec_command", tool_use_id="start",
                    tool_response={"exit_code": 2, "output": "test failed"})

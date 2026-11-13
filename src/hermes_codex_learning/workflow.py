@@ -1,7 +1,10 @@
 """Closed-vocabulary execution evidence. Never copy task text into this projection."""
 from __future__ import annotations
 
+import re
 import shlex
+from itertools import dropwhile
+from pathlib import Path
 
 from .store import digest, dumps
 
@@ -12,6 +15,29 @@ ACTIONS = {'inspect', 'edit', 'test', 'execute', 'other'}
 OUTCOMES = {'running', 'completed', 'failed', 'interrupted', 'unknown'}
 USER = 'Observed workflow metadata only; task content and command output were withheld.'
 END = 'The observed executor turn ended. Tool outcomes do not prove task correctness.'
+_INSPECTION_COMMANDS = {"rg", "cat", "sed", "head", "tail", "ls", "pwd"}
+_TEST_SUBCOMMANDS = {"go", "cargo", "swift", "dotnet"}
+_PACKAGE_RUNNERS = {"npm", "pnpm", "yarn", "bun"}
+_PYTHON_FLAGS = {"-B", "-E", "-I", "-O", "-OO", "-P", "-S", "-q", "-s", "-u"}
+_NON_RUNNING_TEST_FLAGS = {"-h", "--help", "-V", "--version", "--collect-only", "--co",
+                           "--dry-run", "--list", "--list-tests", "--no-run", "--if-present"}
+_ENV_ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z_0-9]*=")
+
+
+def _runs_tests(binary: str, arguments: list[str]) -> bool:
+    if _NON_RUNNING_TEST_FLAGS.intersection(argument.split("=", 1)[0] for argument in arguments):
+        return False
+    if binary in {"pytest", "unittest"}:
+        return True
+    if binary in _TEST_SUBCOMMANDS:
+        return arguments[:1] == ["test"]
+    if binary in _PACKAGE_RUNNERS:
+        return arguments[:1] == ["test"] or arguments[:2] in (["run", "test"], ["run-script", "test"])
+    if re.fullmatch(r"python(?:3(?:\.\d+)?)?", binary):
+        invocation = list(dropwhile(_PYTHON_FLAGS.__contains__, arguments))
+        return (invocation[:2] in (["-m", "pytest"], ["-m", "unittest"])
+                or bool(invocation and Path(invocation[0]).parts[-2:] == ("scripts", "check_release.py")))
+    return False
 
 
 def action(payload: dict) -> str:
@@ -24,19 +50,19 @@ def action(payload: dict) -> str:
         return 'other'
     args = payload.get('tool_input')
     command = (args.get('command') or args.get('cmd')) if isinstance(args, dict) else None
-    if isinstance(command, str) and len(command) <= 65536:
-        try:
-            words = shlex.split(command)
-        except ValueError:
-            words = []
-        # Only classify simple commands. Shell compositions carry no test claim.
-        if words and not any(c in command for c in ';|&`$\n<>'):
-            binary = words[0].rsplit('/', 1)[-1]
-            if binary in {'pytest', 'unittest'} or (binary in {'python', 'python3'} and
-                    words[1:3] in (['-m', 'pytest'], ['-m', 'unittest'])):
-                return 'test'
-            if binary in {'rg', 'cat', 'sed', 'head', 'tail', 'ls', 'pwd'}:
-                return 'inspect'
+    # Shell compositions can hide the exit status of the actual test command.
+    if not isinstance(command, str) or len(command) > 65536 or any(c in command for c in ';|&`$\r\n<>'):
+        return 'execute'
+    try:
+        words = list(dropwhile(_ENV_ASSIGNMENT.match, shlex.split(command)))
+    except ValueError:
+        return 'execute'
+    if words:
+        binary = words[0].rsplit('/', 1)[-1]
+        if _runs_tests(binary, words[1:]):
+            return 'test'
+        if binary in _INSPECTION_COMMANDS:
+            return 'inspect'
     return 'execute'
 
 

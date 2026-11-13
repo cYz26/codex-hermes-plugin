@@ -104,6 +104,10 @@ class ScopedMemory:
     @staticmethod
     def safe_result(value):
         if not value.get("success"):
+            from .learning_health import capacity_refusal
+            if capacity_refusal(value):
+                return {"success": False, "reason": "memory_capacity_exceeded",
+                        "usage": value.get("usage"), "error": "Native memory capacity exceeded."}
             return {"success":False, "error":"Native memory operation refused; no other project's entries are exposed."}
         return {key:val for key,val in value.items() if key in {"success", "done", "target", "usage", "entry_count"}}
 

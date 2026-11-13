@@ -9,6 +9,8 @@ from .store import Store, digest, dumps
 
 
 _EXECUTION_TOOLS = {"bash", "exec_command", "write_stdin", "exec", "wait", "terminal"}
+LEARNING_STATUS_TOOLS = {"mcp__hermes_learning__learning_status", "mcp__hermes_learning__feedback_status",
+                         "mcp__hermes_learning__record_application"}
 
 
 def _execution_result(response):
@@ -34,13 +36,13 @@ def _execution_result(response):
 def _result_state(name: str, response) -> tuple[str, str, str | None]:
     execution = name.rsplit(".", 1)[-1].lower() in _EXECUTION_TOOLS
     decoded, unknown = _execution_result(response) if execution else (response, False)
+    if isinstance(decoded, dict) and decoded.get("interrupted") is True:
+        return "interrupted", "", None
     if isinstance(decoded, dict) and (decoded.get("isError") is True or decoded.get("error")):
         return "failed", "", None
     if unknown:
         return "unknown", "", "unrecognized_execution_result"
     if isinstance(decoded, dict):
-        if decoded.get("interrupted") is True:
-            return "interrupted", "", None
         if execution and type(decoded.get("exit_code")) is int:
             return ("completed" if decoded["exit_code"] == 0 else "failed"), "", None
         process = None
@@ -102,6 +104,7 @@ def merge_event(store: Store, row: dict) -> dict | None:
             data["tools"].setdefault(tool_id, {
                 "call_id": tool_id, "name": event.get("tool_name", "unknown"),
                 "arguments": event.get("tool_input") or {}, "result": None, "status": "running", "process": "",
+                "action": event.get("bridge_action"), "test_key": event.get("bridge_test_key"),
             })
         else:
             data["coverage"] = sorted(set(data["coverage"]) | {"missing_tool_use_id"})
@@ -128,12 +131,20 @@ def merge_event(store: Store, row: dict) -> dict | None:
             target_id = original["call_id"] if original else tool_id
             if original and tool_id != target_id:
                 data["tools"].pop(tool_id, None)
+            previous_call = data["tools"].get(target_id, {})
+            tool_action, test_key = event.get("bridge_action"), event.get("bridge_test_key")
+            if original:
+                arguments = original["arguments"]
+                tool_action, test_key = original.get("action"), original.get("test_key")
+            elif not arguments:
+                arguments = previous_call.get("arguments") or arguments
+                tool_action = previous_call.get("action") or tool_action
+                test_key = previous_call.get("test_key") or test_key
             data["tools"][target_id] = {
                 "call_id": target_id, "name": original["name"] if original else tool_name,
-                "arguments": original["arguments"] if original else arguments,
+                "arguments": arguments,
                 "result": response, "status": status, "process": process,
-                "action": original.get("action") if original else event.get("bridge_action"),
-                "test_key": original.get("test_key") if original else event.get("bridge_test_key"),
+                "action": tool_action, "test_key": test_key,
             }
             if gap:
                 data["coverage"] = sorted(set(data["coverage"]) | {gap + ":" + target_id})
@@ -165,6 +176,28 @@ def merge_event(store: Store, row: dict) -> dict | None:
     return data
 
 
+def compact_learning_result(response):
+    from .delegation import _result_object
+    value = _result_object(response)
+    if value is None:
+        value = response if isinstance(response, dict) and response.get("retained_detail") == "learning_status_metadata_only" else {}
+    build = value.get("build")
+    result = {key: value[key] for key in ("id", "state", "name", "version", "validation", "validation_reason", "build_digest")
+              if isinstance(value.get(key), str)}
+    if isinstance(build, dict) and isinstance(build.get("digest"), str):
+        result["build_digest"] = build["digest"]
+    result["retained_detail"] = "learning_status_metadata_only"
+    return result
+
+
 def observation(data: dict) -> dict:
+    tools = []
+    for tool in data["tools"].values():
+        name = tool.get("name")
+        if name in LEARNING_STATUS_TOOLS:
+            arguments = tool.get("arguments")
+            args = {key: val for key, val in arguments.items() if key != "delivery_token"} if isinstance(arguments, dict) else {}
+            tool = {**tool, "arguments": args, "result": compact_learning_result(tool.get("result"))}
+        tools.append(tool)
     return {**{key: value for key, value in data.items() if not key.startswith("_") and key != "task_input_provenance"},
-            "tools": list(data["tools"].values())}
+            "tools": tools}

@@ -113,10 +113,6 @@ def retain_artifacts(store, api, *, dry_run=True):
     for key in ('publications-v1', 'artifact-read-cache'):
         for record in store.get(key, {}).values():
             protect(record)
-    for intent in store.get('native-candidate-intents', {}).values():
-        if intent.get('version') in protected:
-            for version in intent.get('sources', {}).values():
-                protect({'version': version})
     now = time.time()
     retired = store.get('artifact-retired-at', {})
     protected.update(version for version, at in retired.items() if at >= now-30*86400)
@@ -133,6 +129,15 @@ def retain_artifacts(store, api, *, dry_run=True):
         protect(json.loads(row[0]))
     for row in store.db.execute("SELECT value FROM meta WHERE key LIKE 'issued-delivery:%'"):
         protect(json.loads(row[0]))
+    # Published, retained or delivered candidates keep the source versions they reference.
+    candidates = {intent.get('version'): intent.get('sources', {}).values()
+                  for intent in store.get('native-candidate-intents', {}).values()}
+    frontier = list(protected)
+    while frontier:
+        for version in candidates.get(frontier.pop(), ()):
+            if isinstance(version, str) and version not in protected and re.fullmatch(r'[a-f0-9]{64}', version):
+                protected.add(version)
+                frontier.append(version)
     result = api.prune_artifacts(sorted(protected), retention_seconds=30*86400, dry_run=dry_run)
     if not dry_run:
         removed = set(result.get('removed', []))

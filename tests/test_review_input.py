@@ -107,6 +107,20 @@ class ReviewInputTests(unittest.TestCase):
         self.assertNotIn(";base64,", dumps(bounded))
         self.assertNotIn(encoded, dumps(bounded))
 
+    def test_legacy_learning_status_is_summarized_before_budgeting(self):
+        status = {"structuredContent": {"state": "idle", "progress": {"detail": "old status" * 15000}}}
+        feedback = {"structuredContent": {"version": "v1", "validation": "host_test_passed"}}
+        original = [{"role": "user", "content": "Verify the applied method"},
+                    *tool_exchange("status", "mcp__hermes_learning__learning_status", {}, status),
+                    *tool_exchange("feedback", "mcp__hermes_learning__record_application",
+                                   {"delivery_token": "local-fixture", "stage": "verified"}, feedback)]
+        bounded = bound_review_history(original, 4096)
+        self.assertEqual(len(bounded), len(original))
+        self.assertEqual(json.loads(bounded[2]["content"])["state"], "idle")
+        self.assertEqual(json.loads(bounded[4]["content"])["validation"], "host_test_passed")
+        self.assertNotIn("local-fixture", dumps(bounded))
+        self.assertIn("old status", original[2]["content"])
+
     def test_large_text_history_keeps_latest_prompt_conclusion_and_complete_tool_pairs(self):
         messages = [{"role": "user", "content": "Older task"}]
         for i in range(20):

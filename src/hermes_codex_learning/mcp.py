@@ -17,17 +17,22 @@ TOOLS = [
           "properties":{"chat":{"type":"string"},"turn":{"type":"string"},"tool_call":{"type":"string"}},
           "required":["chat","turn","tool_call"],"additionalProperties":False}}},
         "required":["delivery_token","cwd","stage"],"additionalProperties":False}},
+    {"name": "feedback_status", "description": "Read the latest turn's skill versions and copyable test references, or read one application receipt. Pass the absolute cwd and the host chat ID.",
+     "inputSchema": {"type": "object", "properties": {"cwd": {"type": "string"}, "chat": {"type": "string"},
+                     "turn": {"type": "string"}, "receipt_id": {"type": "string"}},
+                     "required": ["cwd", "chat"], "additionalProperties": False}},
     {"name": "update_status", "description": "Read automatic Hermes update policy, latest check, candidate compatibility gates and activation/rollback outcome. Works when the learning worker is offline.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "update_check", "description": "Check the official Hermes stable release and exact plugin compatibility. Does not install or activate a release.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
-    {"name": "learning_status", "description": "Read capture/admission, review, candidates, publication, recall and per-chat/turn backlog positions. Does not trigger learning. Use cwd/chat/turn to narrow progress and after_cursor for pagination.",
+    {"name": "learning_status", "description": "Read capture, review, publication, recall and feedback progress. With cwd and chat, execution.test_references lists host event references for record_application. Use turn or after_cursor to narrow results. Does not trigger learning.",
      "inputSchema": {"type": "object", "properties": {"cwd":{"type":"string"},"chat":{"type":"string"},"turn":{"type":"string"},
         "limit":{"type":"integer","minimum":1,"maximum":100},"after_cursor":{"type":"integer","minimum":0}}, "additionalProperties": False}},
     {"name": "context", "description": "Read Hermes personal knowledge: project-scoped memories and relevant shared skills. Pass the current task's absolute cwd and a short task query; omitted cwd returns no project memory. Listing is not skill use.",
      "inputSchema": {"type": "object", "properties": {"cwd": {"type": "string"}, "query": {"type": "string"}}, "additionalProperties": False}},
-    {"name": "skill_load", "description": "Load a current shared Hermes skill/resource with version and source provenance. Pass the task's absolute cwd; check applicability of project-specific examples. A delivery receipt does not prove adoption.",
-     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "file_path": {"type": "string"}, "cwd": {"type": "string"}},
+    {"name": "skill_load", "description": "Load a current shared Hermes skill/resource. Pass cwd and the artifact_version from context to require an exact version. A delivery receipt does not prove adoption.",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "file_path": {"type": "string"},
+                     "cwd": {"type": "string"}, "artifact_version": {"type": "string"}},
                      "required": ["name"], "additionalProperties": False}},
 ]
 
@@ -35,7 +40,7 @@ from .learning_tools import TOOLS as LEARNING_TOOLS
 TOOLS.extend(LEARNING_TOOLS)
 
 for tool in TOOLS:
-    readonly=tool["name"] in {"context","skill_load","learning_status","update_status","learning_request_status","pending_reviews"}
+    readonly=tool["name"] in {"context","skill_load","learning_status","feedback_status","update_status","learning_request_status","pending_reviews"}
     tool["annotations"]={"readOnlyHint":readonly,"destructiveHint":False,
                          "openWorldHint":tool["name"]=="update_check"}
     if tool["name"] in {"record_application", *(item["name"] for item in LEARNING_TOOLS)}:

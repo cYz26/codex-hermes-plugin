@@ -188,22 +188,26 @@ def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
         result["user"] = "Codex App task specification from a verified host transcript (not a direct user declaration).\n\n" + task["prompt"]
         result["task_input_provenance"] = {"kind": "native_hook_transcript", "hook_event": row["id"],
                                            **{key: task[key] for key in ("source_thread", "item_id", "item_hash", "method")}}
+    resolved = set()
     for identifier, fact in facts["commands"].items():
         if identifier not in result["tools"]:
             continue
         result["tools"][identifier]["host_position"] = {key:fact[key] for key in ("ordinal","timestamp") if key in fact}
         status = str(fact["status"]).lower().replace("_", "")
         code = fact["exit_code"]
-        if type(code) is int:
+        if status == "interrupted":
+            result["tools"][identifier].update(status="interrupted", process="", status_source="host_transcript")
+        elif fact.get("kind") == "CommandExecution" and type(code) is int and status in {"completed", "failed"}:
             original = result["tools"][identifier].get("result")
             if isinstance(original, dict) and original.get("status_source") == "host_transcript":
-                original = original["output"]
+                original = original.get("output")
             result["tools"][identifier].update(status="completed" if code == 0 else "failed", process="",
+                status_source="host_transcript",
                 result={"output": original, "exit_code": code, "status_source": "host_transcript"} if include_task
                        else {'outcome': 'completed' if code == 0 else 'failed'})
         elif status in {"inprogress", "running"}:
             result["tools"][identifier].update(status="running", process=str(fact["process_id"] or ""))
-        elif status in {"failed", "interrupted"}:
+        elif status == "failed":
             result["tools"][identifier].update(status=status,process="",status_source="host_transcript")
             if not include_task or result["tools"][identifier].get("result") is None:
                 result["tools"][identifier]["result"]={"outcome":status}
@@ -211,6 +215,10 @@ def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
             result["tools"][identifier].update(status="completed",process="",status_source="host_transcript")
             if not include_task or result["tools"][identifier].get("result") is None:
                 result["tools"][identifier]["result"]={"outcome":"completed"}
+        if result["tools"][identifier]["status"] in {"completed", "failed", "interrupted"}:
+            resolved.add("unrecognized_execution_result:" + identifier)
+    if resolved and "coverage" in result:
+        result["coverage"] = sorted(set(result["coverage"]) - resolved)
     if result.get("_ended_by") == "Stop":
         result["status"] = "incomplete" if any(t["status"] in {"running", "unknown"} for t in result["tools"].values()) else "completed"
     return result

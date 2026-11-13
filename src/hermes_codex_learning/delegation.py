@@ -35,7 +35,10 @@ def _result_object(response):
     structured = response.get("structuredContent")
     if isinstance(structured, dict):
         return structured
-    for item in response.get("content", []):
+    content = response.get("content")
+    if not isinstance(content, list):
+        return None
+    for item in content:
         if isinstance(item, dict) and item.get("type") == "text":
             try:
                 value = json.loads(item.get("text", ""))

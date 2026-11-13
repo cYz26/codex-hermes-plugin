@@ -95,19 +95,26 @@ class LifecycleTests(unittest.TestCase):
 
     def test_native_related_skill_is_recalled_but_unrelated_own_skill_is_not_recommended(self):
         from hermes_codex_learning.knowledge import context_view
-        view = context_view({'memories': {}, 'skills': [
-            {'name': 'csv', 'description': 'CSV ingestion'},
-            {'name': 'atomic-output', 'related_skills': ['csv']},
-            {'name': 'notifications', 'description': 'notification senders'}],
-            'bridge_provenance': {'skills': {name: {'projects': ['/a']}
-                for name in ('csv', 'atomic-output', 'notifications')}}}, '/a', 'CSV')
-        self.assertEqual(view['recommended_skills'], ['csv', 'atomic-output'])
+        for forward in (False, True):
+            with self.subTest(forward=forward):
+                view = context_view({'memories': {}, 'skills': [
+                    {'name': 'csv', 'description': 'CSV ingestion',
+                     'related_skills': ['atomic-output', 'private-output'] if forward else []},
+                    {'name': 'atomic-output', 'related_skills': [] if forward else ['csv']},
+                    {'name': 'private-output', 'related_skills': ['csv']},
+                    {'name': 'notifications', 'description': 'notification senders'}],
+                    'checked_publication': True,
+                    'bridge_provenance': {'skills': {
+                        'csv': {'projects': ['/a']}, 'atomic-output': {'projects': ['/a']},
+                        'notifications': {'projects': ['/a']}, 'private-output': {'projects': ['/b']}}}},
+                    '/a', 'CSV')
+                self.assertEqual(view['recommended_skills'], ['csv', 'atomic-output'])
 
     def test_retention_protects_published_rollback_and_recently_retired_versions(self):
         from hermes_codex_learning.retention import retain_artifacts
         with tempfile.TemporaryDirectory() as directory:
             bridge = self.bridge(Path(directory), [])
-            versions = [str(i)*64 for i in range(1, 7)]
+            versions = [str(i)*64 for i in range(1, 8)]
             def record(v):
                 return {'artifact': {'version': v}, 'retired_at': time.time()-40*86400}
             bridge.store.set('publications-v1', {'skill': record(versions[0])})
@@ -118,6 +125,12 @@ class LifecycleTests(unittest.TestCase):
             bridge.api.prune_artifacts = lambda protected, **kw: seen.extend(protected) or {'removed': []}
             retain_artifacts(bridge.store, bridge.api)
             self.assertEqual(set(seen), {versions[0], versions[2], versions[3], versions[4], versions[5]})
+            bridge.store.set('native-candidate-intents', {'ancestor': {
+                'version': versions[1], 'sources': {'original': versions[6]}}, 'candidate': {
+                'version': versions[3], 'sources': {'ancestor': versions[1]}}})
+            seen.clear()
+            retain_artifacts(bridge.store, bridge.api)
+            self.assertEqual(set(seen), set(versions))
 
     def test_ended_incomplete_evidence_does_not_keep_the_host_busy_forever(self):
         with tempfile.TemporaryDirectory() as directory:

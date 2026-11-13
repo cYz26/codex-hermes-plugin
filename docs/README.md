@@ -19,6 +19,7 @@
 | [工程入口](../README.md) | 两种场景、配置和离线检查 |
 | [自进化实现整理](./SELF-EVOLUTION.zh-CN.md) | 执行与学习闭环、资料准入、项目归属、发布和恢复 |
 | [原生学习与维护](./NATIVE-LIFECYCLE.zh-CN.md) | 完整复用原生能力、Curator 来源与发布衔接、快照留存及验证 |
+| [Codex 与原生 Hermes 机制对照](./NATIVE-PARITY-REVIEW-2026-11-13.zh-CN.md) | v0.23.1 基线、接入层差异和后续优化 |
 | [自进化定期审查方案](./SELF-EVOLUTION-REVIEW-PLAN.zh-CN.md) | 前两周每日审查、每周机制 review、产物质量标准与落地步骤（方案） |
 | [待审记忆处理与验证](./PENDING-REVIEWS.zh-CN.md) | 项目范围内的差异、批准／丢弃、重复清理及 Mac 验收入口 |
 | [复盘恢复与重试](./REVIEW-RETRIES.zh-CN.md) | 自动复盘冷却、失败回执保留、手动提前与 schema 2 回退边界 |

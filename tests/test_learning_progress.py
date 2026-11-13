@@ -100,6 +100,31 @@ class LearningProgressTests(unittest.TestCase):
         self.assertIn('user_followup',status['dialogue_signal'])
         self.assertEqual(status['execution']['correctness'],'not_inferred')
 
+    def test_scoped_progress_returns_copyable_test_references_and_mcp_versions(self):
+        project = str(self.root)
+        self.event('UserPromptSubmit', prompt='Add a regression test')
+        self.event('PostToolUse', tool_use_id='recall', tool_name='mcp__hermes_learning__context',
+                   tool_response={'structuredContent': {'project': project, 'recommended_skills': ['test-skill'],
+                                                        'skills': [{'name': 'test-skill', 'artifact_version': 'body-v1'}]}})
+        self.event('PostToolUse', tool_use_id='exec-abc', tool_name='Bash',
+                   tool_input={'command': 'python3 -B -m unittest'}, tool_response={'exit_code': 0, 'output': 'private'})
+        self.event('PostToolUse', tool_use_id='not-a-test', tool_name='Bash',
+                   tool_input={'command': 'pwd'}, tool_response={'exit_code': 0})
+        self.event('Stop', last_assistant_message='Tests passed')
+        ref = {'chat': 'chat', 'turn': 't', 'tool_call': 'exec-abc'}
+        pending = self.status()['turns'][0]
+        self.assertEqual(pending['execution']['test_references'], [{'source_event': ref, 'outcome': 'pending'}])
+        self.assertEqual(pending['recall']['mcp_recommendations'], [{
+            'source_event': {**ref, 'tool_call': 'recall'},
+            'skills': [{'name': 'test-skill', 'artifact_version': 'body-v1'}],
+        }])
+        self.bridge.ingest()
+        observed = self.status()['turns'][0]
+        self.assertEqual(observed['execution']['test_references'],
+                         [{'source_event': ref, 'outcome': 'completed', 'outcome_source': 'hook_exit_code'}])
+        self.assertNotIn('private', str(observed['execution']))
+        self.assertNotIn('test_references', self.bridge.rpc('learning_status', {'chat': 'chat'})['progress']['turns'][0]['execution'])
+
     def test_unavailable_old_inputs_do_not_starve_a_later_recoverable_turn(self):
         source={'host':self.bridge.store.get('host_id'),'project':str(self.root),'chat':'chat'}
         for i in range(10):

@@ -195,6 +195,32 @@ def begin(bridge, intent):
     return True
 
 
+def mark_user_taught(bridge, intent, result):
+    if intent.get("reason") != "user_request" or not result.get("applied"):
+        return None
+    binding = binding_for(bridge, intent)
+    if not binding:
+        return None
+    value = get(bridge.store, **binding)
+    if value["mode"] != "learn":
+        return None
+    operations = [fact.get("operation") or fact for fact in result["applied"] if fact.get("tool") == "skill_manage"]
+    if not any(op.get("action") == "create" and op.get("name") == value["skill_name"] for op in operations):
+        return None
+    try:
+        from tools import skill_usage
+    except ImportError:
+        return "unconfirmed"
+    # Preserve the native creation and activity record. This flag only governs
+    # which skills Curator may manage automatically.
+    target = value["skill_name"]
+    origin = skill_usage.get_record(target).get("created_by")
+    if origin == "agent":
+        skill_usage._set_field(target, "created_by", "learn")
+        origin = skill_usage.get_record(target).get("created_by")
+    return "user_taught" if origin == "learn" else "unconfirmed"
+
+
 def record_result(bridge, intent, result, versions):
     binding = binding_for(bridge, intent)
     if not binding:
