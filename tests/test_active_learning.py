@@ -79,6 +79,19 @@ class ActiveLearningTests(unittest.TestCase):
         return self.bridge.rpc("request_learning", {"cwd": str(self.project), "chat_id": "chat-a",
             "request_id": "request-a", "focus": "Capture the verified method", **extra})
 
+    def test_learn_can_target_an_existing_native_skill_without_creating_a_duplicate(self):
+        self.bridge.store.set("artifact-read-cache", {"codebase-inspection": {"artifact": {"version": "v1"}}})
+        result = self.request(mode="learn", skill_name="codebase-inspection")
+        self.assertEqual(result["state"], "collecting")
+        self.assertEqual(result["skill_name"], "codebase-inspection")
+        self.bridge.store.set("artifact-read-cache", {})
+        self.assertEqual(self.request(mode="learn", skill_name="codebase-inspection"), result)
+
+    def test_learn_rejects_unknown_unprefixed_or_unsafe_skill_names(self):
+        for name in ("unknown-skill", "../codebase-inspection", "a/b", "learned-", None):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.request(mode="learn", skill_name=name)
+
     def test_request_is_durable_idempotent_and_scoped_to_the_selected_chat(self):
         result = self.request()
         self.assertEqual(result["state"], "queued")

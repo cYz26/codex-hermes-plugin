@@ -18,7 +18,7 @@ TOOLS = [
         "memory_writes":{"type":"string","enum":["add","revise"],"default":"add",
                          "description":"Use revise only when the user requests correction/update of existing project memory."},
         "through_turn":{"type":"string","description":"Optional captured cutoff turn; unfinished turns return waiting_for_turn."},
-        "skill_name":{"type":"string","description":"Required for learn: a descriptive learned-<topic> target, reused across batches."},
+        "skill_name":{"type":"string","description":"Required for learn: an existing native skill name, or learned-<topic> for a new skill; reused across batches."},
     }, ("chat_id",)),
     tool("add_learning_material", "Add one user-selected source chunk to a collecting learn request. At most 24 KiB per chunk and 64 chunks; use stable chunk IDs for retries. Existing data admission applies.", {
         "chunk_id":{"type":"string"}, "source":{"type":"string","description":"Source URL or path, at most 512 UTF-8 bytes."},

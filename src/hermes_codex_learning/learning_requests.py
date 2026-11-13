@@ -120,8 +120,8 @@ def submit(store, settings, project, params):
     if through is not None:
         identity(through, "through_turn")
     skill = params.get("skill_name")
-    if mode == "learn" and (not isinstance(skill, str) or not re.fullmatch(r"learned-[a-z0-9][a-z0-9-]{0,55}", skill)):
-        raise ValueError("learn requires a skill_name such as learned-api-auth")
+    if mode == "learn" and (not isinstance(skill, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", skill)):
+        raise ValueError("learn requires a safe native skill name")
     if mode == "refine" and skill is not None:
         raise ValueError("skill_name is only used in learn mode")
     contract = {"request_id": request_id, "project": project, "chat_id": chat, "mode": mode,
@@ -133,6 +133,11 @@ def submit(store, settings, project, params):
         if value["fingerprint"] != fingerprint:
             raise ValueError("request_id is already bound to another request")
         return view(store, value)
+    if mode == "learn" and not re.fullmatch(r"learned-[a-z0-9][a-z0-9-]{0,55}", skill):
+        # Reuse the worker's native catalog; collection must not instantiate a
+        # second runtime or create a parallel learned-* copy of an existing skill.
+        if skill not in store.get("artifact-read-cache", {}):
+            raise ValueError("Use an existing native skill or a new learned-<topic> name")
     turns = chat_turns(store, project, chat)
     if not turns:
         raise ValueError("No captured chat matches chat_id in this project; wait for hooks or select an existing chat")
