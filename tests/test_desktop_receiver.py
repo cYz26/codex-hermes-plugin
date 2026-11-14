@@ -65,7 +65,10 @@ class DesktopReceiverTests(unittest.TestCase):
                             "project_approval": True, "applied_entities": [], "pending_entities": ["memory:11111111"]}
                 skill_approval = {**approval, "id": "skills", "text": "skill detail", "project_approval": False,
                                   "pending_entities": ["skills:22222222"]}
-                items = {item["id"]: item for item in (review, approval, skill_approval)}
+                publication = {**approval, "id": "publication", "approval_subject": "publication",
+                               "summary": "通用技能待审 · portable", "text": "publication detail",
+                               "pending_entities": ["publication:portable"]}
+                items = {item["id"]: item for item in (review, approval, skill_approval, publication)}
                 posted = []
 
                 def remote(action, *args, body=None):
@@ -76,7 +79,7 @@ class DesktopReceiverTests(unittest.TestCase):
                     if action == "detail":
                         return items[args[1]]
                     if action == "sync":
-                        return {"items": list(items.values()) if body["after"] == 0 else [], "cursor": 3}
+                        return {"items": list(items.values()) if body["after"] == 0 else [], "cursor": len(items)}
                     self.assertEqual(action, "ack")
                     return {}
 
@@ -91,8 +94,11 @@ class DesktopReceiverTests(unittest.TestCase):
                     client.poll()
                     client.poll()
 
-                self.assertEqual(len(posted), 2)
+                self.assertEqual(len(posted), 3)
                 self.assertEqual(posted[0], {"summary": review["summary"], "scope": "/project", "text": review["text"]})
                 self.assertEqual(posted[1], {"summary": "[project] 2 项提案待审批", "scope": "/project",
                                              "text": "memory detail\n\nskill detail", "kind": "approval.required",
                                              "project_approval": True})
+                self.assertEqual(posted[2], {"summary": publication["summary"], "scope": "/project",
+                                             "text": publication["text"], "kind": "approval.required",
+                                             "project_approval": True, "approval_subject": "publication"})

@@ -8,13 +8,16 @@ private struct Receipt: Decodable {
     let scope: String?
     let kind: String?
     let projectApproval: Bool?
+    let approvalSubject: String?
 
     private enum CodingKeys: String, CodingKey {
         case summary, text, scope, kind
         case projectApproval = "project_approval"
+        case approvalSubject = "approval_subject"
     }
 
     var requiresApproval: Bool { kind == "approval.required" }
+    var isPublicationReview: Bool { requiresApproval && approvalSubject == "publication" }
 
     var reviewScope: String? {
         guard let scope, scope.hasPrefix("/"), projectApproval != false else { return nil }
@@ -111,11 +114,13 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                     return
                 }
                 let content = UNMutableNotificationContent()
-                content.title = receipt.requiresApproval ? "Hermes 待审批" : "学习回执"
+                content.title = receipt.isPublicationReview ? "通用技能待审"
+                    : receipt.requiresApproval ? "Hermes 待审批" : "学习回执"
                 content.body = receipt.summary
                 content.categoryIdentifier = receipt.requiresApproval && receipt.reviewScope != nil
                     ? self.approvalCategory : self.category
-                content.threadIdentifier = receipt.requiresApproval ? self.approvalCategory : self.category
+                content.threadIdentifier = receipt.isPublicationReview ? "publication-review"
+                    : receipt.requiresApproval ? self.approvalCategory : self.category
                 content.userInfo = ["receiptPath": url.path]
                 let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
                 let request = UNNotificationRequest(identifier: url.deletingPathExtension().lastPathComponent,
@@ -197,7 +202,8 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
         let viewer = window ?? NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable, .miniaturizable],
                                         backing: .buffered, defer: false)
         viewer.isReleasedWhenClosed = false
-        viewer.title = receipt?.requiresApproval == true ? "Hermes 待审批" : "Hermes 学习明细"
+        viewer.title = receipt?.isPublicationReview == true ? "通用技能待审"
+            : receipt?.requiresApproval == true ? "Hermes 待审批" : "Hermes 学习明细"
         viewer.contentView = content
         if window == nil { viewer.center() }
         window = viewer
@@ -232,7 +238,8 @@ private final class Notifier: NSObject, NSApplicationDelegate, UNUserNotificatio
                 return
             }
             process.executableURL = helper
-            process.arguments = [scope]
+            let publication = (try? Receipt(at: receipt))?.isPublicationReview == true
+            process.arguments = publication ? [scope, "--publication"] : [scope]
         } else {
             guard let script = Bundle.main.url(forResource: "review", withExtension: "py"),
                   let python = Bundle.main.object(forInfoDictionaryKey: "HermesReviewPython") as? String else {

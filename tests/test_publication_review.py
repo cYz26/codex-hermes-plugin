@@ -1,4 +1,5 @@
 import hashlib
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -7,6 +8,8 @@ from unittest.mock import patch
 
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.daemon import Bridge
+from hermes_codex_learning.knowledge import context_view
+from hermes_codex_learning.notices import NoticeQueue
 
 
 class PublicationReviewTests(unittest.TestCase):
@@ -24,7 +27,7 @@ class PublicationReviewTests(unittest.TestCase):
         (self.artifact / 'SKILL.md').write_text(body)
         self.value = {'name': 'portable', 'version': 'v1', 'content': body, 'resource_dir': str(self.artifact),
                       'files': {'SKILL.md': hashlib.sha256(body.encode()).hexdigest()}}
-        self.context = {'version': 'catalog-v1', 'memories': {}, 'skills': [{'name': 'portable', 'version': 'c1'}],
+        self.context = {'version': 'catalog-v1', 'memories': {}, 'skills': [{'name': 'portable', 'version': 'c1', 'artifact_version': 'v1'}],
                         'bridge_provenance': {'skills': {'portable': {'projects': [str(self.root)]}}}}
         self.bridge.store.set('knowledge-index-v1', self.context['bridge_provenance'])
         self.bridge.store.set('artifact-read-cache', {'portable': {'artifact': self.value}})
@@ -35,6 +38,147 @@ class PublicationReviewTests(unittest.TestCase):
 
     def submit(self, **kw):
         return self.bridge.rpc('review_publication', {'cwd': str(self.root), 'review': self.review, **kw})
+
+    def review_action(self, action, *, cwd=None, **params):
+        return self.bridge.rpc('publication_review', {'cwd': str(cwd or self.root), 'action': action, **params})
+
+    def publish(self):
+        with patch('hermes_codex_learning.native_reads.skill', return_value=self.value):
+            return self.bridge.publish_checked(self.context)
+
+    def add_resources(self, version, **resources):
+        directory = self.settings.home / 'learning/artifacts' / version
+        directory.mkdir()
+        for name, content in resources.items():
+            path = directory / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        self.value = {**self.value, 'version': version, 'resource_dir': str(directory), 'content': resources['SKILL.md'],
+                      'files': {name: hashlib.sha256(body.encode()).hexdigest() for name, body in resources.items()}}
+        self.context['version'] = version
+        self.context['skills'][0]['artifact_version'] = version
+        self.bridge.store.set('artifact-read-cache', {'portable': {'artifact': self.value}})
+
+    def test_existing_candidate_gets_one_actionable_notice_and_scoped_file_preview(self):
+        self.add_resources('v2', **{'SKILL.md': self.value['content'], 'references/checks.md': 'Reusable checks.'})
+        self.bridge.store.set('publication-context-version', 'pre-review build')
+        self.bridge.store.set('publication-decisions', {'portable': {'allowed': False, 'version': 'v2',
+                                                                  'reason': 'data_classification_unassessed'}})
+        self.publish()
+        self.context['version'] = 'next-context-version'
+        self.publish()
+        candidates = self.review_action('list')['candidates']
+        self.assertEqual(len(candidates), 1)
+        candidate = candidates[0]
+        self.assertEqual((candidate['name'], candidate['version'], candidate['sources']),
+                         ('portable', 'v2', [str(self.root)]))
+        self.assertEqual([(r['path'], r['change']) for r in candidate['resources']],
+                         [('SKILL.md', 'added'), ('references/checks.md', 'added')])
+        params = {'name': 'portable', 'revision': candidate['revision'], 'file': 'references/checks.md'}
+        self.assertEqual(self.review_action('file', **params), {'before': None, 'after': 'Reusable checks.'})
+        foreign = self.root.parent / 'another-project'
+        self.bridge.settings = replace(self.settings, capture_scope='global')
+        self.assertEqual(self.review_action('list', cwd=foreign), {'candidates': [], 'decisions': []})
+        with self.assertRaises(ValueError):
+            self.review_action('file', cwd=foreign, **params)
+        with self.assertRaises(ValueError):
+            self.review_action('file', **{**params, 'file': '../../private.txt'})
+        queue = NoticeQueue(self.settings.state)
+        self.addCleanup(queue.close)
+        notice, = queue.sync('test')['items']
+        self.assertEqual((notice['kind'], notice['approval_subject'], notice['scope']),
+                         ('approval.required', 'publication', str(self.root)))
+        self.assertTrue(notice['project_approval'])
+        self.assertIn('通用技能待审', notice['summary'])
+        self.assertNotIn('Reusable checks.', json.dumps(notice))
+        self.assertIsNone(self.bridge.store.get('publication-reviews-v1'))
+
+    def test_keep_new_revision_preserves_last_shared_copy_and_new_changes_return_to_review(self):
+        self.add_resources('v2', **{'SKILL.md': self.value['content'], 'references/old.md': 'Old reference'})
+        self.publish()
+        candidate, = self.review_action('list')['candidates']
+        with patch('hermes_codex_learning.native_reads.skill', return_value=self.value):
+            result = self.review_action('approve_generic', name='portable', revision=candidate['revision'])
+        self.assertEqual(result['state'], 'queued')
+        self.assertEqual(self.review_action('list')['decisions'][0]['state'], 'queued')
+        self.assertEqual(self.bridge.store.get('publications-v1'), {})
+        self.publish()
+        self.assertEqual(self.review_action('list')['decisions'][0]['state'], 'published')
+        previous_body = self.value['content']
+        self.add_resources('v3', **{'SKILL.md': previous_body + 'Add a check.\n', 'references/new.md': 'New reference'})
+        self.publish()
+        candidate, = self.review_action('list')['candidates']
+        self.assertEqual(candidate['previous_version'], 'v2')
+        self.assertEqual({r['path']: r['change'] for r in candidate['resources']},
+                         {'SKILL.md': 'changed', 'references/new.md': 'added', 'references/old.md': 'removed'})
+        params = {'name': 'portable', 'revision': candidate['revision']}
+        self.assertEqual(self.review_action('file', **params, file='SKILL.md'),
+                         {'before': previous_body, 'after': self.value['content']})
+        self.assertEqual(self.review_action('file', **params, file='references/old.md'),
+                         {'before': 'Old reference', 'after': None})
+        with patch('hermes_codex_learning.native_reads.skill', return_value=self.value):
+            self.assertEqual(self.review_action('keep_project', **params)['state'], 'kept_in_project')
+        checked = self.publish()
+        self.assertEqual(checked['publications']['portable']['version'], 'v2')
+        self.assertEqual(context_view(checked, str(self.root))['skills'][0]['artifact_version'], 'v3')
+        self.assertEqual(context_view(checked, '/unrelated', 'portable')['skills'][0]['artifact_version'], 'v2')
+        self.assertEqual(self.review_action('list')['candidates'], [])
+        self.assertEqual(self.review_action('list')['decisions'][0]['state'], 'kept_in_project')
+        with self.assertRaises(ValueError):
+            self.review_action('approve_generic', **params)
+        self.add_resources('v4', **{'SKILL.md': previous_body + 'Different change.\n'})
+        self.publish()
+        self.assertEqual(self.review_action('list')['candidates'][0]['version'], 'v4')
+
+    def test_fresh_native_version_hashes_and_origin_are_required_for_a_decision(self):
+        self.publish()
+        candidate, = self.review_action('list')['candidates']
+        params = {'name': 'portable', 'revision': candidate['revision']}
+        with patch('hermes_codex_learning.native_reads.skill', return_value={**self.value, 'version': 'new'}):
+            with self.assertRaises(ValueError):
+                self.review_action('approve_generic', **params)
+        body = self.artifact / 'SKILL.md'
+        body.write_text('Changed after displaying review')
+        with self.assertRaises(ValueError):
+            self.review_action('file', **params, file='SKILL.md')
+        with patch('hermes_codex_learning.native_reads.skill', return_value=self.value):
+            with self.assertRaisesRegex(ValueError, 'resource_changed'):
+                self.review_action('approve_generic', **params)
+        self.bridge.store.set('knowledge-index-v1', {'skills': {'portable': {'projects': [str(self.root), '/another']}}})
+        with self.assertRaises(ValueError):
+            self.review_action('keep_project', **params)
+        self.assertIsNone(self.bridge.store.get('publication-reviews-v1'))
+
+    def test_other_automatic_blocks_do_not_offer_publication_approval(self):
+        frontmatter = self.value['content'].split('Inspect sources')[0]
+        for settings, extra, reason in (
+            (replace(self.settings, data_policy={'enabled': True}), 'No assessment command.', 'data_classification_unassessed'),
+            (self.settings, 'Project source ' + str(self.root), 'project_private_material'),
+            (replace(self.settings, quality_checks=True), 'No required sections.', 'missing_applicability_limits_or_verification'),
+        ):
+            with self.subTest(reason=reason):
+                self.bridge.settings = settings
+                body = self.artifact / 'SKILL.md'
+                content = frontmatter + extra
+                body.write_text(content)
+                self.value = {**self.value, 'content': content, 'files': {'SKILL.md': hashlib.sha256(content.encode()).hexdigest()}}
+                self.bridge.store.set('artifact-read-cache', {'portable': {'artifact': self.value}})
+                self.context['version'] = extra
+                self.publish()
+                self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'], reason)
+                self.assertEqual(self.review_action('list')['candidates'], [])
+        self.assertFalse(self.bridge.store.db.execute(
+            "SELECT 1 FROM notices WHERE json_extract(payload,'$.approval_subject')='publication'").fetchone())
+
+    def test_unassessed_executable_needs_an_independent_proof_before_review(self):
+        self.bridge.settings = replace(self.settings, quality_checks=True)
+        self.add_resources('v2', **{'SKILL.md': self.value['content'], 'scripts/example.py': 'print(1)\n'})
+        with patch('hermes_codex_learning.quality.verify') as verify:
+            self.publish()
+        verify.assert_not_called()
+        self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'],
+                         'executable_resource_needs_validation')
+        self.assertEqual(self.review_action('list')['candidates'], [])
 
     def test_review_is_previewable_exact_version_and_published_by_owner(self):
         self.assertEqual(self.submit()['state'], 'preview')

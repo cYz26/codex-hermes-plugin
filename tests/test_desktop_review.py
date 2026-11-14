@@ -4,10 +4,12 @@ import json
 import plistlib
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
+from urllib.parse import urlencode
 
 
 class DesktopReviewTests(unittest.TestCase):
@@ -78,6 +80,8 @@ class DesktopReviewTests(unittest.TestCase):
         self.assertTrue(hasattr(review, "ReviewServer"), "The user-operated review server is missing")
         remote = SimpleNamespace(scope="/project", list=Mock(return_value={"project": "/project", "proposals": []}),
                                  decide=Mock(return_value={"state": "approved", "applied": True}),
+                                 publications=Mock(return_value={"candidates": [], "decisions": []}),
+                                 publication=Mock(side_effect=[{"before": None, "after": "scoped contents"}, {"state": "queued"}]),
                                  prune=Mock(), self_test=Mock())
         server = review.ReviewServer(remote, session_token="fixture-session")
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -120,6 +124,36 @@ class DesktopReviewTests(unittest.TestCase):
         status, _, _ = self.request(server, "POST", "/api/decision", value, headers)
         self.assertEqual(status, 400)
         remote.decide.assert_not_called()
+
+    def test_publication_preview_and_decision_share_the_existing_session_boundary(self):
+        server, remote = self.server()
+        headers = {"X-Hermes-Review-Token": "fixture-session"}
+        candidate = {"name": "portable", "revision": "b" * 64}
+        path = "/api/publication-file?" + urlencode({**candidate, "file": "references/guide.md"})
+        self.assertEqual(self.request(server, "GET", path)[0], 403)
+        status, body, _ = self.request(server, "GET", path, headers=headers)
+        self.assertEqual((status, json.loads(body)["after"]), (200, "scoped contents"))
+        remote.publication.assert_called_once_with("file", "portable", "b" * 64, "references/guide.md")
+        decision = {"action": "approve_generic", **candidate}
+        self.assertEqual(self.request(server, "POST", "/api/decision", decision, headers)[0], 403)
+        headers["Origin"] = server.base_url
+        injected = {**decision, "cwd": "/unrelated"}
+        self.assertEqual(self.request(server, "POST", "/api/decision", injected, headers)[0], 400)
+        status, body, _ = self.request(server, "POST", "/api/decision", decision, headers)
+        self.assertEqual((status, json.loads(body)["state"]), (200, "queued"))
+        remote.publication.assert_called_with("approve_generic", "portable", "b" * 64)
+
+    def test_polling_does_not_extend_the_approval_session(self):
+        server, _ = self.server()
+        headers = {"X-Hermes-Review-Token": "fixture-session"}
+        last_request = server.last_request = time.monotonic() - 60
+        self.assertEqual(self.request(server, "GET", "/api/proposals?poll=1", headers=headers)[0], 200)
+        self.assertEqual(self.request(server, "GET", "/api/publications?poll=1", headers=headers)[0], 200)
+        self.assertEqual(server.last_request, last_request)
+        self.assertEqual(self.request(server, "GET", "/api/publications", headers=headers)[0], 200)
+        self.assertGreater(server.last_request, last_request)
+        server.last_request = time.monotonic() - 1801
+        self.assertEqual(self.request(server, "GET", "/api/publications?poll=1", headers=headers)[0], 410)
 
     def test_page_requires_the_session_and_safely_embeds_project_names(self):
         server, remote = self.server()

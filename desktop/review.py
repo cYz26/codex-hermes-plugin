@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 
 LOCAL_AGENT = "com.cy.hermes-codex-learning.pilot"
+PUBLICATION_DECISIONS = ("approve_generic", "keep_project")
 
 
 class BridgeReviews:
@@ -30,6 +31,9 @@ class BridgeReviews:
             raise ValueError("审批入口需要绝对的 Python、桥接脚本和配置路径")
         self.python, self.bridge, self.settings = python, bridge, settings
         self.scope, self.client = scope, None
+        self.client_lock = threading.Lock()
+        self.publication_enabled = False
+        self.publication_first = False
 
     def command(self, args):
         return [self.python, "-I", "-B", *args]
@@ -48,14 +52,16 @@ class BridgeReviews:
         return value
 
     def _client(self):
-        if self.client is None:
-            status = self._run(["status"], self.bridge)
-            root = status.get("plugin_root")
-            if (status.get("approval_capabilities", {}).get("revision_checked_decisions") is not True
-                    or not isinstance(root, str) or not Path(root).is_absolute()):
-                raise RuntimeError("当前学习服务没有启用审批入口，请先安装包含审批流程的版本")
-            self.client = str(Path(root) / "scripts/bridge")
-        return self.client
+        with self.client_lock:
+            if self.client is None:
+                status = self._run(["status"], self.bridge)
+                root = status.get("plugin_root")
+                if (status.get("approval_capabilities", {}).get("revision_checked_decisions") is not True
+                        or not isinstance(root, str) or not Path(root).is_absolute()):
+                    raise RuntimeError("当前学习服务没有启用审批入口，请先安装包含审批流程的版本")
+                self.publication_enabled = status["approval_capabilities"].get("publication_reviews") is True
+                self.client = str(Path(root) / "scripts/bridge")
+            return self.client
 
     def list(self):
         return self._run(["approvals", "list", "--cwd", self.scope], self._client())
@@ -66,6 +72,26 @@ class BridgeReviews:
             raise ValueError("请先查看这条提案的差异，再提交明确决定")
         return self._run(["approvals", decision, "--cwd", self.scope, "--id", identifier,
                           "--revision", revision], self._client())
+
+    def publications(self):
+        bridge = self._client()
+        if not self.publication_enabled:
+            return {"candidates": [], "decisions": []}
+        return self._run(["publication-review", "list", "--cwd", self.scope], bridge)
+
+    def publication(self, action, name, revision, file=None):
+        if (not isinstance(name, str) or not 0 < len(name) <= 4000 or "\x00" in name
+                or not isinstance(revision, str) or not re.fullmatch(r"[a-f0-9]{64}", revision)):
+            raise ValueError("请刷新待审候选并核对显示的版本")
+        args = ["publication-review", action, "--cwd", self.scope, "--name=" + name, "--revision", revision]
+        if action == "file":
+            if not isinstance(file, str) or not file or "\x00" in file:
+                raise ValueError("请选择清单中的文件")
+            args.append("--file=" + file)
+        bridge = self._client()
+        if not self.publication_enabled:
+            raise RuntimeError("当前学习服务未提供通用技能审批")
+        return self._run(args, bridge)
 
     def prune(self, revision):
         if not re.fullmatch(r"[a-f0-9]{64}", revision):
@@ -114,7 +140,9 @@ def local_reviews(receipt: Path, home: Path):
         raise ValueError("这份回执不属于当前本机学习服务")
     value = json.loads(receipt.read_text())
     scope = value.get("scope") if isinstance(value, dict) else None
-    return BridgeReviews(python, str(supervisor.with_name("bridge")), settings, scope)
+    reviews = BridgeReviews(python, str(supervisor.with_name("bridge")), settings, scope)
+    reviews.publication_first = value.get("approval_subject") == "publication"
+    return reviews
 
 
 class ReviewServer(ThreadingHTTPServer):
@@ -131,14 +159,20 @@ class ReviewServer(ThreadingHTTPServer):
     def page(self):
         def literal(value):
             return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c")
+        bootstrap = {"project": self.reviews.scope,
+                     "publication_first": getattr(self.reviews, "publication_first", False)}
         return (self.template.replace("__SESSION_JSON__", literal(self.session_token))
-                .replace("__BOOTSTRAP_JSON__", literal({"project": self.reviews.scope}))
+                .replace("__BOOTSTRAP_JSON__", literal(bootstrap))
                 .replace("__CSP_NONCE__", self.session_token)).encode()
 
     def expire(self):
-        while time.monotonic() - self.started < 3600 and time.monotonic() - self.last_request < 1800:
+        while not self.expired():
             time.sleep(10)
         self.shutdown()
+
+    def expired(self):
+        now = time.monotonic()
+        return now - self.started >= 3600 or now - self.last_request >= 1800
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
@@ -174,19 +208,37 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path.path == "/":
             if parse_qs(path.query).get("session") != [self.server.session_token]:
                 return self.reply(403, {"error": "请从通知窗口重新打开审批页"})
+            if self.server.expired():
+                return self.reply(410, {"error": "审批会话已过期，请从通知窗口重新打开审批页"})
             self.server.last_request = time.monotonic()
             return self.reply(200, self.server.page(), "text/html; charset=utf-8")
-        if path.path != "/api/proposals" or not self.api_allowed():
+        if not self.api_allowed():
             return self.reply(403, {"error": "审批会话不匹配"})
-        self.server.last_request = time.monotonic()
+        if self.server.expired():
+            return self.reply(410, {"error": "审批会话已过期，请从通知窗口重新打开审批页"})
+        # Background reads must respect the existing idle expiry.
+        if path.path not in {"/api/proposals", "/api/publications"} or path.query != "poll=1":
+            self.server.last_request = time.monotonic()
         try:
-            return self.reply(200, self.server.reviews.list())
+            reviews = self.server.reviews
+            if path.path == "/api/proposals":
+                return self.reply(200, reviews.list())
+            if path.path == "/api/publications":
+                return self.reply(200, reviews.publications())
+            if path.path == "/api/publication-file":
+                query = parse_qs(path.query)
+                if set(query) != {"name", "revision", "file"} or any(len(value) != 1 for value in query.values()):
+                    return self.reply(400, {"error": "请选择当前待审版本清单中的文件"})
+                return self.reply(200, reviews.publication("file", query["name"][0], query["revision"][0], query["file"][0]))
+            return self.reply(404, {"error": "审批入口不存在"})
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
             return self.reply(502, {"error": str(error)})
 
     def do_POST(self):
         if not self.api_allowed(writing=True):
             return self.reply(403, {"error": "请在当前审批页中提交决定"})
+        if self.server.expired():
+            return self.reply(410, {"error": "审批会话已过期，请从通知窗口重新打开审批页"})
         self.server.last_request = time.monotonic()
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -203,6 +255,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
             action = value.get("action")
             if action in {"approve", "reject"} and set(value) == {"action", "id", "revision"}:
                 result = self.server.reviews.decide(value["id"], value["revision"], action)
+            elif action in PUBLICATION_DECISIONS and set(value) == {"action", "name", "revision"}:
+                result = self.server.reviews.publication(action, value["name"], value["revision"])
             elif action == "prune" and set(value) == {"action", "revision"}:
                 result = self.server.reviews.prune(value["revision"])
             elif action == "self-test" and set(value) == {"action"}:
@@ -224,12 +278,15 @@ def main():
     source.add_argument("--config", type=Path, help="SSH receiver configuration")
     source.add_argument("--receipt", type=Path, help="Local notification receipt")
     parser.add_argument("--cwd", help="Project scope for an SSH receiver")
+    parser.add_argument("--publication", action="store_true", help="Show skill sharing candidates first")
     args = parser.parse_args()
     if (args.config is None) != (args.cwd is None):
         parser.error("--cwd is required with --config; --receipt supplies its own project scope")
     try:
         reviews = (RemoteReviews(json.loads(args.config.read_text()), args.cwd) if args.config
                    else local_reviews(args.receipt, Path.home()))
+        if args.publication:
+            reviews.publication_first = True
         with ReviewServer(reviews) as server:
             if not webbrowser.open(server.base_url + "/?" + urlencode({"session": server.session_token})):
                 raise RuntimeError("系统未能打开浏览器")

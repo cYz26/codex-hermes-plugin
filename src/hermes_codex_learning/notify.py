@@ -89,6 +89,8 @@ def _message(event: dict) -> str:
     kind = event.get("kind")
     if kind == "publication.applied":
         return "Hermes 已发布 1 项通用技能：" + event["name"]
+    if kind == APPROVAL_REQUIRED and event.get("approval_subject") == "publication":
+        return "通用技能待审 · " + event["name"]
     if kind == "publication.pending":
         return "Hermes 有 1 项通用候选待验证，尚未共享：" + event["name"]
     if kind == "review.started":
@@ -124,6 +126,8 @@ def persist_receipt(state: Path, event: dict) -> Path:
                    "summary": event["message"], "text": detail}
         if event.get("kind") == APPROVAL_REQUIRED:
             receipt.update(kind=APPROVAL_REQUIRED, project_approval=event["project_approval"])
+            if event.get("approval_subject"):
+                receipt["approval_subject"] = event["approval_subject"]
         atomic_json(path, receipt)
     return path
 

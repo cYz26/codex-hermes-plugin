@@ -84,6 +84,8 @@ class NoticeQueue:
             payload["retry"] = event["retry"]
         if event["kind"] == APPROVAL_REQUIRED:
             payload.update(kind=APPROVAL_REQUIRED, project_approval=event["project_approval"])
+            if event.get("approval_subject"):
+                payload["approval_subject"] = event["approval_subject"]
         self.db.execute("INSERT OR IGNORE INTO notices VALUES (?,?,?,?)", (event["id"], scope, dumps(payload), time.time()))
         self.db.execute("INSERT OR IGNORE INTO notice_order(id) VALUES (?)", (event["id"],))
 

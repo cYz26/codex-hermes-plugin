@@ -38,6 +38,7 @@ class Bridge:
         self.drain = threading.Event()
         self.ready = threading.Event()
         self.resume = threading.Event()
+        self.publication_lock = threading.Lock()
         self.startup_context = None
         self.startup_status = None
         from .identity import build_identity
@@ -630,9 +631,11 @@ class Bridge:
         recover_archived(self, context)
         if self.settings.capture_scope == "global" or self.settings.data_policy.get("mode")=="trusted_enterprise":
             context = self.update_knowledge(context)
-        context = self.cache_artifacts(context)
         if self.settings.checked_publication:
-            context = self.publish_checked(context)
+            with self.publication_lock:
+                context = self.publish_checked(self.cache_artifacts(context))
+        else:
+            context = self.cache_artifacts(context)
         from .enterprise import scope_view
         context=scope_view({**context,
             "enterprise_memory_boundaries":{key:proof["boundary_id"] for key,proof in self.store.get("semantic-memory-attestations",{}).items() if proof.get("boundary_id")},
@@ -685,6 +688,8 @@ class Bridge:
     def publish_checked(self, context: dict) -> dict:
         from .policy import admit, sharing_check
         from .enterprise import boundary
+        from . import publication_review
+        from .quality import duplicate_key, proof_valid, verifier_hash, verify
         enterprise=boundary(self.settings.data_policy)
         if not isinstance(context.get("skills"), list):
             raise ValueError("Native skill catalog is unavailable; keep the previous publication")
@@ -694,8 +699,7 @@ class Bridge:
         present = {item["name"] for item in context.get("skills", [])}
         native_aliases = self.store.get('native-skill-aliases', {})
         publications = {name: item for name, item in publications.items() if name in present or name in native_aliases}
-        from .quality import verifier_hash
-        publication_key = digest([context.get('version'), context.get('bridge_provenance'),
+        publication_inputs = [context.get('version'), context.get('bridge_provenance'),
                                   self.store.get('workflow-skill-attestations', {}),
                                   self.store.get('semantic-skill-attestations', {}), self.settings.data_policy,
                                   enterprise["id"] if enterprise else None,
@@ -703,7 +707,11 @@ class Bridge:
                                   native_aliases, self.store.get('lifecycle-withheld', {}),
                                   self.store.get('native-candidate-intents', {}),
                                   self.store.get('native-lifecycle-status', {}).get('state'), publication_reviews,
-                                  [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]])
+                                  [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]]
+        if not self.settings.data_policy:
+            # Revisit the legacy personal-library cache so existing candidates get their first actionable notice.
+            publication_inputs.append('publication-review-v2')
+        publication_key = digest(publication_inputs)
         if self.store.get("publication-context-version") != publication_key:
             index = context.get("bridge_provenance", {})
             markers = []
@@ -711,7 +719,8 @@ class Bridge:
                 markers.extend(re.findall(r"[`\"']([^`\"']{5,120})[`\"']", entry))
                 markers.extend(re.findall(r"\b[A-Z][A-Z0-9_-]{7,}\b", entry))
             decisions = {}
-            for item in context.get("skills", []):
+            review_candidates = {}
+            for item in context["skills"]:
                 name = item["name"]
                 origins = index.get("skills", {}).get(name, {}).get("projects", [])
                 try:
@@ -719,6 +728,9 @@ class Bridge:
                     artifact_root = Path(value["resource_dir"]).resolve()
                     if not artifact_root.is_relative_to((self.settings.home / "learning/artifacts").resolve()):
                         raise ValueError("Artifact is outside the learning publication directory")
+                    candidate = publication_review.identity(name, value, origins)
+                    reviewed = publication_reviews.get(name)
+                    disposition = publication_review.disposition(reviewed, candidate)
                     intent = self.store.get('native-candidate-intents', {}).get(name, {})
                     decision = sharing_check(value, origins, markers, executable_candidate=self.settings.quality_checks,
                                              enterprise=bool(enterprise),
@@ -739,9 +751,8 @@ class Bridge:
                         resources = {name: (artifact_root / name).read_text() for name in value["files"]}
                         assessment = admit({"kind": "shared_candidate", "resources": resources, "source_projects": origins},
                                            self.settings.data_policy or {"enabled": True}, origins[0], purpose="share")
-                        from .publication_review import matches
-                        reviewed = publication_reviews.get(name)
-                        if not self.settings.data_policy and matches(reviewed, value, origins):
+                        if (not self.settings.data_policy and assessment.get('reason') == publication_review.UNASSESSED
+                                and disposition == publication_review.APPROVE):
                             assessment = {"allowed": True, "basis": "version_bound_operator_review"}
                             decision = {**decision, "review_hash": reviewed["review_hash"]}
                         from .workflow import PROJECT as WORKFLOW_PROJECT
@@ -766,11 +777,21 @@ class Bridge:
                             decision={**decision,"audience":"enterprise","boundary_id":enterprise["id"]}
                         if decision["allowed"] and semantic.get("evidence_contract") == 1:
                             decision={**decision,"task_relevance":{"state":"passed","proof_hash":digest(semantic.get("learning_evidence"))}}
-                    if self.settings.quality_checks and decision["allowed"]:
-                        from .quality import proof_valid, verify
+                    if (disposition == publication_review.KEEP
+                            and (decision['allowed'] or decision.get('reason') == publication_review.UNASSESSED)):
+                        decision = {'allowed': False, 'reason': publication_review.KEPT_REASON,
+                                    'review_hash': reviewed['review_hash']}
+                    needs_review = (decision.get('reason') == publication_review.UNASSESSED and not self.settings.data_policy
+                                    and len(origins) == 1 and self.settings.project_for(origins[0]) == origins[0]
+                                    and publications.get(name, {}).get('artifact', {}).get('version') != value['version'])
+                    if self.settings.quality_checks and (decision["allowed"] or needs_review):
                         key = "quality:" + digest([name, value["version"]])
                         proof = self.store.get(key, {})
-                        if not proof_valid(value, proof):
+                        verified = proof_valid(value, proof)
+                        if needs_review and any(Path(path).suffix.lower() in {'.py', '.sh'} for path in value['files']):
+                            if not verified or proof.get('kind') != 'isolated_execution':
+                                proof = {'state': 'pending', 'reason': 'executable_resource_needs_validation'}
+                        elif not verified:
                             proof = verify(value)
                             self.store.set(key, proof)
                         if proof["state"] != "passed":
@@ -782,8 +803,9 @@ class Bridge:
                                              (name, value["version"])).fetchone():
                         decision = {"allowed":False,"reason":"host_validation_failed"}
                     decision["version"] = value["version"]
+                    if needs_review and decision.get('reason') == publication_review.UNASSESSED:
+                        review_candidates[name] = (digest(candidate), duplicate_key(value))
                     if decision["allowed"]:
-                        from .quality import duplicate_key
                         duplicate = next((other for other,record in publications.items() if other != name
                                           and duplicate_key(record["artifact"]) == duplicate_key(value)), None)
                         if duplicate:
@@ -817,18 +839,33 @@ class Bridge:
             aliases.update(forwarded)
             for name in forwarded:
                 publications.pop(name, None)
+            published_keys = {duplicate_key(record['artifact']): name for name, record in publications.items()}
+            for name, (identifier, key) in review_candidates.items():
+                duplicate = published_keys.get(key)
+                if duplicate and duplicate != name:
+                    decisions[name]['reason'] = 'duplicate_of:' + duplicate
+                elif name not in aliases:
+                    decisions[name]['review_candidate'] = identifier
             self.store.set("publications-v1", publications)
             self.store.set("publication-aliases", {name:target for name,target in aliases.items() if target in publications})
             self.store.set("publication-decisions", decisions)
-            self.store.set("publication-context-version", publication_key)
             for name, decision in decisions.items():
                 sources = index.get("skills", {}).get(name, {}).get("projects", [])
-                if (decision.get("allowed") or decision.get("reason") == "project_experience"
+                if (decision.get("allowed") or decision.get("reason") in {"project_experience", publication_review.KEPT_REASON}
                         or decision.get("reason", "").startswith("duplicate_of:") or len(sources) != 1):
                     continue
-                self.emit({"id": "pending-publication:" + digest([name, decision]), "kind": "publication.pending",
-                           "project": sources[0], "name": name,
-                           "receipt": f"通用候选：{name}\n状态：尚未发布\n原因：{decision.get('reason', 'unknown')}"})
+                if identifier := decision.get('review_candidate'):
+                    self.emit({"id": "publication-review:" + identifier, "kind": "approval.required",
+                               "project": sources[0], "name": name, "approval_subject": "publication",
+                               "review_candidate": identifier,
+                               "pending_entities": ["publication:" + name], "project_approval": True,
+                               "receipt": (f"通用技能待审\n\n候选：{name}\n版本：{decision['version']}\n"
+                                           "此版本需要确认可跨项目共享。请打开「查看当前待审」核对完整文件。")})
+                else:
+                    self.emit({"id": "pending-publication:" + digest([name, decision]), "kind": "publication.pending",
+                               "project": sources[0], "name": name,
+                               "receipt": f"通用候选：{name}\n状态：尚未发布\n原因：{decision.get('reason', 'unknown')}"})
+            self.store.set("publication-context-version", publication_key)
         for name, item in publications.items():
             version = item["artifact"]["version"]
             key = "publication-notified:" + name
@@ -863,6 +900,11 @@ class Bridge:
             return
         for event in self.store.consume("os-notification", 20):
             for notice in notification_events(event):
+                if notice.get('approval_subject') == 'publication':
+                    from .publication_review import pending
+                    if not any(digest(candidate) == notice.get('review_candidate') for candidate, *_ in pending(
+                            self.settings, self.store, notice['project'], name=notice['name'])):
+                        continue
                 result = macos_notification(self.settings.state, notice)
                 self.store.set("notification:" + notice["id"], result)
 
@@ -937,10 +979,28 @@ class Bridge:
 
     def rpc(self, method: str, params: dict) -> dict:
         from .learning_requests import METHODS, rpc as learning_rpc
+        if method == "publication_review":
+            from . import publication_review
+            project = self.request_project({"cwd": params["cwd"]})
+            action = params.get("action")
+            target = (params.get("name"), params.get("revision"))
+            if action in ("list", "file"):
+                with StoreConnection(self.settings, read_only=True) as store, store.db:
+                    store.db.execute('BEGIN')
+                    if action == "list":
+                        return publication_review.list_pending(self.settings, store, project)
+                    return publication_review.preview_file(self.settings, store, project, *target, params.get("file"))
+            if action in (publication_review.APPROVE, publication_review.KEEP):
+                with self.publication_lock, StoreConnection(self.settings) as store:
+                    if not self.resume.is_set() or self.drain.is_set():
+                        raise RuntimeError("学习服务正在更新，请稍后刷新审批页。")
+                    return publication_review.decide(self.settings, store, project, *target, action,
+                                                     lambda name: native_reads.skill(self.api, name=name))
+            raise ValueError("Unknown publication review action")
         if method == "review_publication":
             from .publication_review import submit
             project = self.request_project({"cwd": params["cwd"]})
-            with StoreConnection(self.settings, read_only=params.get("dry_run", True)) as store:
+            with self.publication_lock, StoreConnection(self.settings, read_only=params.get("dry_run", True)) as store:
                 return submit(self.settings, store, project, params.get("review"), dry_run=params.get("dry_run", True))
         if method in METHODS:
             if "cwd" not in params:
@@ -1052,7 +1112,8 @@ class Bridge:
                         "build": self.build,
                         "plugin_root": str(Path(__file__).resolve().parents[2]),
                         "approval_capabilities": {"preview": True, "revision_checked_decisions": True,
-                                                  "native_memory_only": True, "automatic_approval": False},
+                                                  "native_memory_only": True, "publication_reviews": True,
+                                                  "automatic_approval": False},
                         "coverage": {
                             "pending_events":store.db.execute("SELECT COUNT(*) FROM events WHERE delivered IS NULL").fetchone()[0],
                             "incomplete_turns":store.db.execute("SELECT COUNT(*) FROM turns WHERE json_extract(payload,'$.status')='incomplete'").fetchone()[0],

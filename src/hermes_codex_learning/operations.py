@@ -46,6 +46,13 @@ def add_parsers(commands):
     retention = commands.add_parser("retention", help="Inspect retention or queue a bounded cleanup")
     retention.add_argument("--settings")
     retention.add_argument("--apply",action="store_true")
+    publication = commands.add_parser("publication-review", help="Review project-scoped skill sharing candidates")
+    publication.add_argument("--settings")
+    publication.add_argument("--cwd", required=True)
+    publication.add_argument("action", choices=("list", "file", "approve_generic", "keep_project"))
+    publication.add_argument("--name")
+    publication.add_argument("--revision")
+    publication.add_argument("--file")
     for name, description in (("memory-preview", "Inspect project memory and preview compaction"),
                               ("publication-preview", "Inspect which skill versions pass strict visibility"),
                               ("review-metrics", "Summarize one day of recorded review costs and changes"),
@@ -80,6 +87,12 @@ def add_parsers(commands):
 
 
 def execute(args):
+    if args.command == "publication-review":
+        from .ipc import request
+        params = {"cwd": args.cwd, "action": args.action, "name": args.name, "revision": args.revision, "file": args.file}
+        # Two 2 MiB UTF-8 files can grow to almost 24 MiB after JSON escaping.
+        options = {"max_response_bytes": 25 * 1024 * 1024} if args.action == "file" else {}
+        return request(Settings.load(args.settings), "publication_review", params, **options)
     if args.command in {"memory-preview", "publication-preview"}:
         from .ipc import request
         params = {"cwd": args.cwd}

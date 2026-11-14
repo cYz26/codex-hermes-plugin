@@ -226,7 +226,8 @@ def main() -> int:
     if args.command == "systemd" and args.start and not args.dry_run and sys.platform != "linux":
         parser.error("Starting a systemd service requires Linux")
     if args.command in {"install","sources","learning-config","enterprise-config","retention","quality","migration",
-                        "review-retry","curator-config","memory-preview","publication-preview","review-metrics","skill-readiness"}:
+                        "review-retry","curator-config","memory-preview","publication-preview","publication-review",
+                        "review-metrics","skill-readiness"}:
         from .operations import execute
         try:
             result = execute(args)

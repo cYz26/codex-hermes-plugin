@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hermes 记忆审批</title>
+<title>Hermes 项目审批</title>
 <style>
 :root { color-scheme: light dark; font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 body { margin: 0; background: light-dark(#f5f6f8, #181a1e); color: light-dark(#20232b, #eceef2); }
@@ -11,27 +11,49 @@ h1 { font-size: 26px; margin: 0 0 6px; } h2 { font-size: 19px; margin: 0; } h3 {
 p { margin: 6px 0 16px; } .muted { opacity: .72; } .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 button { font: inherit; cursor: pointer; border: 1px solid #8590a3; border-radius: 7px; padding: 7px 13px; background: transparent; color: inherit; }
 button.primary { color: white; background: #3565c6; border-color: #3565c6; } button:disabled { opacity: .4; cursor: default; }
+button:not(:disabled):active { transform: translateY(1px); }
+button:focus-visible, summary:focus-visible { outline: 2px solid #5382dc; outline-offset: 3px; }
 .card { margin-top: 20px; padding: 20px; border-radius: 10px; background: light-dark(#fff, #23262d); border: 1px solid light-dark(#dce0e8, #3c424e); }
 .badge { font-size: 12px; padding: 3px 9px; border-radius: 14px; background: light-dark(#edf1f8, #354056); }
 .changes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 12px 0 18px; }
+.changes > div { min-width: 0; }
+.review-section { margin-top: 28px; } .review-section .card { margin-top: 12px; }
+.files { margin: 12px 0 18px; } .file { border-top: 1px solid light-dark(#dce0e8, #3c424e); padding: 9px 0; }
+summary { cursor: pointer; overflow-wrap: anywhere; } .version { overflow-wrap: anywhere; }
 pre { font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; padding: 13px; border-radius: 6px; background: light-dark(#f6f7fa, #1b1e24); min-height: 54px; }
-#message { padding: 10px 0; min-height: 24px; } #history { margin-top: 30px; } .error { color: light-dark(#a52626, #ff9696); }
+#refresh-status { margin: 8px 0 0; min-height: 1.55em; }
+#message:not(:empty) { position: fixed; z-index: 1; inset: auto 20px 20px auto; max-width: min(420px, calc(100vw - 56px));
+  border: 1px solid light-dark(#b0bed2, #626f86); border-radius: 8px; box-shadow: 0 4px 18px #0003;
+  background: light-dark(#fff, #252a34); padding: 11px 14px; overflow-wrap: anywhere; pointer-events: none; }
+#message.success { color: light-dark(#21653d, #a0dcb2); }
+#message.warning { color: light-dark(#755013, #ffcf87); }
+#history, #publication-history { margin-top: 24px; } .error { color: light-dark(#a52626, #ff9696); }
 @media(max-width: 700px) { .changes { grid-template-columns: 1fr; } main { padding: 22px 14px; } }
 </style>
 <main>
-  <h1>Hermes 记忆审批</h1>
+  <h1>Hermes 项目审批</h1>
   <p id="project" class="muted"></p>
-  <p>请先核对修改前后的内容。批准后才会写入记忆；原条目已经变化时，会停止应用。</p>
   <div class="row">
     <button id="refresh">刷新列表</button>
     <button id="cleanup" disabled>清理重复和过期提案</button>
     <button id="selftest">运行隔离自检</button>
     <button id="close">关闭审批会话</button>
   </div>
-  <div id="message" role="status" aria-live="polite"></div>
-  <div id="counts" class="muted"></div>
-  <div id="proposals"></div>
-  <section id="history"></section>
+  <p id="refresh-status" class="muted">正在读取最新待审内容…</p>
+  <div id="message" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div id="review-sections">
+    <section id="memory-section" class="review-section">
+      <h2>记忆待审</h2>
+      <div id="counts" class="muted"></div>
+      <div id="proposals"></div>
+      <section id="history"></section>
+    </section>
+    <section id="publication-section" class="review-section">
+      <h2>通用技能待审</h2>
+      <div id="publications"></div>
+      <section id="publication-history"></section>
+    </section>
+  </div>
 </main>
 <script nonce="__CSP_NONCE__">
 const sessionToken = __SESSION_JSON__;
@@ -39,22 +61,29 @@ const bootstrap = __BOOTSTRAP_JSON__;
 const labels = {pending: "待审", duplicate: "重复提案", stale: "原条目已变化", already_applied: "新内容已存在", unsupported: "需要原生人工审核"};
 const actions = {add: "新增记忆", patch: "修订记忆", replace: "替换记忆", remove: "删除记忆"};
 let current = null;
+let publicationCards = new Map();
+let publicationListKey;
+let refreshTask = null;
+let refreshTimer;
 let busy = false;
+let closed = false;
+let trackedPublication = null;
 const byId = id => document.getElementById(id);
 byId("project").textContent = "项目：" + bootstrap.project;
+if (bootstrap.publication_first) byId("review-sections").prepend(byId("publication-section"));
 function node(tag, text, className) {
   const element = document.createElement(tag);
   if (text !== undefined) element.textContent = text;
   if (className) element.className = className;
   return element;
 }
-function message(text, error = false) {
+function message(text, tone = "") {
   byId("message").textContent = text;
-  byId("message").className = error ? "error" : "";
+  byId("message").className = tone;
 }
 async function request(path, body) {
   const headers = {"X-Hermes-Review-Token": sessionToken};
-  const options = {headers};
+  const options = {headers, cache: "no-store"};
   if (body !== undefined) {
     options.method = "POST";
     headers["Content-Type"] = "application/json";
@@ -62,6 +91,13 @@ async function request(path, body) {
   }
   const response = await fetch(path, options);
   const value = await response.json();
+  if (response.status === 410) {
+    closed = true;
+    clearTimeout(refreshTimer);
+    document.querySelectorAll("button").forEach(button => button.disabled = true);
+    byId("refresh-status").textContent = value.error;
+    byId("refresh-status").className = "error";
+  }
   if (!response.ok || value.state === "failed") throw new Error(value.error || value.reason || "本次操作未完成");
   return value;
 }
@@ -69,6 +105,7 @@ function candidates() {
   return current ? current.proposals.filter(p => ["duplicate", "stale", "already_applied"].includes(p.state)) : [];
 }
 function render(value) {
+  if (JSON.stringify(value) === JSON.stringify(current)) return;
   current = value;
   const counts = value.counts || {};
   byId("counts").textContent = "待审 " + (counts.pending || 0) + " 项 · 重复 " + (counts.duplicate || 0)
@@ -96,10 +133,10 @@ function render(value) {
     const controls = node("div", undefined, "row");
     const approve = node("button", "批准此修改", "primary");
     approve.disabled = !proposal.can_approve;
-    approve.onclick = () => decide(proposal, "approve");
+    approve.onclick = () => decide(approve, proposal, "approve");
     const reject = node("button", "丢弃提案");
     reject.disabled = !proposal.can_reject;
-    reject.onclick = () => decide(proposal, "reject");
+    reject.onclick = () => decide(reject, proposal, "reject");
     controls.append(approve, reject);
     card.append(controls);
     container.append(card);
@@ -115,45 +152,239 @@ function render(value) {
     }
   }
 }
-async function refresh() {
-  if (busy) return;
-  try { render(await request("/api/proposals")); }
-  catch (error) { message(error.message, true); }
+const fileLabels = {added: "新增", removed: "删除", changed: "修改", unchanged: "未变化"};
+function resource(candidate, file) {
+  const panel = node("details", undefined, "file");
+  const body = node("div");
+  panel.append(node("summary", file.path + " · " + fileLabels[file.change]), body);
+  let loaded = false;
+  panel.ontoggle = async () => {
+    if (!panel.open || loaded) return;
+    loaded = true;
+    body.replaceChildren(node("p", "正在读取已校验的文件。", "muted"));
+    try {
+      const params = new URLSearchParams({name: candidate.name, revision: candidate.revision, file: file.path});
+      const value = await request("/api/publication-file?" + params);
+      if (value.previous_unavailable) {
+        body.replaceChildren(node("p", "已共享版本的文件不可用。", "error"));
+        if (value.after !== null) body.append(node("pre", value.after || "（空文件）"));
+      } else if (file.change === "changed") {
+        const columns = node("div", undefined, "changes");
+        for (const [label, text] of [["已共享版本", value.before], ["待审版本", value.after]]) {
+          const column = node("div");
+          column.append(node("h3", label), node("pre", text || "（空文件）"));
+          columns.append(column);
+        }
+        body.replaceChildren(columns);
+      } else {
+        body.replaceChildren(node("pre", (value.after ?? value.before) || "（空文件）"));
+      }
+    } catch (error) {
+      loaded = false;
+      body.replaceChildren(node("p", error.message + "。请刷新列表后重新核对。", "error"));
+    }
+  };
+  panel.open = file.path === "SKILL.md" && file.change !== "unchanged";
+  return panel;
 }
-async function perform(body, success) {
-  if (busy) return;
-  busy = true;
-  document.querySelectorAll("button").forEach(button => button.disabled = true);
-  message("正在处理，请等待结果。");
-  try {
-    const result = await request("/api/decision", body);
-    message(success(result));
-  } catch (error) { message(error.message + "。请刷新状态后重新核对。", true); }
-  finally {
-    busy = false;
-    byId("refresh").disabled = byId("selftest").disabled = byId("close").disabled = false;
-    await refresh();
+function renderPublicationCards(candidates) {
+  const key = JSON.stringify(candidates);
+  if (key === publicationListKey) return;
+  const cards = new Map();
+  for (const candidate of candidates) {
+    if (publicationCards.has(candidate.revision)) {
+      cards.set(candidate.revision, publicationCards.get(candidate.revision));
+      continue;
+    }
+    const card = node("article", undefined, "card");
+    card.append(node("h3", candidate.name), node("p", "待审版本 " + candidate.version, "version muted"),
+      node("p", "来源项目 " + candidate.sources.join("、"), "version muted"),
+      node("p", candidate.previous_version ? "对照已共享版本 " + candidate.previous_version : "首次申请共享", "version muted"),
+      node("p", "请核对全部文件，确认内容可供其他项目使用。"));
+    const files = node("div", undefined, "files");
+    files.append(...candidate.resources.map(file => resource(candidate, file)));
+    const controls = node("div", undefined, "row");
+    const approve = node("button", "批准跨项目共享", "primary");
+    const keep = node("button", "保留在本项目");
+    approve.onclick = () => decidePublication(approve, candidate, "approve_generic");
+    keep.onclick = () => decidePublication(keep, candidate, "keep_project");
+    controls.append(approve, keep);
+    card.append(files, controls);
+    cards.set(candidate.revision, card);
+  }
+  const container = byId("publications");
+  container.replaceChildren(...(cards.size ? cards.values() : [node("p", "当前项目没有待审的通用技能。", "muted")]));
+  publicationCards = cards;
+  publicationListKey = key;
+}
+function renderPublications(value) {
+  renderPublicationCards(value.candidates);
+  const history = byId("publication-history");
+  history.replaceChildren();
+  if (!value.decisions.length) return;
+  history.append(node("h3", "最近的共享审批"));
+  const outcomes = {published: "已共享", kept_in_project: "已保留在本项目", queued: "已提交，等待发布检查",
+    withheld: "未通过发布检查", superseded: "候选已更新，需要审查新版本"};
+  for (const result of value.decisions) {
+    history.append(node("p", result.name + " · " + result.version + " · " + (outcomes[result.state] || result.state)
+      + (result.reason ? "（" + result.reason + "）" : ""), "version muted"));
+    if (trackedPublication?.name === result.name && trackedPublication.version === result.version && result.state !== "queued") {
+      message(result.name + " · " + outcomes[result.state], result.state === "published" ? "success" : "warning");
+      trackedPublication = null;
+    }
   }
 }
-function decide(proposal, decision) {
+function scheduleRefresh() {
+  clearTimeout(refreshTimer);
+  if (!document.hidden && !busy && !closed) {
+    refreshTimer = setTimeout(() => refresh({poll: true}), 8000);
+  }
+}
+function refresh({poll = false, manual = false} = {}) {
+  if (busy || closed) return;
+  const button = byId("refresh");
+  if (manual) {
+    button.textContent = "正在刷新…";
+    button.disabled = true;
+    message("正在读取最新待审内容…");
+  }
+  if (refreshTask) {
+    refreshTask.manual ||= manual;
+    return refreshTask.done;
+  }
+  clearTimeout(refreshTimer);
+  const status = byId("refresh-status");
+  if (!poll) status.textContent = "正在读取最新待审内容…";
+  const task = {manual};
+  refreshTask = task;
+  const show = async (path, display, target) => {
+    try {
+      const value = await request(path + (poll ? "?poll=1" : ""));
+      if (!closed && refreshTask === task) display(value);
+      return true;
+    } catch (error) {
+      if (refreshTask === task) {
+        if (target === "proposals") {
+          current = null;
+          byId("cleanup").disabled = true;
+          byId("counts").textContent = "";
+          byId("history").replaceChildren();
+        } else {
+          publicationCards.clear();
+          publicationListKey = undefined;
+          byId("publication-history").replaceChildren();
+        }
+        byId(target).replaceChildren(node("p", error.message, "error"));
+      }
+      return false;
+    }
+  };
+  task.done = Promise.all([
+    show("/api/proposals", render, "proposals"),
+    show("/api/publications", renderPublications, "publications"),
+  ]).then(results => {
+    if (refreshTask !== task) return;
+    refreshTask = null;
+    const ok = results.every(Boolean);
+    if (!closed) {
+      status.textContent = ok ? "最近更新 " + new Date().toLocaleTimeString()
+        : "有列表暂时读取失败。页面可见时会自动重试。";
+      status.className = ok ? "muted" : "error";
+    }
+    if (task.manual) {
+      button.textContent = "刷新列表";
+      if (!closed) {
+        button.disabled = false;
+        message(ok ? "已刷新待审列表。" : "有列表暂时读取失败，稍后会自动重试。", ok ? "success" : "error");
+      }
+    }
+    scheduleRefresh();
+  });
+  return task.done;
+}
+async function perform(button, working, path, body, outcome) {
+  if (busy || closed) return;
+  busy = true;
+  trackedPublication = null;
+  refreshTask = null;
+  clearTimeout(refreshTimer);
+  const refreshButton = byId("refresh");
+  refreshButton.textContent = "刷新列表";
+  refreshButton.disabled = false;
+  const controls = Array.from(document.querySelectorAll("button"), control => [control, control.disabled]);
+  controls.forEach(([control]) => control.disabled = true);
+  const label = button.textContent;
+  button.textContent = working;
+  button.setAttribute("aria-busy", "true");
+  message(working);
+  try {
+    const result = await request(path, body);
+    message(...outcome(result));
+  } catch (error) {
+    message(error.message + "。请核对最新状态后再试。", "error");
+  }
+  finally {
+    button.textContent = label;
+    button.removeAttribute("aria-busy");
+    busy = false;
+    if (!closed) {
+      controls.forEach(([control, disabled]) => control.disabled = disabled);
+      await refresh();
+    }
+  }
+}
+function decide(button, proposal, decision) {
   const text = decision === "approve" ? "批准提案 " + proposal.id + " 并写入上方显示的修改？"
     : "丢弃提案 " + proposal.id + "？原记忆会保留。";
-  if (!confirm(text)) return;
-  perform({action: decision, id: proposal.id, revision: proposal.revision}, result => result.state === "approved" && result.applied
-    ? "提案已批准并写入记忆。" : result.state === "rejected" ? "提案已丢弃，原记忆保留。"
-    : result.applied ? "修改已写入，提案还需要清理。" : "这条提案已被处理或发生变化，请核对当前状态。");
+  if (!confirm(text)) return message("已取消，未提交决定。");
+  perform(button, decision === "approve" ? "正在批准…" : "正在丢弃…", "/api/decision",
+    {action: decision, id: proposal.id, revision: proposal.revision}, result => result.state === "approved" && result.applied
+      ? ["提案已批准并写入记忆。", "success"] : result.state === "rejected" ? ["提案已丢弃，原记忆保留。", "success"]
+      : result.applied ? ["修改已写入，提案还需要清理。", "warning"] : ["这条提案已被处理或发生变化，请核对当前状态。", "warning"]);
 }
-byId("refresh").onclick = refresh;
-byId("cleanup").onclick = () => {
+function decidePublication(button, candidate, action) {
+  const approve = action === "approve_generic";
+  const prompt = (approve ? "批准这个版本供其他项目使用？" : "将这个版本保留在本项目？")
+    + "\n" + candidate.name + "\n" + candidate.version;
+  if (!confirm(prompt)) return message("已取消，未提交决定。");
+  perform(button, approve ? "正在提交批准…" : "正在保留…", "/api/decision",
+    {action, name: candidate.name, revision: candidate.revision}, result => {
+      if (result.state === "queued") {
+        trackedPublication = {name: candidate.name, version: candidate.version};
+        return ["批准已记录，等待后台完成发布检查。"];
+      }
+      if (result.state === "kept_in_project") return ["这个版本已保留在本项目。", "success"];
+      return ["处理结果尚未确认，请核对当前状态。", "warning"];
+    });
+}
+byId("refresh").onclick = () => refresh({manual: true});
+byId("cleanup").onclick = event => {
   const rows = candidates();
-  if (!rows.length || !confirm("丢弃以下重复、过期或已包含新内容的提案？\n" + rows.map(p => p.id).join("、") + "\n这次清理不会修改记忆。")) return;
-  perform({action: "prune", revision: current.review_revision}, result => "已清理 " + result.removed.length + " 项提案。" + (result.remaining ? "还可继续清理 " + result.remaining + " 项。" : ""));
+  if (!rows.length) return;
+  if (!confirm("丢弃以下重复、过期或已包含新内容的提案？\n" + rows.map(p => p.id).join("、") + "\n这次清理不会修改记忆。")) {
+    return message("已取消清理。");
+  }
+  perform(event.currentTarget, "正在清理…", "/api/decision", {action: "prune", revision: current.review_revision},
+    result => ["已清理 " + result.removed.length + " 项提案。" + (result.remaining ? "还可继续清理 " + result.remaining + " 项。" : ""), "success"]);
 };
-byId("selftest").onclick = () => perform({action: "self-test"}, result => "隔离自检通过：" + result.tests + " 项测试。现有学习数据保持完整。");
-byId("close").onclick = async () => {
-  try { await request("/api/close", {}); message("审批会话已关闭，可以关闭这个页面。"); document.querySelectorAll("button").forEach(button => button.disabled = true); }
-  catch (error) { message(error.message, true); }
-};
+byId("selftest").onclick = event => perform(event.currentTarget, "正在自检…", "/api/decision", {action: "self-test"},
+  result => ["隔离自检通过，共 " + result.tests + " 项。", "success"]);
+byId("close").onclick = event => perform(event.currentTarget, "正在关闭…", "/api/close", {}, () => {
+  closed = true;
+  byId("refresh-status").textContent = "审批会话已关闭。";
+  return ["审批会话已关闭，可以关闭这个页面。", "success"];
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearTimeout(refreshTimer);
+  else refresh();
+});
+window.addEventListener("focus", () => {
+  if (!document.hidden) refresh();
+});
+window.addEventListener("pageshow", event => {
+  if (event.persisted) refresh();
+});
+window.addEventListener("pagehide", () => clearTimeout(refreshTimer));
 refresh();
 </script>
 </html>

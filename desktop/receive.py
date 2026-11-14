@@ -18,6 +18,12 @@ from pathlib import Path
 APPROVAL_REQUIRED = "approval.required"
 
 
+def approval_group(item):
+    if item.get("kind") == APPROVAL_REQUIRED:
+        return item.get("approval_subject", "native")
+    return None
+
+
 def identity(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -87,11 +93,13 @@ class Receiver:
         ids = sorted(item["id"] for item in group)
         identifier = identity([scope, ids])
         receipt = {"summary": group[0]["summary"], "scope": scope, "text": text}
-        approval = group[0].get("kind") == APPROVAL_REQUIRED
+        approval = approval_group(group[0])
         if len(group) > 1:
             pending = {proposal for item in group for proposal in item["pending_entities"]}
             project = Path(scope).name or scope
-            if approval:
+            if approval == "publication":
+                receipt["summary"] = f"[{project}] 通用技能待审 · {len(pending)} 项"
+            elif approval:
                 receipt["summary"] = f"[{project}] {len(pending)} 项提案待审批"
             else:
                 applied = {entity for item in group for entity in item["applied_entities"]}
@@ -100,6 +108,8 @@ class Receiver:
         if approval:
             receipt.update(kind=APPROVAL_REQUIRED,
                            project_approval=any(item.get("project_approval") is True for item in group))
+            if approval == "publication":
+                receipt["approval_subject"] = approval
         path = self.state / (identifier + ".json")
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(receipt, ensure_ascii=False))
@@ -118,7 +128,7 @@ class Receiver:
         known = {item for row in self.db.execute("SELECT ids FROM batches") for item in json.loads(row[0])}
         for item in items:
             if item["id"] not in known:
-                groups.setdefault((item["scope"], item.get("kind") == APPROVAL_REQUIRED), []).append(item)
+                groups.setdefault((item["scope"], approval_group(item)), []).append(item)
         for (scope, _), group in groups.items():
             receipts = [self.remote("detail", "--id", item["id"], "--scope", scope) for item in group]
             identifier, ids, path = self.write_batch(scope, group, "\n\n".join(item["text"] for item in receipts))
@@ -155,7 +165,7 @@ class Receiver:
         groups = {}
         for raw, in self.db.execute("SELECT payload FROM received WHERE batch IS NULL ORDER BY rowid LIMIT 100"):
             item = json.loads(raw)
-            groups.setdefault((item["scope"], item.get("kind") == APPROVAL_REQUIRED), []).append(item)
+            groups.setdefault((item["scope"], approval_group(item)), []).append(item)
         for (scope, _), group in groups.items():
             identifier, ids, path = self.write_batch(scope, group, "\n\n".join(item["text"] for item in group))
             with self.db:
