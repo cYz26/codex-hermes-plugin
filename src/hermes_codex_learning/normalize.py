@@ -9,6 +9,7 @@ from .store import Store, digest, dumps
 
 
 _EXECUTION_TOOLS = {"bash", "exec_command", "write_stdin", "exec", "wait", "terminal"}
+BACKGROUND_EXIT_PENDING = "background_exit_pending"
 LEARNING_STATUS_TOOLS = {"mcp__hermes_learning__learning_status", "mcp__hermes_learning__feedback_status",
                          "mcp__hermes_learning__record_application"}
 
@@ -63,6 +64,37 @@ def _result_state(name: str, response) -> tuple[str, str, str | None]:
     return "completed", "", None
 
 
+def settle_turn(data: dict) -> None:
+    ended_by = data.get("_ended_by") or ("Stop" if data["status"] == "incomplete" and data.get("assistant") else None)
+    pending = [tool for tool in data["tools"].values() if tool["status"] in {"running", "unknown"}]
+    background = [tool for tool in pending if tool["status"] == "running" and tool.get("background_session")]
+    coverage = set(data.get("coverage", [])) - {BACKGROUND_EXIT_PENDING}
+    if background:
+        coverage.add(BACKGROUND_EXIT_PENDING)
+    data["coverage"] = sorted(coverage)
+    if ended_by == "Interrupt":
+        data["status"] = "interrupted"
+    elif ended_by == "Stop":
+        unresolved = len(pending) != len(background) or (background and "missing_tool_use_id" in coverage)
+        data["status"] = "incomplete" if unresolved else "completed"
+        if data.get('_evidence_mode') == 'workflow-v1':
+            # The lifecycle ended; unknown tool outcomes remain explicitly unknown.
+            data['status'] = 'completed'
+
+
+def _background_poll_targets(data, event):
+    if event.get("tool_name", "").rsplit(".", 1)[-1] != "write_stdin":
+        return []
+    args = event.get("tool_input")
+    session = args.get("session_id") if isinstance(args, dict) else None
+    if type(session) not in {str, int}:
+        return []
+    transcript = digest(event.get("transcript_path"))
+    return [tool for tool in data["tools"].values()
+            if (background := tool.get("background_session")) and background["session_id"] == str(session)
+            and background["transcript_ref"] == transcript]
+
+
 def merge_event(store: Store, row: dict) -> dict | None:
     event = json.loads(row["payload"])
     name = event.get("hook_event_name")
@@ -70,13 +102,16 @@ def merge_event(store: Store, row: dict) -> dict | None:
     if not session or not turn:
         return None
     key = digest([session, turn])
-    previous = store.db.execute("SELECT payload FROM turns WHERE id=?", (key,)).fetchone()
+    previous = store.db.execute("SELECT payload,revision,observed_revision FROM turns WHERE id=?", (key,)).fetchone()
     data = json.loads(previous[0]) if previous else {
         "source": {"host": event.get("bridge_host", "codex-desktop"),
                    "project": event.get("bridge_project", event["cwd"]), "chat": session, "turn": turn,
                    "executor": "Codex App"},
         "user": "", "assistant": "", "tools": {}, "status": "running", "coverage": [],
     }
+    if previous and (event.get("bridge_host", "codex-desktop") != data["source"]["host"]
+                     or event.get("bridge_project", event["cwd"]) != data["source"]["project"]):
+        return None
     provenance = data.setdefault("evidence_provenance", {})
     captured_at = row["created"] if "created" in row.keys() else time.time()
     provenance.setdefault("first_captured_at", captured_at)
@@ -98,6 +133,9 @@ def merge_event(store: Store, row: dict) -> dict | None:
         if not data.get("_ended_by"):
             data["status"] = "running"
     elif name == "PreToolUse":
+        poll_targets = _background_poll_targets(data, event)
+        if len(poll_targets) == 1:
+            return None  # A same-session poll retrieves evidence for the original call.
         data["status"] = "running"
         tool_id = event.get("tool_use_id")
         if tool_id:
@@ -126,12 +164,44 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 arguments = {}
                 data["coverage"] = sorted(set(data["coverage"]) | {"unrecognized_tool_input:" + tool_id})
             polled = event.get("bridge_polled") or arguments.get("session_id") or arguments.get("cell_id")
-            original = next((t for t in data["tools"].values()
-                             if t.get("process") and str(t["process"]) == str(polled)), None)
+            matches = [t for t in data["tools"].values() if t.get("process") and str(t["process"]) == str(polled)
+                       and not t.get("background_session")]
+            poll_targets = _background_poll_targets(data, event)
+            if len(poll_targets) == 1 and not matches and poll_targets[0]["background_session"].get("exit_event"):
+                settled = poll_targets[0]["background_session"]
+                if settled["exit_event"] == row["id"] and previous["revision"] != previous["observed_revision"]:
+                    return data
+                data["_skip_observation"] = row["id"]
+                return data
+            matches.extend(poll_targets)
+            original = matches[0] if len(matches) == 1 else None
             target_id = original["call_id"] if original else tool_id
             if original and tool_id != target_id:
                 data["tools"].pop(tool_id, None)
             previous_call = data["tools"].get(target_id, {})
+            background = previous_call.get("background_session")
+            if background:
+                if background.get("exit_event"):
+                    if background["exit_event"] == row["id"] and previous["revision"] != previous["observed_revision"]:
+                        return data  # This exact exit was merged but not yet observed.
+                    data["_skip_observation"] = row["id"]
+                    return data  # A later result cannot revise or recount a retained exit.
+                if (digest(event.get("transcript_path")) != background["transcript_ref"] or
+                        (not original and (tool_name != previous_call["name"] or arguments != previous_call["arguments"]))):
+                    data["_skip_observation"] = row["id"]
+                    return data
+                decoded, unknown = _execution_result(response)
+                has_exit_code = not unknown and isinstance(decoded, dict) and type(decoded.get("exit_code")) is int
+                terminal = status == "interrupted" or (has_exit_code and status ==
+                            ("completed" if decoded["exit_code"] == 0 else "failed"))
+                if status not in {"completed", "failed", "interrupted"} or not terminal:
+                    # Preserve the confirmed launch. A same-call Hook may arrive
+                    # before its structured host result; keep its identity to join later.
+                    background["pending_exit_event"] = row["id"]
+                    status, process, response, gap = "running", previous_call["process"], None, None
+                else:
+                    background = {k: v for k, v in background.items() if k != "pending_exit_event"}
+                    background["exit_event"] = row["id"]
             tool_action, test_key = event.get("bridge_action"), event.get("bridge_test_key")
             if original:
                 arguments = original["arguments"]
@@ -145,26 +215,21 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 "arguments": arguments,
                 "result": response, "status": status, "process": process,
                 "action": tool_action, "test_key": test_key,
+                **({"background_session": background} if background else {}),
             }
             if gap:
                 data["coverage"] = sorted(set(data["coverage"]) | {gap + ":" + target_id})
     elif name == "Stop":
+        if data.get("_ended_by") == "Stop" and any(tool.get("background_session") for tool in data["tools"].values()):
+            data["_skip_observation"] = row["id"]
+            return data
         data["assistant"] = event.get("last_assistant_message", "")
         provenance.update(terminal_event=row["id"], terminal_at=captured_at)
         if data.get("_ended_by") != "Interrupt" and data["status"] != "interrupted":
             data["_ended_by"] = "Stop"
     elif name == "Interrupt":
         data["_ended_by"] = "Interrupt"
-    # Migrate old persisted incomplete turns without changing the native API shape.
-    ended_by = data.get("_ended_by") or ("Stop" if data["status"] == "incomplete" and data["assistant"] else None)
-    if ended_by == "Interrupt":
-        data["status"] = "interrupted"
-    elif ended_by == "Stop":
-        pending = any(t["status"] in {"running", "unknown"} for t in data["tools"].values())
-        data["status"] = "incomplete" if pending else "completed"
-        if data.get('_evidence_mode') == 'workflow-v1':
-            # The lifecycle ended; unknown tool outcomes remain explicitly unknown.
-            data['status'] = 'completed'
+    settle_turn(data)
     revision = digest(data)
     now = time.time()
     stopped = now if data["status"] == "completed" else None

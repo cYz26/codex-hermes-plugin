@@ -1,0 +1,89 @@
+{
+  "provenance": {
+    "kind": "sanitized Codex host record",
+    "transcript_lines": [
+      1,
+      453,
+      455,
+      640
+    ],
+    "source_prefix_sha256": "4ae4ad209371353f271df6077b275c73f4f6480f271c58bb6633fed9f26914e7"
+  },
+  "chat": "chat-80469",
+  "turn": "turn-80469",
+  "cli_version": "0.167.0-alpha.4.1",
+  "hooks": [
+    {
+      "created": 1794620633.731222,
+      "payload": {
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {
+          "command": "python3 -m http.server 8313 --bind 127.0.0.1 --directory Builds/WebGL"
+        },
+        "bridge_action": "execute",
+        "tool_use_id": "exec-launch-80469"
+      }
+    },
+    {
+      "created": 1794621005.7227561,
+      "payload": {
+        "hook_event_name": "Stop",
+        "last_assistant_message": "Preview link delivered."
+      }
+    }
+  ],
+  "transcript": [
+    {
+      "timestamp": "2026-11-14T01:43:53.649Z",
+      "ordinal": 452,
+      "type": "response_item",
+      "payload": {
+        "type": "custom_tool_call",
+        "name": "exec",
+        "status": "completed",
+        "input": "text(await tools.exec_command({cmd:\"python3 -m http.server 8313 --bind 127.0.0.1 --directory Builds/WebGL\",\"yield_time_ms\":1000,\"max_output_tokens\":1000}));\n",
+        "call_id": "call_launch_80469",
+        "internal_chat_message_metadata_passthrough": {
+          "turn_id": "turn-80469"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-11-14T01:43:54.896Z",
+      "ordinal": 454,
+      "type": "response_item",
+      "metadata": {
+        "client_authored": false,
+        "fallback_token_limit_override": 12000
+      },
+      "payload": {
+        "type": "custom_tool_call_output",
+        "output": [
+          {
+            "type": "input_text",
+            "text": "Script completed\nWall time 1.2 seconds\nOutput:\n"
+          },
+          {
+            "type": "input_text",
+            "text": "{\"chunk_id\":\"c542aa\",\"wall_time_seconds\":1.002354875,\"session_id\":80469,\"original_token_count\":0,\"output\":\"\"}"
+          }
+        ],
+        "call_id": "call_launch_80469",
+        "internal_chat_message_metadata_passthrough": {
+          "turn_id": "turn-80469"
+        }
+      }
+    },
+    {
+      "timestamp": "2026-11-14T01:50:05.795Z",
+      "ordinal": 639,
+      "type": "event_msg",
+      "payload": {
+        "type": "task_complete",
+        "turn_id": "turn-80469",
+        "root_turn_id": "turn-80469"
+      }
+    }
+  ]
+}

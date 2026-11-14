@@ -75,19 +75,31 @@ class Bridge:
             if not rows:
                 break
             for row in rows:
-                self.consume_event(row)
+                if not self.consume_event(row):
+                    break
                 consumed += 1
                 if consumed >= 1000 or time.monotonic()-started >= 2:
                     break
+            else:
+                continue
+            break
         from .feedback import reconcile as reconcile_feedback
         reconcile_feedback(self.store)
 
-    def consume_event(self, row) -> None:
+    def consume_event(self, row) -> bool:
         payload = json.loads(row["payload"])
         excluded = exclude_internal(self.store, payload)
+        prepared = None
         if not excluded:
             register_delegation(self.store, row["id"], payload, settings=self.settings)
-        data = None if excluded else merge_event(self.store, row)
+            if payload.get("session_id") and payload.get("turn_id"):
+                key = digest([payload["session_id"], payload["turn_id"]])
+                prepared = self.store.get("background-observation:" + key)
+                if prepared:
+                    self.observe_turn(prepared["turn"], prepared["event"])
+                    if self.store.get("background-observation:" + key):
+                        return False  # Keep the queued event until the previous observation is resolved.
+        data = None if excluded or (prepared and prepared["event"] == row["id"]) else merge_event(self.store, row)
         if data:
             self.observe_turn(data, row["id"])
         if not excluded and payload.get("hook_event_name") in {"UserPromptSubmit", "PostToolUse", "Stop", "Interrupt"}:
@@ -113,18 +125,43 @@ class Bridge:
             self.store.db.execute("UPDATE events SET delivered=?,error=NULL WHERE id=?", (time.time(), row["id"]))
         self.store.set("loop-progress",{"phase":"consuming","updated_at":time.time(),
             "last_event":row["id"],"chat":payload.get("session_id"),"turn":payload.get("turn_id"),"captured_at":row["created"]})
+        return True
 
     def observe_turn(self, data: dict, event_id: str) -> None:
         key = digest([data["source"]["chat"],data["source"]["turn"]])
+        if data.get("_skip_observation") == event_id:
+            return
         if data.get('_evidence_mode') == 'workflow-v1':
             self.observe_workflow(data, event_id)
             return
-        if self.store.get("withheld-turn:" + digest([data["source"]["chat"], data["source"]["turn"]])):
+        if self.store.get("withheld-turn:" + key):
             return
-        enriched = task_input(self.store, data, settings=self.settings)
-        if not enriched.get("user") or data["status"] in {"completed", "interrupted", "incomplete"}:
-            from .host_evidence import supplement
-            enriched = supplement(self.store, enriched, settings=self.settings)
+        pending_key = "background-observation:" + key
+        prepared = self.store.get(pending_key)
+        if prepared:
+            if prepared["event"] != event_id or prepared["turn"]["source"] != data["source"]:
+                return  # An unconfirmed write for this turn must be resolved first.
+            enriched = prepared["turn"]
+        else:
+            previous = self.store.get("observation-receipt:" + key, {})
+            if previous.get("background") and previous.get("event") == event_id:
+                return
+            enriched = task_input(self.store, data, settings=self.settings)
+            if not enriched.get("user") or data["status"] in {"completed", "interrupted", "incomplete"}:
+                from .host_evidence import supplement
+                enriched = supplement(self.store, enriched, settings=self.settings, event_id=event_id)
+            states = [tool["background_session"] for tool in enriched["tools"].values() if tool.get("background_session")]
+            if any(state.get("pending_exit_event") == event_id for state in states):
+                return  # A Post without an actual exit must not add a native revision.
+            if states and not previous.get("background") and not any(state.get("exit_event") == event_id for state in states):
+                terminal = enriched.get("evidence_provenance", {}).get("terminal_event")
+                if terminal:
+                    event_id = terminal
+        if (enriched["status"] == "incomplete" and enriched.get("_ended_by") == "Stop" and self.store.db.execute(
+                "SELECT 1 FROM learning_signals WHERE chat=? AND turn=? AND kind IN ('user_followup','user_correction')",
+                (enriched["source"]["chat"],enriched["source"]["turn"])).fetchone()):
+            enriched={**enriched,"status":"completed","learning_basis":"dialogue_with_unresolved_execution",
+                      "coverage":sorted(set(enriched.get("coverage",[])) | {"execution_results_unresolved"})}
         projected = observation(enriched)
         if self.settings.data_policy:
             from .policy import admit
@@ -140,11 +177,6 @@ class Bridge:
         if not enriched["user"]:
             self.store.set("turn-admission:"+key,{"state":"awaiting_input","reason":"request_body_unavailable","at":time.time()})
             return
-        if (enriched["status"] == "incomplete" and enriched.get("_ended_by") == "Stop" and self.store.db.execute(
-                "SELECT 1 FROM learning_signals WHERE chat=? AND turn=? AND kind IN ('user_followup','user_correction')",
-                (enriched["source"]["chat"],enriched["source"]["turn"])).fetchone()):
-            enriched={**enriched,"status":"completed","learning_basis":"dialogue_with_unresolved_execution",
-                      "coverage":sorted(set(enriched.get("coverage",[])) | {"execution_results_unresolved"})}
         if enriched["status"] not in {"completed", "interrupted"}:
             self.store.set("turn-admission:"+key,{"state":"awaiting_terminal_evidence","at":time.time()})
             if enriched != data:
@@ -163,21 +195,37 @@ class Bridge:
         self.bind_chat_handle(enriched["source"], handle)
         self.store.set("assessment:" + handle, {key:value for key,value in assessment.items() if key != "payload"})
         admitted = assessment.get("payload", projected)
-        if enriched.get("learning_basis"):
-            admitted = {**admitted,"status":enriched["status"],"learning_basis":enriched["learning_basis"],"coverage":enriched["coverage"]}
+        background = any(tool.get("background_session") for tool in enriched["tools"].values())
+        if prepared or background:
+            identity = digest([handle, admitted])
+            if prepared and prepared["identity"] != identity:
+                self.store.set("turn-admission:" + key, {"state":"withheld", "at":time.time(),
+                               "reason":"prepared_observation_no_longer_matches_admission"})
+                return
+            if not prepared:
+                # Freeze the admitted input before crossing the native boundary.
+                # New transcript bytes must not change a possibly committed event.
+                self.store.set(pending_key, {"event":event_id, "turn":enriched, "identity":identity})
         receipt = self.api.observe(handle, admitted, event_id=event_id)
         self.store.set("turn-admission:"+key,{"state":"admitted","at":time.time(),"basis":assessment.get("basis"),
                                             "learning_basis":enriched.get("learning_basis","terminal_execution")})
         if isinstance(receipt,dict):
-            self.store.set("observation-receipt:"+key,{"handle":handle,"revision":receipt.get("revision"),"event":event_id,"at":time.time()})
+            self.store.set("observation-receipt:"+key,{"handle":handle,"revision":receipt.get("revision"),"event":event_id,
+                "at":time.time(), **({"background":True} if background else {})})
         if self.settings.proactive:
             from .scheduling import enqueue
             enqueue(self.store, enriched, handle)
         revision = digest(enriched)
         key = digest([enriched["source"]["chat"], enriched["source"]["turn"]])
         with self.store.db:
-            self.store.db.execute("UPDATE turns SET payload=?,revision=?,observed_revision=? WHERE id=?",
-                                  (dumps(enriched), revision, revision, key))
+            self.store.db.execute("UPDATE turns SET payload=?,revision=?,observed_revision=?,stopped=COALESCE(stopped,?) WHERE id=?",
+                                  (dumps(enriched), revision, revision,
+                                   enriched.get("evidence_provenance", {}).get("terminal_at") if background else None, key))
+            if prepared or background:
+                self.store.db.execute("DELETE FROM meta WHERE key=?", (pending_key,))
+                if not any((tool.get("background_session") or {}).get("pending_exit_event")
+                           for tool in enriched["tools"].values()):
+                    self.store.db.execute("DELETE FROM meta WHERE key=?", ("input-retry:" + key,))
 
     def observe_workflow(self, data: dict, event_id: str) -> None:
         from .workflow import observation as workflow_observation
@@ -240,23 +288,40 @@ class Bridge:
         if now - self.store.get("last_input_retry", 0) < 30:
             return
         self.store.set("last_input_retry", now)
-        rows = self.store.db.execute("SELECT t.id,t.payload FROM turns t LEFT JOIN meta m ON m.key='input-retry:'||t.id "
-                                     "WHERE observed_revision IS NULL AND json_extract(t.payload,'$.status') IN ('completed','interrupted','incomplete') "
+        rows = self.store.db.execute("SELECT t.id,t.payload,t.observed_revision FROM turns t LEFT JOIN meta m ON m.key='input-retry:'||t.id "
+                                     "WHERE json_extract(t.payload,'$.status') IN ('completed','interrupted','incomplete') "
+                                     "AND (observed_revision IS NULL OR (json_extract(t.payload,'$.coverage') LIKE '%background_exit_pending%' AND EXISTS ("
+                                     "SELECT 1 FROM json_each(t.payload,'$.tools') "
+                                     "WHERE json_extract(value,'$.background_session.pending_exit_event') IS NOT NULL))) "
                                      "AND COALESCE(json_extract(m.value,'$.retry_at'),0)<=? "
                                      "ORDER BY COALESCE(json_extract(m.value,'$.last_attempt'),0),activity,t.id LIMIT 8",(now,)).fetchall()
         for row in rows:
             data = json.loads(row["payload"])
+            prepared = self.store.get("background-observation:" + row["id"])
             event = self.store.db.execute("SELECT id FROM events WHERE json_extract(payload,'$.session_id')=? "
                                           "AND json_extract(payload,'$.turn_id')=? "
                                           "AND json_extract(payload,'$.hook_event_name') IN ('Stop','Interrupt') "
                                           "ORDER BY created DESC LIMIT 1", (data["source"]["chat"], data["source"]["turn"])).fetchone()
-            if event:
+            if prepared:
+                self.observe_turn(prepared["turn"], prepared["event"])
+            elif row["observed_revision"] is not None:
+                pending_events = {state["pending_exit_event"] for tool in data["tools"].values()
+                                  if (state := tool.get("background_session")) and state.get("pending_exit_event")}
+                for pending_event in sorted(pending_events)[:8]:
+                    self.observe_turn(data, pending_event)
+                    updated = self.store.db.execute("SELECT payload FROM turns WHERE id=?", (row["id"],)).fetchone()
+                    data = json.loads(updated["payload"])
+            elif event:
                 self.observe_turn(data, event["id"])
-            observed = self.store.db.execute("SELECT observed_revision FROM turns WHERE id=?",(row["id"],)).fetchone()[0]
+            current = self.store.db.execute("SELECT observed_revision,payload FROM turns WHERE id=?",(row["id"],)).fetchone()
+            current_tools = json.loads(current["payload"])["tools"].values()
+            waiting_exit = any((tool.get("background_session") or {}).get("pending_exit_event") for tool in current_tools)
+            observed = current["observed_revision"] is not None and not waiting_exit
             previous = self.store.get("input-retry:"+row["id"],{}) or {}
             attempts = previous.get("attempts",0)+1
             self.store.set("input-retry:"+row["id"],None if observed else {"last_attempt":now,"attempts":attempts,
-                "retry_at":now+min(900,30*2**min(attempts-1,5)),"reason":self.store.get("turn-admission:"+row["id"],{}).get("reason","terminal_input_unavailable")})
+                "retry_at":now+min(900,30*2**min(attempts-1,5)),"reason":"background_exit_evidence_pending" if waiting_exit else
+                    self.store.get("turn-admission:"+row["id"],{}).get("reason","terminal_input_unavailable")})
 
     def usage(self, payload: dict) -> None:
         if not payload.get("tool_name", "").endswith("skill_load"):

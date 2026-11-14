@@ -6,6 +6,7 @@ import time
 
 from .delegation import _result_object
 from .feedback import applications_for_turn, deliveries_for_turn, test_references
+from .normalize import BACKGROUND_EXIT_PENDING
 from .store import digest
 
 
@@ -118,6 +119,14 @@ def summarize(store, *, project=None, chat=None, turn=None, limit=20, after_curs
             "delivery_source_event", "events", "validation_reason", "superseded_by")}
             for value in applications_for_turn(store, *source)]
         execution = {"turn_status": row["turn_status"], "terminal_hook": row["ended_by"], "correctness": "not_inferred"}
+        if BACKGROUND_EXIT_PENDING in gaps:
+            execution["pending_processes"] = [dict(process) for process in store.db.execute("""
+                SELECT tool.key tool_call, json_extract(tool.value,'$.process') session_id, 'running' status,
+                       json_extract(tool.value,'$.background_session.observed_at') observed_at
+                FROM turns t, json_each(t.payload,'$.tools') tool WHERE t.id=?
+                  AND json_extract(tool.value,'$.status')='running'
+                  AND json_extract(tool.value,'$.background_session') IS NOT NULL LIMIT 20
+            """, (key,))]
         if project and chat:
             execution["test_references"] = test_references(store, project, chat, row["turn"])
         mcp_recommendations = _mcp_recommendations(store, project, chat, row["turn"]) if project and chat else []

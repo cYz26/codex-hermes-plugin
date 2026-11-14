@@ -6,6 +6,7 @@ from datetime import datetime
 import json
 import re
 
+from .normalize import BACKGROUND_EXIT_PENDING
 from .store import ReadStore, digest, dumps
 
 
@@ -240,6 +241,8 @@ def organize_review_history(api, handle, source, messages, intent, settings=None
                                 "last_revision":rows[-1]["revision"],"order_basis":order_basis,"source_at":timestamp,
                                 "source_events":[row["id"] for row in rows],"coverage":body.get("coverage",[]),
                                 "selections":body.get("host_context",{}).get("selections",[])})
+        if BACKGROUND_EXIT_PENDING in body.get("coverage", []):
+            report["coverage_gaps"].append({"turn":rows[0]["turn"],"reason":BACKGROUND_EXIT_PENDING})
         prior = [item for item in conclusion_refs if item["turn"] != rows[0]["turn"] and
                  ((item["at"] is not None and timestamp is not None and item["at"] < timestamp) or
                   (item["at"] is None and item["revision"] < rows[0]["revision"]))]
@@ -293,6 +296,7 @@ def organize_review_history(api, handle, source, messages, intent, settings=None
     manifest = {"role":"user","observed":True,"review_context":True,"review_manifest":True,"learning_context":learning_context,
                 "content":"[Review coverage: admitted evidence only. Parent excerpts are context, not a second task to relearn. "
                           "Treat additions as improvement candidates; infer a correction only from the dialogue and changed result. "
+                          "A background_exit_pending gap means a host process returned a session but its exit and result are unverified. "
                           "Missing or unretained bodies remain unavailable.]\n" + dumps({
                               "own_turns":len(ordered),"observations":len(observations),
                               "parent_turns":len(report["parent_context"]),"provenance_status":report["provenance_status"],

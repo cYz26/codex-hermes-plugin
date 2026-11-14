@@ -4,14 +4,27 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
+from collections import Counter
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+from .normalize import settle_turn
 from .store import digest
 
 LIMIT = 16 * 1024 * 1024
 HEADER_LIMIT = 2 * 1024 * 1024
+CURSOR_VERSION = 2
+# The only code-mode form joined without an inner tool ID is a literal call
+# whose return is emitted directly. Never evaluate or search arbitrary JS.
+_DIRECT_EXEC = re.compile(
+    r'text\(\s*await\s+tools\.exec_command\(\s*\{\s*(?:cmd|"cmd")\s*:\s*'
+    r'("(?:[^"\\\x00-\x1f]|\\.)*")'
+    r'((?:\s*,\s*(?:yield_time_ms|max_output_tokens|"yield_time_ms"|"max_output_tokens")\s*:\s*[0-9]{1,9}){0,2})'
+    r'\s*\}\s*\)\s*\)\s*;?\s*'
+)
+_EXEC_COMPLETE = re.compile(r'Script completed\nWall time [0-9]+(?:\.[0-9]+)? seconds\nOutput:\n')
 
 
 def _verify_path(path, sessions_root):
@@ -82,21 +95,79 @@ def read_host_relation(path: Path, chat: str, project: str, *, sessions_root: Pa
         return _relation(_header(stream, chat, project))
 
 
+def _code_session(row, payload):
+    """Read the host's structured shell yield, retaining no shell output."""
+    metadata = row.get("metadata") or {}
+    blocks = payload.get("output")
+    if (not isinstance(metadata, dict) or metadata.get("client_authored") is not False
+            or not isinstance(blocks, list) or len(blocks) != 2
+            or any(not isinstance(block, dict) or block.get("type") != "input_text"
+                   or not isinstance(block.get("text"), str) for block in blocks)
+            or not _EXEC_COMPLETE.fullmatch(blocks[0]["text"]) or len(blocks[1]["text"]) > 65536):
+        return None
+    try:
+        body = json.loads(blocks[1]["text"])
+    except ValueError:
+        return None
+    if (isinstance(body, dict) and set(body) == {"chunk_id", "wall_time_seconds", "session_id", "original_token_count", "output"}
+            and isinstance(body["chunk_id"], str) and re_safe_id(body["chunk_id"])
+            and type(body["wall_time_seconds"]) in {int, float} and 0 <= body["wall_time_seconds"] < LIMIT
+            and type(body["session_id"]) is int and 0 < body["session_id"] < 2**63
+            and type(body["original_token_count"]) is int and body["original_token_count"] >= 0
+            and isinstance(body["output"], str)):
+        return body["session_id"]
+    return None
+
+
+def _record_code_exec(calls, row, payload, position):
+    call_id, kind = payload.get("call_id"), payload.get("type")
+    if kind not in {"custom_tool_call", "custom_tool_call_output"} or not isinstance(call_id, str) or not re_safe_id(call_id):
+        return
+    if kind == "custom_tool_call":
+        if call_id in calls:
+            calls[call_id].update(conflict=True)
+            return
+        calls[call_id] = {}
+        script = payload.get("input")
+        if (payload.get("name") != "exec" or payload.get("status") != "completed"
+                or not isinstance(script, str) or len(script) > 65536):
+            return
+        match = _DIRECT_EXEC.fullmatch(script)
+        if not match:
+            return
+        options = re.findall(r'yield_time_ms|max_output_tokens', match[2])
+        if len(options) != len(set(options)):
+            return
+        try:
+            command = json.loads(match[1])
+        except ValueError:
+            return
+        calls[call_id] = {"command_hash": digest(command), "invoked": position}
+    else:
+        call = calls.setdefault(call_id, {})
+        if "returned" in call:
+            call["conflict"] = True
+        elif "command_hash" in call:
+            call.update(returned=position, session=_code_session(row, payload))
+
+
 def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: Path | None = None,
               include_task: bool = True, cursor: dict | None = None) -> dict:
     stat = _verify_path(path, sessions_root)
     if include_task and stat.st_size > LIMIT:
         raise ValueError("Host transcript ownership or bounded-read limit failed")
-    inputs, commands, trace = [], {}, {}
+    inputs, commands, trace, code_execs = [], {}, {}, {}
     with path.open() as stream:
         meta = _header(stream, chat, project)
         identity = [stat.st_dev, stat.st_ino, chat, turn]
-        if (cursor and cursor.get("identity") == identity and cursor.get("include_task", False) == include_task
+        if (cursor and cursor.get("version") == CURSOR_VERSION and cursor.get("identity") == identity
+                and cursor.get("include_task", False) == include_task
                 and stream.tell() <= cursor.get("offset", -1) <= stat.st_size
                 and cursor.get("boundary_hash") == _boundary_hash(path,cursor["offset"])):
             stream.seek(cursor["offset"])
             commands = dict(cursor.get("commands", {}))
             trace = dict(cursor.get("trace", {}))
+            code_execs = dict(cursor.get("code_execs", {}))
             inputs = list(cursor.get("inputs", [])) if include_task else []
         elif not include_task and stat.st_size > LIMIT:
             stream.seek(max(stream.tell(), stat.st_size - LIMIT))
@@ -116,6 +187,9 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
             matches = payload.get("turn_id") == turn or msg_meta.get("turn_id") == turn
             ordinal, stamp = row.get("ordinal"), row.get("timestamp")
             position = {"ordinal":ordinal, "timestamp":stamp} if type(ordinal) is int else {"timestamp":stamp}
+            if (row.get("type") == "response_item" and msg_meta.get("turn_id") == turn
+                    and payload.get("turn_id", turn) == turn and not trace.get("prefix_omitted")):
+                _record_code_exec(code_execs, row, payload, position)
             if matches and (row.get("type") == "turn_context" or payload.get("type") == "task_started"):
                 trace.setdefault("start", position)
             if matches and row.get("type") == "response_item" and payload.get("role") in {"user","assistant"}:
@@ -152,13 +226,75 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                                "item_id": item["id"], "item_hash": digest(item), "method": item["name"]})
     if len(inputs) > 1:
         raise ValueError("Ambiguous task specifications in one host turn")
-    result = {"input": inputs[0] if inputs else None, "commands": commands, "relation":_relation(meta), "trace":trace}
-    result["cursor"] = {"identity":identity,"offset":offset,"commands":commands,"trace":trace,
+    result = {"input": inputs[0] if inputs else None, "commands": commands, "relation":_relation(meta), "trace":trace,
+              "code_execs":code_execs,"cwd_hash":digest(meta.get("cwd"))}
+    result["cursor"] = {"version":CURSOR_VERSION,"identity":identity,"offset":offset,"commands":commands,"trace":trace,"code_execs":code_execs,
                         "include_task":include_task, "inputs":inputs if include_task else [],"boundary_hash":_boundary_hash(path,offset)}
     return result
 
 
-def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
+def _at(position):
+    try:
+        stamp = datetime.fromisoformat(position["timestamp"].replace("Z", "+00:00"))
+        return stamp.timestamp() if stamp.tzinfo is not None else None
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _join_background(store, data, facts, transcript_path):
+    calls = facts.get("code_execs", {})
+    if data.get("_ended_by") != "Stop" or not calls:
+        return
+    source = data["source"]
+    # Only recover previously unobserved input here. An existing native
+    # receipt for this event cannot be replaced with a different body.
+    turn = store.db.execute("SELECT observed_revision FROM turns WHERE id=?", (digest([source["chat"], source["turn"]]),)).fetchone()
+    if turn and turn["observed_revision"] is not None:
+        return
+    terminal = data.get("evidence_provenance", {}).get("terminal_event")
+    def same_scope(event):
+        return (event.get("bridge_host"), event.get("bridge_project"), event.get("session_id"),
+                event.get("turn_id"), event.get("transcript_path")) == (
+                    source["host"], source["project"], source["chat"], source["turn"], transcript_path)
+
+    stop = store.db.execute("SELECT created,payload FROM events WHERE id=?", (terminal,)).fetchone()
+    if not stop:
+        return
+    stop_event = json.loads(stop["payload"])
+    if stop_event.get("hook_event_name") != "Stop" or not same_scope(stop_event):
+        return
+    starts = {}
+    for row in store.db.execute("SELECT id,created,payload FROM events WHERE json_extract(payload,'$.session_id')=? "
+                                "AND json_extract(payload,'$.turn_id')=? AND json_extract(payload,'$.hook_event_name')='PreToolUse'",
+                                (source["chat"], source["turn"])):
+        event = json.loads(row["payload"])
+        arguments = event.get("tool_input")
+        command = arguments.get("command") if isinstance(arguments, dict) else None
+        if (same_scope(event) and digest(event.get("cwd")) == facts["cwd_hash"] and event.get("tool_name") == "Bash"
+                and isinstance(command, str) and event.get("tool_use_id")):
+            starts.setdefault(digest(command), []).append((row, event["tool_use_id"], command))
+    commands = Counter(call.get("command_hash") for call in calls.values())
+    sessions = Counter(call.get("session") for call in calls.values())
+    for outer_id, call in calls.items():
+        command_hash, session = call.get("command_hash"), call.get("session")
+        matching = starts.get(command_hash, [])
+        if not session or call.get("conflict") or len(matching) != 1 or commands[command_hash] != 1 or sessions[session] != 1:
+            continue
+        pre, tool_id, command = matching[0]
+        tool = data["tools"].get(tool_id)
+        if (not tool or tool.get("status") != "running" or tool.get("result") is not None or tool.get("process")
+                or tool.get("name") != "Bash" or tool.get("arguments", {}).get("command") != command):
+            continue
+        invoked, returned = _at(call["invoked"]), _at(call["returned"])
+        if (invoked is not None and returned is not None and invoked <= pre["created"] <= returned <= stop["created"]
+                and not any(other.get("process") == str(session) for other in data["tools"].values())):
+            tool.update(process=str(session), background_session={"outer_call_id":outer_id, "pre_event":pre["id"],
+                                                                 "observed_at":call["returned"]["timestamp"],
+                                                                 "session_id":str(session),
+                                                                 "transcript_ref":digest(transcript_path)})
+
+
+def supplement(store, data: dict, *, settings=None, include_task=True, event_id=None) -> dict:
     source = data["source"]
     row = store.db.execute("SELECT id,payload FROM events WHERE json_extract(payload,'$.session_id')=? "
                            "AND json_extract(payload,'$.turn_id')=? AND json_extract(payload,'$.transcript_path') IS NOT NULL "
@@ -192,6 +328,18 @@ def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
     for identifier, fact in facts["commands"].items():
         if identifier not in result["tools"]:
             continue
+        tool = result["tools"][identifier]
+        background = tool.get("background_session")
+        if background:
+            exit_at = _at(fact)
+            launched_at = _at({"timestamp":background["observed_at"]})
+            if (background.get("exit_event") or event_id is None or background.get("pending_exit_event") != event_id
+                    or background["transcript_ref"] != digest(event["transcript_path"])
+                    or exit_at is None or launched_at is None or exit_at < launched_at):
+                continue
+            if fact.get("kind") != "CommandExecution" or not (fact["status"] == "interrupted" or
+                    (str(fact["status"]).lower() in {"completed", "failed"} and type(fact["exit_code"]) is int)):
+                continue
         result["tools"][identifier]["host_position"] = {key:fact[key] for key in ("ordinal","timestamp") if key in fact}
         status = str(fact["status"]).lower().replace("_", "")
         code = fact["exit_code"]
@@ -217,8 +365,13 @@ def supplement(store, data: dict, *, settings=None, include_task=True) -> dict:
                 result["tools"][identifier]["result"]={"outcome":"completed"}
         if result["tools"][identifier]["status"] in {"completed", "failed", "interrupted"}:
             resolved.add("unrecognized_execution_result:" + identifier)
+            if background:
+                tool["background_session"] = {k: v for k, v in background.items() if k != "pending_exit_event"}
+                tool["background_session"]["exit_event"] = background["pending_exit_event"]
     if resolved and "coverage" in result:
         result["coverage"] = sorted(set(result["coverage"]) - resolved)
-    if result.get("_ended_by") == "Stop":
-        result["status"] = "incomplete" if any(t["status"] in {"running", "unknown"} for t in result["tools"].values()) else "completed"
+    if include_task:
+        _join_background(store, result, facts, event["transcript_path"])
+    if result.get("_ended_by") in {"Stop", "Interrupt"}:
+        settle_turn(result)
     return result
