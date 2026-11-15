@@ -19,7 +19,7 @@ import threading
 ROOT=Path(__file__).resolve().parents[1]
 GOAL="Evaluate policy evaluation frameworks for enterprise services and recommend a shortlist."
 BEFORE="Reviewed public documentation only. Public Framework A ranked first; existing internal capabilities were not examined."
-ADDITION="Also check the existing internal solutions and compare their capabilities with the public choices."
+ADDITION="Correction: also check the existing internal solutions and compare their capabilities with the public choices."
 AFTER="The internal shared evaluation service already meets the requirements. Reusing that capability changes the preferred option; public Framework A is now a fallback."
 METHOD="---\nname: learned-enterprise-technical-research\ndescription: Compare public options with existing internal capabilities.\nlearning_scope: global_candidate\n---\nApplicability: technical research and selection in an enterprise environment.\n1. Start with both public external sources and authorized internal documentation and capabilities.\n2. Compare industry alternatives with existing internal capabilities and revise the ranking when reuse is viable.\n3. State source coverage gaps and uncertainty.\nLimits: respect a user's explicit source restrictions and authorization boundaries. Do not infer access from proximity.\nVerification: show which evidence changed the comparison; reading a skill does not prove execution.\n"
 
@@ -199,10 +199,16 @@ def main():
         else:
             chat='research';turn(chat,'prior',GOAL,BEFORE)
             turn(chat,'addition',ADDITION,AFTER)
+        import time
+        from hermes_codex_learning.scheduling import SETTLE_SECONDS
         for _ in range(100):
             bridge.ingest()
             if bridge.store.pending():
                 continue
+            # A large fixture turn spans multiple ingest batches. Simulate the quiet
+            # window after its final event has updated activity, not before.
+            with bridge.store.db:
+                bridge.store.db.execute("UPDATE turns SET activity=?", (time.time() - SETTLE_SECONDS - 1,))
             bridge.idle_reviews();bridge.reviews();bridge.last_publish=0;bridge.publish()
             pending_feedback=bridge.store.db.execute('SELECT 1 FROM review_priority WHERE requested IS NULL LIMIT 1').fetchone()
             if not api.read(kind='status',detail='summary')['intents'] and not pending_feedback:break

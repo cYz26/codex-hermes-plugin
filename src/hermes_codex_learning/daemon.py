@@ -61,8 +61,9 @@ class Bridge:
         publish(self.settings, self.store.notice(event))
 
     def handle_for(self, source: dict) -> str:
-        result = self.api.open({**{k: source[k] for k in ("host", "project", "chat")}, "executor": "Codex App"})
-        self.store.set("scope:" + result["handle"], {k: source[k] for k in ("host", "project", "chat")})
+        identity = {**{k: source[k] for k in ("host", "project", "chat")}, "executor": source.get("executor", "Codex App")}
+        result = self.api.open(identity)
+        self.store.set("scope:" + result["handle"], identity)
         self.bind_chat_handle(source, result["handle"])
         return result["handle"]
 
@@ -147,8 +148,9 @@ class Bridge:
             previous = self.store.get("observation-receipt:" + key, {})
             if previous.get("background") and previous.get("event") == event_id:
                 return
-            enriched = task_input(self.store, data, settings=self.settings)
-            if not enriched.get("user") or data["status"] in {"completed", "interrupted", "incomplete"}:
+            native_host = data["source"].get("executor") == "Hermes"
+            enriched = data if native_host else task_input(self.store, data, settings=self.settings)
+            if not native_host and (not enriched.get("user") or data["status"] in {"completed", "interrupted", "incomplete"}):
                 from .host_evidence import supplement
                 enriched = supplement(self.store, enriched, settings=self.settings, event_id=event_id)
             states = [tool["background_session"] for tool in enriched["tools"].values() if tool.get("background_session")]
@@ -234,8 +236,9 @@ class Bridge:
         from .workflow import observation as workflow_observation
         if data.get('_ended_by') not in {'Stop', 'Interrupt'}:
             return
-        from .host_evidence import supplement
-        data = supplement(self.store, data, settings=self.settings, include_task=False)
+        if data["source"].get("executor") != "Hermes":
+            from .host_evidence import supplement
+            data = supplement(self.store, data, settings=self.settings, include_task=False)
         data['status'] = 'interrupted' if data['_ended_by'] == 'Interrupt' else 'completed'
         value = workflow_observation(data)
         handle = self.api.open({k: value['source'][k] for k in ('host', 'project', 'chat', 'executor')})['handle']
@@ -447,9 +450,16 @@ class Bridge:
             self.store.set("loop-progress",{**self.store.get("loop-progress",{}),"phase":"reviewing","updated_at":started_at,"handle":intent["handle"],"intent":intent["id"]})
             self.store.set("review-progress:"+intent["handle"],{"state":"running","intent":intent["id"],
                 "revision":intent.get("revision"),"reason":intent.get("reason"),"started_at":started_at})
-            with self.review_writes.capture(intent["handle"]) as calls, \
+            from .shared_learning import review_scope
+            with review_scope(self, source.get("project") if source.get("evidence_mode") != "workflow-v1" else None), \
+                    self.review_writes.capture(intent["handle"]) as calls, \
                     capture_review_summary(self.api, intent["handle"]) as summary:
                 result = run_review(self.settings, self.api, intent["handle"], intent["id"], attempt_id)
+            if self.settings.shared_profile is not None:
+                from .shared_storage import bind_skill_proposal
+                for pending in result.get("staged", []):
+                    if pending.get("tool") == "skill_manage":
+                        bind_skill_proposal(self, source.get("project"), pending.get("result", {}).get("pending_id"), before_versions)
             curator_management = learning_dispatch.mark_user_taught(self, intent, result)
             if curator_management is not None:
                 result = {**result, "curator_management": curator_management}
@@ -891,7 +901,14 @@ class Bridge:
                 self.store.set("notification:" + notice["id"], result)
 
     def loop(self) -> None:
+        from .shared_learning import drain as drain_shared_writes, drain_client, recover as recover_shared_writes
+        migrate_shared = self.settings.shared_profile is not None
         if self.resume.is_set():
+            if migrate_shared:
+                from .shared_storage import migrate
+                recover_shared_writes(self)
+                migrate(self, dry_run=False)
+                migrate_shared = False
             self.publish()
         else:
             # Validate native reads without publishing candidate-derived provenance
@@ -911,9 +928,16 @@ class Bridge:
                 self.stop.wait(0.2)
                 continue
             try:
+                if migrate_shared:
+                    from .shared_storage import migrate
+                    recover_shared_writes(self)
+                    migrate(self, dry_run=False)
+                    migrate_shared = False
                 from .review_resolution import process as resolve_reviews
                 resolve_reviews(self)
+                drain_client(self)
                 self.ingest()
+                drain_shared_writes(self)
                 self.retry_completed_inputs()
                 self.recover_context()
                 from .learning_dispatch import prepare
@@ -960,6 +984,14 @@ class Bridge:
             self.stop.wait(delay)
 
     def rpc(self, method: str, params: dict) -> dict:
+        if method == "shared_approval_decision":
+            if self.settings.shared_profile is None:
+                raise ValueError("Shared learning is disabled")
+            from .shared_storage import approval_decision
+            return approval_decision(self, self.request_project(params), params)
+        if method.startswith("shared_"):
+            from .shared_learning import rpc as shared_rpc
+            return shared_rpc(self, method, params)
         from .learning_requests import METHODS, rpc as learning_rpc
         if method == "publication_review":
             from . import publication_review
@@ -994,6 +1026,10 @@ class Bridge:
                                         "draining":self.drain.is_set(), "state":store.get("state")}
                 return result
         if method == "pending_reviews":
+            if self.settings.shared_profile is not None:
+                from .shared_storage import approval_list
+                with StoreConnection(self.settings, read_only=True) as store:
+                    return approval_list(self.settings, store, self.request_project(params), params.get("id"))
             from .approvals import PendingReviews
             with StoreConnection(self.settings, read_only=True) as store:
                 return PendingReviews(self.settings, store).list(params.get("cwd"), params.get("id"))
@@ -1087,7 +1123,11 @@ class Bridge:
                 from .progress import summarize
                 progress = summarize(store,project=project,
                     chat=params.get("chat"),turn=params.get("turn"),limit=params.get("limit",20),after_cursor=params.get("after_cursor",0))
-                return {"snapshot": snapshot,
+                shared = None
+                if self.settings.shared_profile is not None:
+                    from .shared_learning import status as shared_status
+                    shared = shared_status(store, project)
+                return {"snapshot": snapshot, "shared_learning": shared,
                         **learning_health(self.settings, store, context, project, self.native_policy),
                         "progress":progress,
                         "review_retries": ReviewRetryQueue(self.settings, store).summary(),
@@ -1124,7 +1164,7 @@ class Bridge:
                         "capture_exclusions": [{"chat": row["key"][len("excluded-chat:"):], **json.loads(row["value"])}
                                                for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'excluded-chat:%'")]}
         if method == "context":
-            if not self.resume.is_set():
+            if not self.resume.is_set() or (self.settings.shared_profile is not None and not self.ready.is_set()):
                 empty=context_view({"memories":{},"skills":[]},self.request_project(params))
                 return {**empty,"available":False,"reason":"update_paused"}
             path = self.settings.state / "context.json"
@@ -1133,6 +1173,10 @@ class Bridge:
             context = context or {"available": False}
             from .enterprise import scope_view, requires_scoping
             context=scope_view(context,self.settings.data_policy)
+            if self.settings.shared_profile is not None:
+                from .shared_storage import scoped_context
+                with StoreConnection(self.settings, read_only=True) as store:
+                    return scoped_context(self.settings, store, context, self.request_project(params), params.get("query", ""))
             if self.settings.capture_scope == "global" or requires_scoping(context,self.settings.data_policy):
                 return context_view(context, self.request_project(params), params.get("query", ""))
             return context
@@ -1187,14 +1231,22 @@ def run(settings: Settings, api, review_writes: ReviewWrites | None = None) -> i
         bridge.store.close()
         owner.close()
         raise RuntimeError("Cloud 0.5 learning policy requires its verified Learning API patch")
+    if settings.shared_profile is not None and bridge.native_capabilities.get("shared_learning") != 1:
+        bridge.store.close()
+        owner.close()
+        api.close()
+        raise RuntimeError("The native runtime does not support shared learning protocol 1")
 
     class Handler(socketserver.StreamRequestHandler):
         def handle(self):
+            from .shared_learning import Rejected
             try:
                 request = json.loads(self.rfile.readline(1024 * 1024))
                 result = {"result": bridge.rpc(request["method"], request.get("params", {}))}
             except Exception as exc:
                 result = {"error": f"{type(exc).__name__}: {exc}"}
+                if isinstance(exc, Rejected):
+                    result["permanent"] = True
             try:
                 self.wfile.write((dumps(result) + "\n").encode())
             except (BrokenPipeError, ConnectionResetError):

@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -166,7 +167,7 @@ def main():
     from hermes_codex_learning.review_input import install_review_policy
     settings = Settings(home,project,args.source,Path(sys.executable),capture_scope="global",
                         data_policy={"enabled":True,"synthetic_roots":[str(project)]},idle_seconds=0,idle_interval=0,
-                        checked_publication=True,quality_checks=True)
+                        checked_publication=True,quality_checks=True,proactive=not args.explicit)
     if args.enterprise:
         from dataclasses import replace
         from hermes_codex_learning.enterprise import make_boundary
@@ -186,7 +187,7 @@ def main():
     bridge = Bridge(settings,api)
     try:
         bridge.store.set("knowledge-index-v1",reconcile({},api.read(kind="context"),bootstrap_project="/unrelated"))
-        for event in [{"hook_event_name":"UserPromptSubmit","prompt":"Synthetic fixture: normalize CSV headers to NFKC; retain the supported project convention."},
+        for event in [{"hook_event_name":"UserPromptSubmit","prompt":"Correction: normalize synthetic CSV headers to NFKC; retain the supported project convention."},
                       {"hook_event_name":"Stop","last_assistant_message":"Verified synthetic full-width and ASCII matching."}]:
             hook(dict(event,cwd=str(project),session_id="fixture-chat",turn_id="fixture-turn"),settings)
         bridge.ingest()
@@ -197,6 +198,9 @@ def main():
             bridge.rpc("request_learning",request)
             prepare(bridge)
         else:
+            from hermes_codex_learning.scheduling import SETTLE_SECONDS
+            with bridge.store.db:
+                bridge.store.db.execute("UPDATE turns SET activity=?", (time.time() - SETTLE_SECONDS - 1,))
             bridge.idle_reviews()
         bridge.reviews()
         bridge.publish()

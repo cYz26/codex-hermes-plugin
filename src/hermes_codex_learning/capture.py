@@ -168,7 +168,15 @@ def hook(payload: dict, settings: Settings) -> dict:
             store.set("recall-query:" + session, query)
         scoped = settings.capture_scope == "global" or requires_scoping(cache, settings.data_policy)
         query = store.get("recall-query:" + session, "")
-        if scoped:
+        if settings.shared_profile is not None:
+            from .ipc import request
+            try:
+                cache = request(settings, "context", {"cwd": project, "query": query}, timeout=0.3)
+            except (OSError, ValueError, RuntimeError):
+                return {}
+            if cache.get("available") is False:
+                return {}
+        elif scoped:
             cache = context_view(cache, project, query)
         recommended = cache.get("recommended_skills", [])
         if not scoped and cache.get("skills"):

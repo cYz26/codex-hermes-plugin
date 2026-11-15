@@ -150,6 +150,15 @@ def source_seal(source: Path, recipe: dict) -> str:
     return git(source, "write-tree")
 
 
+def require_shared_source(source: Path) -> dict:
+    revision = git(source, "rev-parse", "HEAD")
+    for recipe in catalog().values():
+        if recipe.get("shared_learning_protocol") == 1 and recipe["base_commit"] == revision:
+            if source_seal(source, recipe) == recipe.get("mechanism_review", {}).get("source_tree"):
+                return recipe
+    raise UpdateError("Select a verified Hermes backend with shared learning protocol 1")
+
+
 def github_json(settings: Settings, url: str) -> dict:
     proxies = {key.removesuffix("_proxy"): value for key, value in
                {**os.environ, **settings.network_environment}.items() if key in {"http_proxy", "https_proxy"}}
@@ -410,6 +419,8 @@ class Updater:
             if tag not in recipes:
                 raise UpdateError("Release needs a reviewed compatibility recipe before preparation")
             recipe = recipes[tag]
+            if self.settings.shared_profile is not None and recipe.get("shared_learning_protocol") != 1:
+                raise UpdateError("Candidate does not support the active shared learning format")
             review_gate(recipe)
             existing = read_json(self.directory / "candidate.json")
             if (existing and existing.get("tag") == tag and existing.get("preflight_only", False) == preflight
@@ -497,6 +508,9 @@ class Updater:
                 if binding:
                     smoke.extend(["--fallback-python", interpreter])
                 command("runtime-smoke", smoke, cwd=self.root)
+                if recipe.get("shared_learning_protocol") == 1:
+                    command("shared-learning-contract", [interpreter, "-B", self.root / "probes/shared_learning_contract.py",
+                            "--source", source, "--python", interpreter], cwd=self.root)
                 if source_seal(source, recipe) != record["source_tree"] or plugin_hash(self.root) != record["plugin"]:
                     raise UpdateError("Source or plugin changed during verification")
                 if binding and inspect_official(official_source, recipe["base_commit"]) != binding:
@@ -528,6 +542,8 @@ class Updater:
         recipe = _recipe or self.recipes().get(record.get("tag"))
         if not recipe or record.get("state") != "ready" or record.get("recipe") != recipe["recipe"]:
             raise UpdateError("Candidate is not verified for this compatibility recipe")
+        if self.settings.shared_profile is not None and recipe.get("shared_learning_protocol") != 1:
+            raise UpdateError("Candidate does not support the active shared learning format")
         if record.get("commit", recipe["base_commit"]) != recipe["base_commit"]:
             raise UpdateError("Candidate commit differs from the reviewed recipe")
         review_gate(recipe)
@@ -546,6 +562,8 @@ class Updater:
         elif Path(record["python"]) != folder / "runtime/bin/python" or record.get("fallback_python"):
             raise UpdateError("Candidate interpreter is outside the managed candidate")
         required = {"native-contracts", "bridge-contracts", "runtime-smoke"}
+        if recipe.get("shared_learning_protocol") == 1:
+            required.add("shared-learning-contract")
         if self.settings.site_manifest:
             from .site_updates import validate_site
             required.add("site-contracts")
@@ -572,6 +590,8 @@ class Updater:
                 previous = read_json(self.directory / "previous.json")
                 if not previous:
                     raise UpdateError("No previous runtime is recorded")
+                if self.settings.shared_profile is not None:
+                    require_shared_source(Path(previous["source"]))
                 target = digest(previous)
             request = {"id": uuid.uuid4().hex, "action": action, "target": target, "created_at": time.time(),
                        "automatic": automatic}

@@ -83,9 +83,14 @@ def settle_turn(data: dict) -> None:
 
 
 def _background_poll_targets(data, event):
-    if event.get("tool_name", "").rsplit(".", 1)[-1] != "write_stdin":
-        return []
+    name = event.get("tool_name", "").rsplit(".", 1)[-1]
     args = event.get("tool_input")
+    native = event.get("bridge_executor") == "Hermes"
+    if native:
+        if name != "process" or not isinstance(args, dict) or args.get("action") not in {"poll", "wait"}:
+            return []
+    elif name != "write_stdin":
+        return []
     session = args.get("session_id") if isinstance(args, dict) else None
     if type(session) not in {str, int}:
         return []
@@ -106,7 +111,7 @@ def merge_event(store: Store, row: dict) -> dict | None:
     data = json.loads(previous[0]) if previous else {
         "source": {"host": event.get("bridge_host", "codex-desktop"),
                    "project": event.get("bridge_project", event["cwd"]), "chat": session, "turn": turn,
-                   "executor": "Codex App"},
+                   "executor": event.get("bridge_executor", "Codex App")},
         "user": "", "assistant": "", "tools": {}, "status": "running", "coverage": [],
     }
     if previous and (event.get("bridge_host", "codex-desktop") != data["source"]["host"]
@@ -117,6 +122,8 @@ def merge_event(store: Store, row: dict) -> dict | None:
     provenance.setdefault("first_captured_at", captured_at)
     if event.get("bridge_host_context"):
         data["host_context"] = event["bridge_host_context"]
+    if event.get("bridge_executor") == "Hermes":
+        provenance["origin"] = "hermes_lifecycle"
     if event.get('bridge_evidence_mode') == 'workflow-v1':
         if data.get('_evidence_mode') != 'semantic-v2':
             data['_evidence_mode'] = 'workflow-v1'
@@ -153,7 +160,14 @@ def merge_event(store: Store, row: dict) -> dict | None:
         else:
             response = event.get("tool_response", {})
             tool_name = event.get("tool_name", "unknown")
-            status, process, gap = _result_state(tool_name, response)
+            native = event.get("bridge_executor") == "Hermes"
+            status, process, gap = _result_state("terminal" if native and tool_name == "process" else tool_name, response)
+            if event.get("bridge_executor") == "Hermes":
+                # Transport completion is separate from the operation's terminal state.
+                if event.get("native_status") in {"cancelled", "blocked"}:
+                    status = "interrupted"
+                elif event.get("native_status") == "error" and status == "completed":
+                    status = "failed"
             if event.get('bridge_evidence_mode') == 'workflow-v1':
                 from .workflow import OUTCOMES
                 status = response.get('outcome', 'unknown')
@@ -202,6 +216,8 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 else:
                     background = {k: v for k, v in background.items() if k != "pending_exit_event"}
                     background["exit_event"] = row["id"]
+            elif native and tool_name == "terminal" and status == "running" and process:
+                background = {"session_id": process, "transcript_ref": digest(None), "launch_event": row["id"]}
             tool_action, test_key = event.get("bridge_action"), event.get("bridge_test_key")
             if original:
                 arguments = original["arguments"]
@@ -215,6 +231,7 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 "arguments": arguments,
                 "result": response, "status": status, "process": process,
                 "action": tool_action, "test_key": test_key,
+                **({"status_source": "hermes_lifecycle"} if native else {}),
                 **({"background_session": background} if background else {}),
             }
             if gap:
@@ -229,6 +246,8 @@ def merge_event(store: Store, row: dict) -> dict | None:
             data["_ended_by"] = "Stop"
     elif name == "Interrupt":
         data["_ended_by"] = "Interrupt"
+        if event.get("bridge_executor") == "Hermes":
+            data["assistant"] = event.get("last_assistant_message", "")
     settle_turn(data)
     revision = digest(data)
     now = time.time()

@@ -1,0 +1,188 @@
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import Mock
+
+from hermes_codex_learning.config import Settings
+from hermes_codex_learning.normalize import merge_event
+from hermes_codex_learning.shared_learning import capture_native, chat_id, enqueue, receipt
+from hermes_codex_learning.store import Store, digest
+
+
+class SharedTransportTests(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.project = self.root / "one"
+        self.project.mkdir()
+        self.settings = Settings(self.root / "owner", self.project, self.root, Path(sys.executable),
+                                 capture_scope="global", checked_publication=True,
+                                 shared_profile=self.root / "client", shared_client_id="a" * 48)
+        self.store = Store(self.settings.state)
+        self.addCleanup(self.store.close)
+        self.identity = {"session": "conversation-1", "turn": "turn-1", "surface": "gui"}
+
+    def capture(self, kind, **body):
+        return capture_native(self.settings, self.store, str(self.project), {**self.identity, **body, "kind": kind})
+
+    def test_hermes_contribution_preserves_executor_and_exact_background_exit(self):
+        self.assertEqual(self.capture("finished", text="out of order")["state"], "awaiting_prompt")
+        first = self.capture("prompt", text="Run the regression tests")
+        self.assertEqual(self.capture("prompt", text="Run the regression tests"), first)
+        self.capture("tool_start", tool="terminal", call="run", args={"command": "python3 -m unittest"})
+        self.capture("tool_end", tool="terminal", call="run",
+                     result={"session_id":"process-id","exit_code":None,"status":"yielded_to_background"})
+        self.capture("finished", text="Waiting for the process")
+        rows = self.store.pending()
+        for row in rows:
+            data = merge_event(self.store, row)
+        self.assertEqual(data["source"]["executor"], "Hermes")
+        self.assertEqual(data["tools"]["run"]["status"], "running")
+        self.assertEqual(data["coverage"], ["background_exit_pending"])
+        self.capture("tool_end", tool="process", call="poll", args={"action":"poll","session_id":"process-id"},
+                     result={"session_id":"process-id","exit_code":1})
+        data = merge_event(self.store, self.store.pending()[-1])
+        self.assertEqual(list(data["tools"]), ["run"])
+        self.assertEqual(data["tools"]["run"]["status"], "failed")
+        self.assertEqual(data["source"]["chat"], chat_id(self.settings, "conversation-1"))
+
+    def test_request_retry_is_idempotent_and_cross_project_receipt_is_empty(self):
+        request = {"operation": "memory", "request_id": "stable-id", "surface": "cli",
+                   "args": {"action": "add", "content": "A durable workspace fact."}}
+        one = enqueue(self.store, str(self.project), request)
+        self.assertEqual(one, enqueue(self.store, str(self.project), request))
+        self.assertEqual(receipt(self.store, str(self.root / "two"), "stable-id")["state"], "unknown")
+        with self.assertRaises(ValueError):
+            enqueue(self.store, str(self.project), {**request, "args": {"action": "remove"}})
+
+    def test_no_project_no_automatic_learning(self):
+        value = capture_native(self.settings, self.store, None, {**self.identity, "kind": "prompt", "text": "Private text"})
+        self.assertEqual(value["state"], "withheld")
+        self.assertFalse(self.store.pending())
+
+
+@unittest.skipUnless(os.getenv("HERMES_LEARNING_NATIVE_SOURCE"), "requires the patched native test runtime")
+class SharedNativeStoreTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        source = os.environ["HERMES_LEARNING_NATIVE_SOURCE"]
+        sys.path.insert(0, source)
+        try:
+            from agent.shared_learning_scope import Scope
+        except ImportError as exc:
+            sys.path.remove(source)
+            raise unittest.SkipTest("native runtime does not include the shared protocol") from exc
+        cls.addClassCleanup(sys.path.remove, source)
+
+    def setUp(self):
+        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        from hermes_codex_learning.daemon import Bridge
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.owner = self.root / "owner"
+        self.owner.mkdir()
+        self.a = str(self.root / "one")
+        self.b = str(self.root / "two")
+        for path in (self.a, self.b):
+            Path(path).mkdir()
+        token = set_hermes_home_override(self.owner)
+        self.addCleanup(reset_hermes_home_override, token)
+        config = Settings(self.owner, Path(self.a), Path(os.environ["HERMES_LEARNING_NATIVE_SOURCE"]),
+                          Path(sys.executable), capture_scope="global", checked_publication=True,
+                          shared_profile=self.root / "client", shared_client_id="a" * 48)
+        api = Mock()
+        api.read.return_value = {"memories": {}, "skills": []}
+        self.bridge = Bridge(config, api)
+        self.addCleanup(self.bridge.store.close)
+        self.bridge.ready.set()
+
+    def view(self, project):
+        return self.bridge.rpc("context", {"cwd": project} if project else {})
+
+    def write(self, project, operation, args, base=None):
+        from hermes_codex_learning.shared_storage import apply_write
+        return apply_write(self.bridge, project, {"operation": operation, "args": args, "base": base})
+
+    def test_independent_memory_store_user_approval_and_stale_write(self):
+        a_initial = self.view(self.a)["memory_versions"]["memory"]
+        b_initial = self.view(self.b)["memory_versions"]["memory"]
+        self.assertEqual(a_initial, b_initial)
+        applied, _ = self.write(self.a, "memory", {"action":"add", "content":"Project one uses fixture cobalt."}, a_initial)
+        self.assertEqual(applied, "applied")
+        self.assertIn("fixture cobalt", self.view(self.a)["memories"]["MEMORY.md"])
+        self.assertNotIn("MEMORY.md", self.view(self.b)["memories"])
+        self.assertEqual(self.write(self.a, "memory", {"action":"add", "content":"Stale change."}, a_initial)[0], "conflict")
+        base = self.view(None)["memory_versions"]["user"]
+        state, staged = self.write(self.a, "memory", {"target":"user","action":"add","content":"Prefer short progress updates."}, base)
+        self.assertEqual(state, "pending_review")
+        self.assertNotIn("USER.md", self.view(None)["memories"])
+        from hermes_codex_learning.shared_storage import read
+        item, = read(self.bridge, self.bridge.store, "pending", self.a, {"subsystem":"memory"})["records"]
+        self.assertEqual(staged["pending_id"], item["id"])
+        params = {"subsystem":"memory","decision":"approve","id":item["id"],"revision":item["revision"]}
+        self.assertEqual(self.write(self.b, "decide", params)[0], "conflict")
+        self.assertEqual(self.write(self.a, "decide", params)[0], "applied")
+        self.assertIn("short progress", self.view(self.b)["memories"]["USER.md"])
+        self.assertNotIn("MEMORY.md", self.view(None)["memories"])
+
+    def test_clear_is_versioned_and_replay_cannot_revive_removed_memory(self):
+        entry = "Temporary decision to be removed."
+        self.assertEqual(self.write(self.a, "memory", {"action": "add", "content": entry}, digest([]))[0], "applied")
+        old = self.view(self.a)["memory_versions"]["memory"]
+        self.assertEqual(self.write(self.a, "clear", {"target":"memory","confirmed":True}, old)[0], "applied")
+        self.assertNotIn("MEMORY.md", self.view(self.a)["memories"])
+        self.assertEqual(self.write(self.a, "memory", {"action": "add", "content": entry}, digest([]))[0], "failed")
+
+    def test_owner_recovery_records_delete_before_reviewing_a_restored_file(self):
+        from hermes_codex_learning.shared_storage import _intent_key, memory_path, native_scope, read, recover_memory_intents
+        from tools.memory_tool import load_on_disk_store
+
+        entry = "A replaced workflow constraint."
+        path = memory_path(self.bridge.settings, self.a, "memory")
+        self.assertEqual(self.write(self.a, "memory", {"action":"add", "content":entry}, digest([]))[0], "applied")
+        key = _intent_key(self.a, "memory")
+        intent = {"project":self.a,"target":"memory","before":digest([entry]),"after":digest([]),
+                  "removed":[digest(entry)]}
+        self.bridge.store.set(key, intent)
+        recover_memory_intents(self.bridge.settings, self.bridge.store)
+        self.assertIn(entry, self.view(self.a)["memories"]["MEMORY.md"])
+        self.bridge.store.set(key, intent)
+        path.write_text("")
+        recover_memory_intents(self.bridge.settings, self.bridge.store)
+        path.write_text(entry)
+        self.assertNotIn("MEMORY.md", self.view(self.a)["memories"])
+        self.assertFalse(read(self.bridge, self.bridge.store, "journey", self.a, {})["memory"])
+        with native_scope(self.bridge.settings, self.a):
+            memory = load_on_disk_store()
+            self.assertFalse(memory._entries_for("memory"))
+        self.assertEqual(self.write(self.a, "memory", {"action":"add", "content":entry}, digest([]))[0], "failed")
+
+    def test_journey_deletion_requires_exact_native_node_and_version(self):
+        from hermes_codex_learning.shared_storage import read
+
+        entry = "Use the proof palette when reviewing the fixture report."
+        self.assertEqual(self.write(self.a, "memory", {"action":"add", "content":entry}, digest([]))[0], "applied")
+        graph = read(self.bridge, self.bridge.store, "journey", self.a, {})
+        node, = [row for row in graph["nodes"] if row["kind"] == "memory"]
+        self.assertEqual(read(self.bridge, self.bridge.store, "journey", self.a, {"id":node["id"]})["content"], entry)
+        self.assertFalse(read(self.bridge, self.bridge.store, "journey", self.b, {"id":node["id"]})["ok"])
+        self.assertEqual(self.write(self.a, "journey_delete", {"id":node["id"]}, digest([]))[0], "conflict")
+        self.assertEqual(self.write(self.a, "journey_delete", {"id":node["id"]}, node["version"])[0], "applied")
+        self.assertFalse(read(self.bridge, self.bridge.store, "journey", self.a, {"id":node["id"]})["ok"])
+
+    def test_client_outbox_has_private_permissions_and_replays_in_order(self):
+        from agent.shared_learning_client import Client, Refused
+        path = self.bridge.settings.shared_profile
+        path.mkdir()
+        client = Client(path, str(self.root / "offline.sock"), "a" * 48)
+        client.queue("event", {"kind":"prompt"})
+        client.queue("event", {"kind":"finished"})
+        client.flush()
+        def owner_starting(*_):
+            raise Refused("owner still starting")
+        client.flush(owner_starting)
+        observed = []
+        client.flush(lambda method, params: observed.append(params["kind"]))
+        self.assertEqual(observed, ["prompt", "finished"])
+        self.assertFalse((path / "shared-learning-outbox.sqlite").stat().st_mode & 0o077)

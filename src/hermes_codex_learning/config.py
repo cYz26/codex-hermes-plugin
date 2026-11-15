@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,8 +43,17 @@ class Settings:
     review_retry_delay: float = 300
     review_retry_max_delay: float = 3600
     review_timeout_seconds: float = 900
+    shared_profile: Path | None = None
+    shared_client_id: str | None = field(default=None, repr=False)
 
     def __post_init__(self):
+        if self.shared_profile is not None or self.shared_client_id is not None:
+            if (self.shared_profile is None or not self.shared_profile.is_absolute()
+                    or self.shared_profile.resolve() == self.home.resolve()
+                    or not re.fullmatch(r"[a-f0-9]{48}", self.shared_client_id or "")
+                    or self.capture_scope != "global" or not self.checked_publication
+                    or self.data_policy.get("mode") == "trusted_enterprise"):
+                raise ValueError("Shared learning requires an independent local profile, global capture and checked publication")
         if any(not isinstance(value, bool) for value in (self.proactive,self.quality_checks,self.retention_enabled,
                                                        self.review_retry_enabled)):
             raise ValueError("Learning and retention switches must be booleans")
@@ -143,6 +153,7 @@ class Settings:
     def load(cls, path: str | Path | None = None) -> Settings:
         config = cls.configuration_path(path)
         data = json.loads(config.read_text())
+        shared = data.get("shared_learning") or {}
         return cls(
             home=Path(data["home"]).resolve(), project=Path(data["project"]).resolve(),
             source=Path(data["source"]).resolve(), python=Path(data["python"]).absolute(),
@@ -173,4 +184,6 @@ class Settings:
             review_retry_delay=data.get("learning", {}).get("retries", {}).get("initial_delay_seconds", 300),
             review_retry_max_delay=data.get("learning", {}).get("retries", {}).get("max_delay_seconds", 3600),
             review_timeout_seconds=data.get("learning", {}).get("review_timeout_seconds", 900),
+            shared_profile=Path(shared["profile"]).expanduser().resolve() if "profile" in shared else None,
+            shared_client_id=shared.get("client_id"),
         )

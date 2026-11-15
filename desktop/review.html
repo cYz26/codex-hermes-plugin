@@ -79,6 +79,7 @@ pre { font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
       <div id="counts" class="muted"></div>
       <div id="proposals"></div>
       <section id="history"></section>
+      <section id="shared-learning-status" hidden></section>
     </section>
     <section id="publication-section" class="review-section">
       <h2>通用技能待审</h2>
@@ -301,6 +302,22 @@ function candidates() {
 function render(value) {
   if (JSON.stringify(value) === JSON.stringify(current)) return;
   current = value;
+  const shared = byId("shared-learning-status");
+  shared.hidden = !value.shared_learning;
+  shared.replaceChildren();
+  if (value.shared_learning) {
+    const v = value.shared_learning;
+    shared.append(node("h2", "共享学习"), node("p",
+      "Codex 已提交 " + (v.contributions["Codex App"] || 0) + " 回合 · Hermes 已提交 " + (v.contributions.Hermes || 0)
+      + " 回合 · 待处理 " + ((v.writes.queued || 0) + (v.writes.applying || 0))
+      + " 项 · 需核对 " + ((v.writes.uncertain || 0) + (v.writes.conflict || 0)) + " 项"));
+    for (const delivered of v.deliveries) {
+      shared.append(node("p", delivered.executor + " 已加载 " + delivered.name + " · " + delivered.version, "muted"));
+    }
+    for (const item of v.published) {
+      shared.append(node("p", "已发布 " + item.name + " · " + item.version, "muted"));
+    }
+  }
   const counts = value.counts || {};
   byId("counts").textContent = "待审 " + (counts.pending || 0) + " 项 · 重复 " + (counts.duplicate || 0)
     + " 项 · 过期或已包含 " + ((counts.stale || 0) + (counts.already_applied || 0)) + " 项";

@@ -29,12 +29,12 @@ def change_fingerprint(changes):
     return digest([{key: change[key] for key in ("action", "before", "after")} for change in changes])
 
 
-def inspect_record(record, entries, patcher=None):
+def inspect_record(record, entries, patcher=None, *, allow_user=False):
     """Describe the pinned proposal, without applying it or replacing its payload."""
     payload = record.get("payload", {})
     operations = payload.get("operations") if payload.get("action") == "batch" else [payload]
     state, reason, changes = "pending", "等待人工确认修改前后的内容", []
-    if (payload.get("target") != "memory" or not isinstance(operations, list)
+    if (payload.get("target") not in ({"memory", "user"} if allow_user else {"memory"}) or not isinstance(operations, list)
             or not operations or len(operations) > 100):
         state, reason, operations = "unsupported", "此入口只审核项目记忆修改", []
     for operation in operations:
@@ -282,6 +282,28 @@ def execute(args):
     settings = Settings.load(args.settings)
     if args.approval_action == "self-test":
         return self_test(settings)
+    if settings.shared_profile is not None:
+        from .ipc import request
+        action = args.approval_action
+        params = {"cwd": args.cwd, "id": getattr(args, "id", None)}
+        if action in {"approve", "reject"}:
+            return request(settings, "shared_approval_decision", {
+                **params, "decision": action, "revision": args.revision}, timeout=15)
+        data = request(settings, "pending_reviews", params)
+        if action == "history":
+            return {"project": data["project"], "decisions": data["decisions"]}
+        if action == "prune":
+            candidates = [p for p in data["proposals"] if p["state"] in {"duplicate", "stale", "already_applied"}]
+            if not args.apply:
+                return {"project": data["project"], "candidates": candidates,
+                        "review_revision": data["review_revision"], "applied": False}
+            if args.revision != data["review_revision"]:
+                raise ValueError("Pending review queue changed after preview")
+            for p in candidates[:20]:
+                request(settings, "shared_approval_decision", {
+                    "cwd": args.cwd, "id": p["id"], "revision": p["revision"], "decision": "reject"})
+            return {"state": "queued", "requested": len(candidates[:20]), "removed": [], "skipped": []}
+        return data
     store = Store(settings.state)
     try:
         reviews = PendingReviews(settings, store)

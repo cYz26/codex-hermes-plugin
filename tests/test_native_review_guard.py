@@ -46,6 +46,7 @@ class NativeReviewGuardTests(unittest.TestCase):
         agent = types.ModuleType("agent")
         agent.background_review = review
         modules = {"agent": agent, "run_agent": types.SimpleNamespace(_review_should_defer=lambda *_: False),
+                   "agent.shared_learning_scope": types.SimpleNamespace(current=contextvars.ContextVar("scope", default=None)),
                    "agent.learning_results": types.SimpleNamespace(review_outcome=lambda st, error, **_: {"run_status": "failed" if error else "completed"}),
                    "agent.thread_scoped_output": types.SimpleNamespace(thread_scoped_silence=contextlib.nullcontext),
                    "tools": types.ModuleType("tools"), "tools.skills_tool": types.SimpleNamespace(bind_turn_secret_capture=bind)}

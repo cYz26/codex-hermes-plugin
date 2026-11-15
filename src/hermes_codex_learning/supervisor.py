@@ -13,7 +13,7 @@ from pathlib import Path
 from .config import Settings
 from .ipc import request
 from .store import Store, atomic_json, digest
-from .updates import ROOT, UpdateError, Updater, catalog, exclusive, read_json, verify_source
+from .updates import ROOT, UpdateError, Updater, catalog, exclusive, read_json, require_shared_source, verify_source
 
 # These are the stores used by Learning API v1, native review and Curator.
 # Never restore the hook outbox or any shared/root authentication store.
@@ -213,6 +213,8 @@ class Supervisor:
                 recipe = updater.recipes().get(previous.get("tag"))
                 if not recipe:
                     raise UpdateError("Rollback runtime no longer has a compatible recipe")
+                if updater.settings.shared_profile is not None:
+                    require_shared_source(Path(previous["source"]))
                 updater.runtime_info(Path(previous["source"]))
                 target = {key: previous[key] for key in ("source", "python")}
                 target["fallback_python"] = previous.get("fallback_python")

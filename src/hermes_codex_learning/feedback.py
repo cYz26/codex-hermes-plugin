@@ -62,6 +62,8 @@ def _outcome_source(tool, evidence_mode):
     if tool.get("status_source") == "host_transcript" or (
             isinstance(result, dict) and result.get("status_source") == "host_transcript"):
         return "host_transcript"
+    if tool.get("status_source") == "hermes_lifecycle":
+        return "hermes_lifecycle"
     return "workflow_projection" if evidence_mode == MODE else "hook_exit_code"
 
 
@@ -167,6 +169,9 @@ def record(store, token, project, stage, events):
         if not isinstance(event, dict) or set(event) != {"chat","turn","tool_call"} or any(
                 not isinstance(v, str) or not v or len(v) > 256 for v in event.values()):
             raise ValueError("Use host event references, not task text")
+    delivered_chat = (issued.get("source_event") or [None])[0]
+    if str(delivered_chat).startswith("hermes:") and any(event["chat"] != delivered_chat for event in events):
+        raise PermissionError("Native verification must use the session that received the skill")
     identity = digest([token, stage, events])
     value = {"id":identity, "name":issued["name"], "version":issued["version"], "project":project,
              "requested":stage, "events":events, "application":"self_reported",

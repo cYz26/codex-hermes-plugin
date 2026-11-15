@@ -146,7 +146,7 @@ def submit(store, settings, project, params):
         raise ValueError("Request instructions were transformed by admission; submit the admitted instructions explicitly")
     source = turns[-1][0]["source"]
     value.update(fingerprint=fingerprint, assessment=assessment,
-                 source={key: source[key] for key in ("host", "project", "chat")},
+                 source={key: source[key] for key in ("host", "project", "chat", "executor") if key in source},
                  state="collecting", results=[], created_at=time.time(), batch=0)
     if mode == "refine":
         freeze(store, value)

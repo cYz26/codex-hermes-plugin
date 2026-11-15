@@ -73,6 +73,15 @@ class Store:
               created REAL NOT NULL, PRIMARY KEY(request_id,chunk_id));
             CREATE TABLE IF NOT EXISTS review_retries(id TEXT PRIMARY KEY, handle TEXT NOT NULL,
               state TEXT NOT NULL, due REAL, payload TEXT NOT NULL, updated REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS shared_writes(
+              id TEXT PRIMARY KEY, project TEXT, payload TEXT NOT NULL, state TEXT NOT NULL,
+              result TEXT, created REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS shared_memory_removals(
+              scope TEXT NOT NULL, target TEXT NOT NULL, digest TEXT NOT NULL,
+              PRIMARY KEY(scope,target,digest));
+            CREATE TABLE IF NOT EXISTS shared_skill_removals(
+              name TEXT PRIMARY KEY, version TEXT NOT NULL, created REAL NOT NULL);
+            CREATE INDEX IF NOT EXISTS shared_writes_pending ON shared_writes(state,created);
             CREATE INDEX IF NOT EXISTS review_retries_due ON review_retries(state,due);
             CREATE INDEX IF NOT EXISTS events_pending ON events(delivered,created,id);
             CREATE INDEX IF NOT EXISTS events_chat_turn ON events(json_extract(payload,'$.session_id'),json_extract(payload,'$.turn_id'));

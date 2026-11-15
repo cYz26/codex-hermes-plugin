@@ -210,7 +210,17 @@ def main() -> int:
     login.add_argument("--settings")
     auth_status = commands.add_parser("auth-status")
     auth_status.add_argument("--settings")
+    from .shared_cli import add_parser as shared_parser
+    shared_parser(commands)
     args = parser.parse_args()
+    if args.command == "shared-learning":
+        from .shared_cli import execute
+        try:
+            print(json.dumps(execute(args), ensure_ascii=False, indent=2))
+            return 0
+        except (ValueError, RuntimeError, OSError) as exc:
+            print(json.dumps({"state": "failed", "error_type": type(exc).__name__, "error": str(exc)}, ensure_ascii=False))
+            return 2
     if args.command == "approvals":
         from .approvals import execute
         try:

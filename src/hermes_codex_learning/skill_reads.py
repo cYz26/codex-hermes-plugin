@@ -55,13 +55,17 @@ def check_requirements(requirements, *, scope):
             "missing_commands": missing_commands, "unchecked": unchecked}
 
 
-def load(settings, name, project, file_path=None, *, artifact_version=None, requirements_only=False):
+def load(settings, name, project, file_path=None, *, artifact_version=None, requirements_only=False,
+         issue_delivery=True, expose_path=True):
     from .enterprise import boundary
     approved=boundary(settings.data_policy)
     active_boundary=approved["id"] if approved else None
     store=ReadStore(settings.state)
     try:
         name=store.get("publication-aliases",{}).get(name,name)
+        if settings.shared_profile is not None and store.db.execute(
+                "SELECT 1 FROM shared_skill_removals WHERE name=?", (name,)).fetchone():
+            raise PermissionError("The skill was withdrawn")
         origins=store.get("knowledge-index-v1",{}).get("skills",{}).get(name,{}).get("projects",[])
         publication=store.get("publications-v1",{}).get(name)
         required=store.get("semantic-skill-attestations",{}).get(name,{}).get("boundary_id")
@@ -107,7 +111,10 @@ def load(settings, name, project, file_path=None, *, artifact_version=None, requ
         if "readiness_status" in value:
             value["native_readiness_scope"] = "cached_learning_environment"
             value["native_readiness_checked_at"] = record.get("cached_at")
-        value["delivery_token"]=issue(settings.state,value,project)
+        if not expose_path:
+            value.pop("resource_dir", None)
+        if issue_delivery:
+            value["delivery_token"]=issue(settings.state,value,project)
         return value
     finally:
         store.close()
