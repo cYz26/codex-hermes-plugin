@@ -16,12 +16,59 @@ from pathlib import Path
 
 
 APPROVAL_REQUIRED = "approval.required"
+GLOBAL_SENDER_IDS = ("com.cy.hermes-learning-global-receipts-v2", "com.cy.hermes-learning-global-receipts")
+GLOBAL_APP = "Hermes 全局共享.app"
 
 
 def approval_group(item):
     if item.get("kind") == APPROVAL_REQUIRED:
         return item.get("approval_subject", "native")
     return None
+
+
+def display_scope(item):
+    scope = item.get("notification_scope")
+    if scope in ("project", "global", "system"):
+        return scope
+    if (item.get("scope") == "global" or approval_group(item) == "publication"
+            or item.get("kind") in ("publication.applied", "publication.pending")):
+        return "global"
+    return "system" if item.get("scope") == "system" else "project"
+
+
+def batch_key(item):
+    return item["scope"], display_scope(item), approval_group(item)
+
+
+def receipt_entry(item, detail):
+    entry = {"summary": item["summary"], "text": detail["text"]}
+    if isinstance(detail.get("presentation"), dict):
+        entry["presentation"] = detail["presentation"]
+    return entry
+
+
+def batch_presentation(group, entries, project, display, approval, applied, pending):
+    def priority(index):
+        presentation = entries[index].get("presentation") or {}
+        tone = presentation.get("tone")
+        if tone is None and group[index].get("status") in {"partial", "failed"}:
+            tone = "warning"
+        return {"error": 3, "warning": 2, "waiting": 1}.get(tone, 0), index
+
+    selected = max(range(len(entries)), key=priority)
+    count = f"{len(entries)} 条回执"
+    presentation = {"subtitle": project, "tone": "info", "body": count, "sections": []}
+    if approval:
+        title = "⚠️ 全局待审批" if approval == "publication" else "⚠️ 项目待审批"
+        return {**presentation, "title": title, "body": f"{len(pending)} 项提案待处理", "tone": "warning"}
+    if priority(selected)[0]:
+        focus = entries[selected].get("presentation") or {"title": "有学习回执需要核对", "tone": "warning"}
+        body = " · ".join(filter(None, (focus.get("body"), count)))
+        return {**presentation, **focus, "subtitle": project, "body": body, "sections": []}
+    if applied:
+        title = f"技能已共享 {len(applied)} 项" if display == "global" else f"已生效 {len(applied)} 项"
+        return {**presentation, "title": title, "tone": "success"}
+    return {**presentation, "title": "全局共享回执" if display == "global" else "项目学习回执"}
 
 
 def identity(value):
@@ -43,6 +90,21 @@ def notifier_binary(configured: str) -> str:
     except FileNotFoundError:
         pass
     return configured
+
+
+def batch_notifier(config, scope):
+    configured = Path(config["notifier"])
+    if scope == "global" and configured.is_absolute() and len(configured.parents) >= 3:
+        project_app = configured.parents[2]
+        binary = project_app.with_name(GLOBAL_APP) / "Contents/MacOS" / configured.name
+        if project_app.suffix == ".app" and binary.is_file():
+            try:
+                info = plistlib.loads((binary.parents[2] / "Contents/Info.plist").read_bytes())
+                if info.get("CFBundleIdentifier") in GLOBAL_SENDER_IDS:
+                    return str(binary)
+            except (OSError, plistlib.InvalidFileException):
+                pass
+    return notifier_binary(config["notifier"])
 
 
 class Receiver:
@@ -89,27 +151,38 @@ class Receiver:
             with self.db:
                 self.db.execute("UPDATE batches SET state=? WHERE id=?", (target, identifier))
 
-    def write_batch(self, scope, group, text):
+    def write_batch(self, scope, group, details):
         ids = sorted(item["id"] for item in group)
         identifier = identity([scope, ids])
-        receipt = {"summary": group[0]["summary"], "scope": scope, "text": text}
+        display = display_scope(group[0])
+        entries = [receipt_entry(item, detail) for item, detail in zip(group, details, strict=True)]
+        receipt = {"summary": group[0]["summary"], "scope": scope,
+                   "text": "\n\n".join(entry["text"] for entry in entries), "notification_scope": display}
         approval = approval_group(group[0])
         if len(group) > 1:
-            pending = {proposal for item in group for proposal in item["pending_entities"]}
-            project = Path(scope).name or scope
+            pending = {proposal for item in group for proposal in item.get("pending_entities", [])}
+            applied = {entity for item in group for entity in item.get("applied_entities", [])}
+            project = Path(scope).name if scope.startswith("/") else ""
             if approval == "publication":
                 receipt["summary"] = f"[{project}] 通用技能待审 · {len(pending)} 项"
             elif approval:
                 receipt["summary"] = f"[{project}] {len(pending)} 项提案待审批"
+            elif display == "global":
+                receipt["summary"] = f"{len(applied)} 项通用技能已共享，{len(pending)} 项候选待检查"
             else:
-                applied = {entity for item in group for entity in item["applied_entities"]}
-                receipt["summary"] = (f"[{project}] {len(applied)} 项经验生效，"
+                receipt["summary"] = (f"[{project or scope}] {len(applied)} 项经验生效，"
                                       f"{len(pending)} 项待处理；{len(group)} 条回执")
+            receipt["presentation"] = batch_presentation(group, entries, project, display, approval, applied, pending)
+            receipt["entries"] = entries
+        elif "presentation" in entries[0]:
+            receipt["presentation"] = entries[0]["presentation"]
         if approval:
             receipt.update(kind=APPROVAL_REQUIRED,
                            project_approval=any(item.get("project_approval") is True for item in group))
             if approval == "publication":
                 receipt["approval_subject"] = approval
+        elif len(group) == 1 and group[0].get("kind"):
+            receipt["kind"] = group[0]["kind"]
         path = self.state / (identifier + ".json")
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps(receipt, ensure_ascii=False))
@@ -128,13 +201,13 @@ class Receiver:
         known = {item for row in self.db.execute("SELECT ids FROM batches") for item in json.loads(row[0])}
         for item in items:
             if item["id"] not in known:
-                groups.setdefault((item["scope"], approval_group(item)), []).append(item)
-        for (scope, _), group in groups.items():
+                groups.setdefault(batch_key(item), []).append(item)
+        for (scope, display, _), group in groups.items():
             receipts = [self.remote("detail", "--id", item["id"], "--scope", scope) for item in group]
-            identifier, ids, path = self.write_batch(scope, group, "\n\n".join(item["text"] for item in receipts))
+            identifier, ids, path = self.write_batch(scope, group, receipts)
             with self.db:
                 self.db.execute("INSERT INTO batches VALUES (?,?,?,?,?)", (identifier, scope, json.dumps(ids), str(path), "dispatching"))
-            result = subprocess.run([notifier_binary(self.config["notifier"]), "--post", str(path)], capture_output=True, timeout=15)
+            result = subprocess.run([batch_notifier(self.config, display), "--post", str(path)], capture_output=True, timeout=15)
             if result.returncode:
                 # A definite rejection is retryable; an interrupted dispatch is
                 # retained as unknown instead of blindly posting duplicates.
@@ -165,15 +238,15 @@ class Receiver:
         groups = {}
         for raw, in self.db.execute("SELECT payload FROM received WHERE batch IS NULL ORDER BY rowid LIMIT 100"):
             item = json.loads(raw)
-            groups.setdefault((item["scope"], approval_group(item)), []).append(item)
-        for (scope, _), group in groups.items():
-            identifier, ids, path = self.write_batch(scope, group, "\n\n".join(item["text"] for item in group))
+            groups.setdefault(batch_key(item), []).append(item)
+        for (scope, display, _), group in groups.items():
+            identifier, ids, path = self.write_batch(scope, group, group)
             with self.db:
                 self.db.execute("INSERT INTO batches VALUES (?,?,?,?,?)",
                                 (identifier, scope, json.dumps(ids), str(path), "dispatching"))
                 self.db.execute("INSERT OR REPLACE INTO batch_times VALUES (?,?)", (identifier,time.time()))
                 self.db.executemany("UPDATE received SET batch=? WHERE id=?", [(identifier, item) for item in ids])
-            result = subprocess.run([self.config["notifier"], "--post", str(path)], capture_output=True, timeout=15)
+            result = subprocess.run([batch_notifier(self.config, display), "--post", str(path)], capture_output=True, timeout=15)
             if result.returncode == 1:  # The bundled notifier reports an explicit rejection with exit 1.
                 with self.db:
                     self.db.execute("UPDATE received SET batch=NULL WHERE batch=?", (identifier,))

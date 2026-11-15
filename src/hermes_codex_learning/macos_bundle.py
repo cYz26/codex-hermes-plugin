@@ -16,13 +16,22 @@ from pathlib import Path
 APP_NAME = "Hermes 学习"
 APP_ID = "com.cy.hermes-learning-receipts"
 LEGACY_APP_ID = "com.cy.hermes-learning-notifier"
+GLOBAL_APP_NAME = "Hermes 全局共享"
+GLOBAL_APP_ID = "com.cy.hermes-learning-global-receipts-v2"
+LEGACY_GLOBAL_APP_ID = "com.cy.hermes-learning-global-receipts"
 APP_EXECUTABLE = "HermesLearningNotifier"
+APP_BUILD = "11"
 REVIEW_ASSETS = ("review.py", "review.html")
+APPROVAL_ICON = "hermes-approval-indicator.png"
 REGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
 
 def notifier_app() -> Path:
     return Path.home() / "Applications" / f"{APP_NAME}.app"
+
+
+def global_notifier_app(project_app: Path | None = None) -> Path:
+    return (project_app or notifier_app()).with_name(f"{GLOBAL_APP_NAME}.app")
 
 
 def legacy_notifier_app(app: Path) -> Path:
@@ -37,10 +46,13 @@ class NotificationAuthorizationError(RuntimeError):
     def __init__(self, app: Path, result: dict):
         self.app, self.result = app, result
         reason = str(result.get("error") or "macOS 未允许新发送方发送通知")
-        super().__init__(reason + "；请在「系统设置 → 通知 → Hermes 学习」允许通知后重新运行")
+        super().__init__(reason + f"。请在「系统设置 → 通知 → {app.stem}」允许通知后重新运行")
 
 
 def authorize_notification_app(app: Path, result_path: Path, timeout: float = 60) -> dict:
+    identifier = bundle_identifier(app)
+    if identifier not in (APP_ID, GLOBAL_APP_ID):
+        raise ValueError("不是受管 Hermes 通知 App")
     subprocess.run([REGISTER, "-f", str(app)], check=True, capture_output=True, text=True)
     subprocess.run(["/usr/bin/open", "-n", "-a", str(app), "--args", "--authorize-result", str(result_path)],
                    check=True, capture_output=True, text=True)
@@ -57,7 +69,7 @@ def authorize_notification_app(app: Path, result_path: Path, timeout: float = 60
         raise NotificationAuthorizationError(app, {"allowed": False, "error": "授权结果不是对象，未替换原 App"})
     reported_path = result.get("bundle_path")
     matches_app = isinstance(reported_path, str) and Path(reported_path).resolve() == app.resolve()
-    if (result.get("bundle_identifier") != APP_ID or not matches_app or result.get("allowed") is not True
+    if (result.get("bundle_identifier") != identifier or not matches_app or result.get("allowed") is not True
             or result.get("authorization_status") not in (2, 3) or result.get("error") not in (None, "")):
         raise NotificationAuthorizationError(app, result)
     return result
@@ -104,7 +116,7 @@ def normalize_bundle_permissions(app: Path) -> dict:
         if path.is_symlink():
             raise ValueError("通知 App 的目标路径不能是符号链接：" + str(path))
     info = plistlib.loads(info_path.read_bytes())
-    if info.get("CFBundleIdentifier") not in (APP_ID, LEGACY_APP_ID):
+    if info.get("CFBundleIdentifier") not in (APP_ID, LEGACY_APP_ID, GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID):
         raise ValueError("不是受管 Hermes 通知 App")
     executable = info.get("CFBundleExecutable")
     icon = info.get("CFBundleIconFile")
@@ -118,7 +130,7 @@ def normalize_bundle_permissions(app: Path) -> dict:
     files = [(info_path, 0o644), (app / "Contents/MacOS" / executable, 0o755),
              (icon_path, 0o644),
              (app / "Contents/_CodeSignature/CodeResources", 0o644)]
-    files.extend((app / "Contents/Resources" / name, 0o644) for name in REVIEW_ASSETS)
+    files.extend((app / "Contents/Resources" / name, 0o644) for name in (*REVIEW_ASSETS, APPROVAL_ICON))
     plan = []
     for path, mode in [(path, 0o755) for path in directories] + files:
         if path.is_symlink():
@@ -139,9 +151,13 @@ def normalize_bundle_permissions(app: Path) -> dict:
     return {str(path.relative_to(app)): {"before": oct(old), "after": oct(mode)} for path, old, mode in plan}
 
 
-def install_notification_app(root: Path, app: Path | None = None) -> dict:
+def install_notification_app(root: Path, app: Path | None = None, *, global_sender: bool = False) -> dict:
     """Authorize a new sender before replacing the active App; keep legacy receipts."""
-    app = notifier_app() if app is None else app
+    app = app or (global_notifier_app() if global_sender else notifier_app())
+    identifier = GLOBAL_APP_ID if global_sender else APP_ID
+    legacy_id = LEGACY_GLOBAL_APP_ID if global_sender else LEGACY_APP_ID
+    name = GLOBAL_APP_NAME if global_sender else APP_NAME
+    icon_stem = "hermes-global-notification" if global_sender else "hermes-project-notification"
     created_parent = not app.parent.exists()
     app.parent.mkdir(parents=True, exist_ok=True)
     if created_parent:
@@ -153,10 +169,10 @@ def install_notification_app(root: Path, app: Path | None = None) -> dict:
         staging = Path(temporary)
         staging.chmod(0o755)
         installed_id = bundle_identifier(app)
-        if app.exists() and installed_id not in (APP_ID, LEGACY_APP_ID):
+        if app.is_symlink() or (app.exists() and installed_id not in (identifier, legacy_id)):
             raise FileExistsError(str(app))
-        migrating = installed_id == LEGACY_APP_ID
-        if legacy.exists() and (migrating or bundle_identifier(legacy) != LEGACY_APP_ID):
+        migrating = installed_id == legacy_id
+        if legacy.exists() and (migrating or bundle_identifier(legacy) != legacy_id):
             raise FileExistsError(str(legacy))
         candidate = staging / app.name
         contents = candidate / "Contents"
@@ -164,15 +180,16 @@ def install_notification_app(root: Path, app: Path | None = None) -> dict:
         binary.parent.mkdir(parents=True)
         resources = contents / "Resources"
         resources.mkdir()
-        icon = build_macos_icon(root / "assets/hermes-learning-icon.png", staging / "HermesLearning.icns")
-        icon_name = "hermes-learning-icon-" + hashlib.sha256(icon.read_bytes()).hexdigest()[:12] + ".icns"
+        icon = build_macos_icon(root / "assets" / (icon_stem + ".png"), staging / "HermesLearning.icns")
+        icon_name = icon_stem + "-" + hashlib.sha256(icon.read_bytes()).hexdigest()[:12] + ".icns"
         shutil.copy2(icon, resources / icon_name)
-        for name in REVIEW_ASSETS:
-            shutil.copy2(root / "desktop" / name, resources / name)
+        shutil.copy2(root / "assets" / APPROVAL_ICON, resources / APPROVAL_ICON)
+        for resource in REVIEW_ASSETS:
+            shutil.copy2(root / "desktop" / resource, resources / resource)
         (contents / "Info.plist").write_bytes(plistlib.dumps({
-            "CFBundleIdentifier": APP_ID, "CFBundleExecutable": APP_EXECUTABLE,
-            "CFBundleName": APP_NAME, "CFBundleDisplayName": APP_NAME,
-            "CFBundlePackageType": "APPL", "CFBundleVersion": "8", "LSMinimumSystemVersion": "12.0",
+            "CFBundleIdentifier": identifier, "CFBundleExecutable": APP_EXECUTABLE,
+            "CFBundleName": name, "CFBundleDisplayName": name,
+            "CFBundlePackageType": "APPL", "CFBundleVersion": APP_BUILD, "LSMinimumSystemVersion": "12.0",
             "HermesReviewProtocolVersion": 1,
             "HermesReviewPython": sys.executable,
             "HermesReviewSourceSHA256": hashlib.sha256((root / "macos/HermesLearningNotifier.swift").read_bytes()).hexdigest(),
@@ -181,12 +198,12 @@ def install_notification_app(root: Path, app: Path | None = None) -> dict:
         target = f"{platform.machine()}-apple-macosx12.0"
         subprocess.run(["/usr/bin/xcrun", "swiftc", "-target", target, "-O",
                         str(root / "macos/HermesLearningNotifier.swift"), "-o", str(binary)], check=True)
-        subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", "--identifier", APP_ID, str(candidate)], check=True)
+        subprocess.run(["/usr/bin/codesign", "--force", "--sign", "-", "--identifier", identifier, str(candidate)], check=True)
         normalize_bundle_permissions(candidate)
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(candidate)], check=True)
         # Authorization must run through LaunchServices from a registered, stable path.
         if pending.exists():
-            if bundle_identifier(pending) != APP_ID:
+            if pending.is_symlink() or bundle_identifier(pending) != identifier:
                 raise FileExistsError(str(pending))
             subprocess.run([str(binary), "--prepare-upgrade", str(pending)], check=True, timeout=15)
             previous_pending = staging / "previous-pending.app"
@@ -202,7 +219,8 @@ def install_notification_app(root: Path, app: Path | None = None) -> dict:
             candidate.rename(pending)
         binary = pending / "Contents/MacOS" / APP_EXECUTABLE
         authorization = authorize_notification_app(pending, staging / "authorization-result.json")
-        subprocess.run([str(binary), "--prepare-upgrade", str(app)], check=True, timeout=15)
+        if app.exists():
+            subprocess.run([str(binary), "--prepare-upgrade", str(app)], check=True, timeout=15)
         backup = legacy if migrating else staging / "previous.app"
         try:
             if app.exists():
@@ -223,5 +241,10 @@ def install_notification_app(root: Path, app: Path | None = None) -> dict:
                 with contextlib.suppress(OSError, subprocess.SubprocessError):
                     subprocess.run([REGISTER, "-f", str(app)], check=True, capture_output=True)
             raise
-    return {"app": str(app), "transport": APP_ID, "migrated": migrating, "authorization": authorization,
+    return {"app": str(app), "transport": identifier, "migrated": migrating, "authorization": authorization,
             "legacy_app": str(legacy) if legacy.exists() else None, "visibility": "not_inferred"}
+
+
+def install_notification_apps(root: Path, app: Path | None = None) -> dict:
+    global_sender = install_notification_app(root, global_notifier_app(app), global_sender=True)
+    return {**install_notification_app(root, app), "global_sender": global_sender}

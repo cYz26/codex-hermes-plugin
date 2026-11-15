@@ -78,13 +78,13 @@ def main():
         return 0
     os.umask(0o077)
     sys.path.insert(0, str(root / "src"))
-    from hermes_codex_learning.macos_bundle import install_notification_app
+    from hermes_codex_learning.macos_bundle import install_notification_apps
     from hermes_codex_learning.store import atomic_json
     assets = None
     report = {"state": "installing", "native_ui_acceptance": False}
     try:
         assets = install_assets(args.config, root)
-        report["notification_app"] = install_notification_app(root, app)
+        report["notification_app"] = install_notification_apps(root, app)
         report.update(state="installed", assets=assets, receiver_restart=False)
     except Exception as error:
         if assets:

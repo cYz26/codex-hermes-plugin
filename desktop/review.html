@@ -15,8 +15,29 @@ button:not(:disabled):active { transform: translateY(1px); }
 button:focus-visible, summary:focus-visible { outline: 2px solid #5382dc; outline-offset: 3px; }
 .card { margin-top: 20px; padding: 20px; border-radius: 10px; background: light-dark(#fff, #23262d); border: 1px solid light-dark(#dce0e8, #3c424e); }
 .badge { font-size: 12px; padding: 3px 9px; border-radius: 14px; background: light-dark(#edf1f8, #354056); }
-.changes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 12px 0 18px; }
-.changes > div { min-width: 0; }
+.diff, .originals { margin: 10px 0 18px; }
+.diff { border: 1px solid light-dark(#dce0e8, #3c424e); border-radius: 7px; overflow: hidden; }
+.diff-header, .diff-row, .originals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.diff-header { font-weight: 600; background: light-dark(#eef2f7, #30343d); }
+.diff-header > span, .diff-mobile-label { padding: 6px 10px; }
+.diff-after { border-inline-start: 1px solid light-dark(#dce0e8, #3c424e); }
+.diff-line { display: grid; grid-template-columns: 3ch 1ch minmax(0, 1fr); gap: 8px; padding: 3px 9px;
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; background: light-dark(#f8f9fb, #1b1e24); }
+.diff-line.diff-empty { background: light-dark(#eef0f4, #262a32); }
+.diff-number { text-align: end; color: light-dark(#546070, #a1aaba); user-select: none; }
+.diff-sign { font-weight: 700; user-select: none; }
+.diff-code { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-eol { margin-inline-start: .7em; font: 11px system-ui; color: light-dark(#5a6372, #bcc6d5); }
+.diff-removed { background: light-dark(#fff0ee, #3f282b); color: light-dark(#781f24, #ffd6d7); }
+.diff-added { background: light-dark(#eaf7ee, #23382e); color: light-dark(#155333, #bceecf); }
+.diff mark { color: inherit; border-radius: 2px; }
+.diff-removed mark { background: light-dark(#fcbfba, #793b43); }
+.diff-added mark { background: light-dark(#abe2b9, #335f48); }
+.diff-context > summary { padding: 5px 10px; color: light-dark(#234b86, #a5c4ff); background: light-dark(#f1f5fc, #2b3446); }
+.diff-context > summary:focus-visible { outline-offset: -3px; }
+.diff-mobile-label { display: none; }
+.originals { gap: 14px; }
+.originals > div { min-width: 0; }
 .review-section { margin-top: 28px; } .review-section .card { margin-top: 12px; }
 .files { margin: 12px 0 18px; } .file { border-top: 1px solid light-dark(#dce0e8, #3c424e); padding: 9px 0; }
 summary { cursor: pointer; overflow-wrap: anywhere; } .version { overflow-wrap: anywhere; }
@@ -28,10 +49,21 @@ pre { font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space
 #message.success { color: light-dark(#21653d, #a0dcb2); }
 #message.warning { color: light-dark(#755013, #ffcf87); }
 #history, #publication-history { margin-top: 24px; } .error { color: light-dark(#a52626, #ff9696); }
-@media(max-width: 700px) { .changes { grid-template-columns: 1fr; } main { padding: 22px 14px; } }
+@media(max-width: 700px) {
+  main { padding: 22px 14px; }
+  .originals { grid-template-columns: 1fr; }
+  .diff-header, .diff-line.diff-empty { display: none; }
+  .diff-hunk { display: flex; flex-direction: column; }
+  .diff-row { display: contents; }
+  .diff-mobile-label { display: block; font-size: 12px; font-weight: 600; background: light-dark(#eef2f7, #30343d); }
+  .diff-mobile-label.diff-before { order: -1; }
+  .diff-mobile-label.diff-after { order: 1; }
+  .diff-line.diff-after { order: 2; }
+  .diff-after { border-inline-start: 0; }
+}
 </style>
 <main>
-  <h1>Hermes 项目审批</h1>
+  <h1 id="review-heading">Hermes 项目审批</h1>
   <p id="project" class="muted"></p>
   <div class="row">
     <button id="refresh">刷新列表</button>
@@ -61,6 +93,7 @@ const bootstrap = __BOOTSTRAP_JSON__;
 const labels = {pending: "待审", duplicate: "重复提案", stale: "原条目已变化", already_applied: "新内容已存在", unsupported: "需要原生人工审核"};
 const actions = {add: "新增记忆", patch: "修订记忆", replace: "替换记忆", remove: "删除记忆"};
 let current = null;
+let memoryCards = new Map();
 let publicationCards = new Map();
 let publicationListKey;
 let refreshTask = null;
@@ -70,12 +103,173 @@ let closed = false;
 let trackedPublication = null;
 const byId = id => document.getElementById(id);
 byId("project").textContent = "项目：" + bootstrap.project;
-if (bootstrap.publication_first) byId("review-sections").prepend(byId("publication-section"));
+if (bootstrap.publication_first) {
+  byId("review-heading").textContent = "Hermes 跨项目共享审批";
+  byId("review-sections").prepend(byId("publication-section"));
+}
 function node(tag, text, className) {
   const element = document.createElement(tag);
   if (text !== undefined) element.textContent = text;
   if (className) element.className = className;
   return element;
+}
+const diffLimits = {bytes: 128 * 1024, lines: 2000, comparisons: 250000};
+const graphemes = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, {granularity: "grapheme"}) : null;
+const lineEnding = /(?:\r\n|\r|\n)$/;
+
+function matchingPairs(left, right, budget, allowPartial = false) {
+  let start = 0;
+  let endLeft = left.length;
+  let endRight = right.length;
+  while (start < endLeft && start < endRight && left[start] === right[start]) start++;
+  while (endLeft > start && endRight > start && left[endLeft - 1] === right[endRight - 1]) {
+    endLeft--;
+    endRight--;
+  }
+  const cost = (endLeft - start) * (endRight - start);
+  if (cost > budget.remaining && !allowPartial) return null;
+  const pairs = Array.from({length: start}, (_, index) => [index, index]);
+  if (cost > 0 && cost <= budget.remaining) {
+    budget.remaining -= cost;
+    const width = endRight - start + 1;
+    const lengths = new Uint16Array((endLeft - start + 1) * width);
+    const offset = (i, j) => (i - start) * width + j - start;
+    for (let i = endLeft - 1; i >= start; i--) {
+      for (let j = endRight - 1; j >= start; j--) {
+        lengths[offset(i, j)] = left[i] === right[j] ? lengths[offset(i + 1, j + 1)] + 1
+          : Math.max(lengths[offset(i + 1, j)], lengths[offset(i, j + 1)]);
+      }
+    }
+    let i = start;
+    let j = start;
+    while (i < endLeft && j < endRight) {
+      if (left[i] === right[j]) pairs.push([i++, j++]);
+      else if (lengths[offset(i + 1, j)] >= lengths[offset(i, j + 1)]) i++;
+      else j++;
+    }
+  }
+  while (endLeft < left.length) pairs.push([endLeft++, endRight++]);
+  return pairs;
+}
+
+function alignLines(left, right) {
+  const pairs = matchingPairs(left, right, {remaining: diffLimits.comparisons});
+  if (!pairs) return null;
+  const rows = [];
+  let i = 0;
+  let j = 0;
+  for (const [nextLeft, nextRight] of [...pairs, [left.length, right.length]]) {
+    while (i < nextLeft || j < nextRight) rows.push([i < nextLeft ? i++ : null, j < nextRight ? j++ : null, true]);
+    if (i < left.length && j < right.length) rows.push([i++, j++, false]);
+  }
+  return rows;
+}
+
+function inlineParts(left, right, budget) {
+  if (!graphemes || left.length + right.length > 1024) return null;
+  const symbols = [left, right].map(text => {
+    const tokens = [];
+    for (const {segment} of graphemes.segment(text)) {
+      const last = tokens.length - 1;
+      if (/^\p{Decimal_Number}$/u.test(segment) && /^\p{Decimal_Number}+$/u.test(tokens[last] || "")) tokens[last] += segment;
+      else tokens.push(segment);
+    }
+    return tokens;
+  });
+  const pairs = matchingPairs(...symbols, budget, true);
+  return symbols.map((side, index) => {
+    const same = new Set(pairs.map(pair => pair[index]));
+    const parts = [];
+    for (const [position, symbol] of side.entries()) {
+      const changed = !same.has(position);
+      const last = parts[parts.length - 1];
+      if (last?.changed === changed) last.text += symbol;
+      else parts.push({text: symbol, changed});
+    }
+    return parts;
+  });
+}
+
+function diffLine(index, text, parts, changed, before, ending) {
+  const side = before ? "diff-before" : "diff-after";
+  if (index === null) return node("div", undefined, "diff-line diff-empty " + side);
+  const state = changed ? (before ? " diff-removed" : " diff-added") : "";
+  const line = node("div", undefined, "diff-line " + side + state);
+  const sign = changed ? (before ? "−" : "+") : "";
+  const code = node("span", parts ? undefined : text, "diff-code");
+  if (parts) for (const part of parts) code.append(node(part.changed ? "mark" : "span", part.text));
+  if (ending !== undefined) code.append(node("span", {"\r\n": "CRLF", "\n": "LF", "\r": "CR", "": "无行尾换行"}[ending], "diff-eol"));
+  line.append(node("span", String(index + 1), "diff-number"), node("span", sign, "diff-sign"), code);
+  return line;
+}
+
+function diffHunk(rows, lines, captions, budget) {
+  const hunk = node("div", undefined, "diff-hunk");
+  hunk.append(node("div", captions[0], "diff-mobile-label diff-before"), node("div", captions[1], "diff-mobile-label diff-after"));
+  for (const [i, j, changed] of rows) {
+    const oldLine = lines[0][i] ?? "";
+    const newLine = lines[1][j] ?? "";
+    const oldText = oldLine.replace(lineEnding, "");
+    const newText = newLine.replace(lineEnding, "");
+    const oldEnding = oldLine.slice(oldText.length);
+    const newEnding = newLine.slice(newText.length);
+    const paired = changed && i !== null && j !== null;
+    const parts = paired ? inlineParts(oldText, newText, budget) : null;
+    const showEnding = paired && oldEnding !== newEnding;
+    const row = node("div", undefined, "diff-row");
+    row.append(diffLine(i, oldText, parts?.[0], changed, true, showEnding ? oldEnding : undefined),
+      diffLine(j, newText, parts?.[1], changed, false, showEnding ? newEnding : undefined));
+    hunk.append(row);
+  }
+  return hunk;
+}
+
+function originalComparison(before, after, captions, absentLabel, emptyLabel) {
+  const panel = node("details", undefined, "diff");
+  const columns = node("div", undefined, "originals");
+  for (const [index, text] of [before, after].entries()) {
+    const column = node("div");
+    column.append(node("h3", captions[index]), node("pre", text === null ? absentLabel : text || emptyLabel));
+    columns.append(column);
+  }
+  panel.append(node("summary", "差异较长，展开完整原文对照"), columns);
+  return panel;
+}
+
+function comparison(before, after, labels, absentLabel, emptyLabel) {
+  const texts = [before ?? "", after ?? ""];
+  const inBudget = texts[0].length + texts[1].length <= diffLimits.bytes && new TextEncoder().encode(texts.join("")).length <= diffLimits.bytes;
+  const lines = inBudget ? texts.map(text => text.match(/[^\r\n]*(?:\r\n|\n|\r)|[^\r\n]+$/g) || []) : null;
+  const rows = lines && lines[0].length + lines[1].length <= diffLimits.lines ? alignLines(...lines) : null;
+  if (!rows) return originalComparison(before, after, labels, absentLabel, emptyLabel);
+  const panel = node("div", undefined, "diff");
+  const captions = [before, after].map((text, index) => labels[index] + (text === null ? " · " + absentLabel : text === "" ? " · " + emptyLabel : ""));
+  const heading = node("div", undefined, "diff-header");
+  heading.append(node("span", captions[0]), node("span", captions[1], "diff-after"));
+  panel.append(heading);
+  if (!rows.length) {
+    panel.append(node("p", captions.join(" / "), "diff-mobile-label"));
+    return panel;
+  }
+  const visible = new Array(rows.length).fill(false);
+  rows.forEach(([, , changed], index) => {
+    if (changed) visible.fill(true, Math.max(0, index - 3), Math.min(rows.length, index + 4));
+  });
+  const budget = {remaining: diffLimits.comparisons};
+  let start = 0;
+  while (start < rows.length) {
+    let end = start + 1;
+    while (end < rows.length && visible[end] === visible[start]) end++;
+    const hunk = diffHunk(rows.slice(start, end), lines, captions, budget);
+    if (visible[start]) panel.append(hunk);
+    else {
+      const context = node("details", undefined, "diff-context");
+      context.append(node("summary", "展开 " + (end - start) + " 行未变内容"), hunk);
+      panel.append(context);
+    }
+    start = end;
+  }
+  return panel;
 }
 function message(text, tone = "") {
   byId("message").textContent = text;
@@ -112,9 +306,14 @@ function render(value) {
     + " 项 · 过期或已包含 " + ((counts.stale || 0) + (counts.already_applied || 0)) + " 项";
   byId("cleanup").disabled = !candidates().length;
   const container = byId("proposals");
-  container.replaceChildren();
-  if (!value.proposals.length) container.append(node("p", "当前项目没有待审记忆修改。", "card"));
+  const cards = new Map();
   for (const proposal of value.proposals) {
+    const key = JSON.stringify(proposal);
+    const saved = memoryCards.get(proposal.id);
+    if (saved?.key === key) {
+      cards.set(proposal.id, saved);
+      continue;
+    }
     const card = node("article", undefined, "card");
     const heading = node("div", undefined, "row");
     heading.append(node("h2", "提案 " + proposal.id), node("span", labels[proposal.state] || proposal.state, "badge"));
@@ -122,13 +321,8 @@ function render(value) {
     if (proposal.duplicate_of) card.append(node("p", "相同修改的保留提案：" + proposal.duplicate_of, "muted"));
     for (const change of proposal.operations) {
       card.append(node("h3", actions[change.action] || change.action));
-      const columns = node("div", undefined, "changes");
-      for (const [label, text] of [["修改前", change.before], ["修改后", change.after]]) {
-        const column = node("div");
-        column.append(node("h3", label), node("pre", text || "（空内容）"));
-        columns.append(column);
-      }
-      card.append(columns);
+      card.append(comparison(change.action === "add" ? null : change.before, change.action === "remove" ? null : change.after,
+        ["当前记忆", "待审内容"], "无条目", "空内容"));
     }
     const controls = node("div", undefined, "row");
     const approve = node("button", "批准此修改", "primary");
@@ -139,8 +333,14 @@ function render(value) {
     reject.onclick = () => decide(reject, proposal, "reject");
     controls.append(approve, reject);
     card.append(controls);
-    container.append(card);
+    cards.set(proposal.id, {key, card});
   }
+  const visible = Array.from(cards.values(), item => item.card);
+  if (!visible.length) visible.push(node("p", "当前项目没有待审记忆修改。", "card"));
+  if (visible.length !== container.children.length || visible.some((card, i) => card !== container.children[i])) {
+    container.replaceChildren(...visible);
+  }
+  memoryCards = cards;
   const history = byId("history");
   history.replaceChildren();
   if (value.decisions && value.decisions.length) {
@@ -168,16 +368,10 @@ function resource(candidate, file) {
       if (value.previous_unavailable) {
         body.replaceChildren(node("p", "已共享版本的文件不可用。", "error"));
         if (value.after !== null) body.append(node("pre", value.after || "（空文件）"));
-      } else if (file.change === "changed") {
-        const columns = node("div", undefined, "changes");
-        for (const [label, text] of [["已共享版本", value.before], ["待审版本", value.after]]) {
-          const column = node("div");
-          column.append(node("h3", label), node("pre", text || "（空文件）"));
-          columns.append(column);
-        }
-        body.replaceChildren(columns);
+      } else if (file.change === "unchanged") {
+        body.replaceChildren(node("pre", value.after || "（空文件）"));
       } else {
-        body.replaceChildren(node("pre", (value.after ?? value.before) || "（空文件）"));
+        body.replaceChildren(comparison(value.before, value.after, ["已共享版本", "待审版本"], "无文件", "空文件"));
       }
     } catch (error) {
       loaded = false;
@@ -270,7 +464,6 @@ function refresh({poll = false, manual = false} = {}) {
           byId("counts").textContent = "";
           byId("history").replaceChildren();
         } else {
-          publicationCards.clear();
           publicationListKey = undefined;
           byId("publication-history").replaceChildren();
         }

@@ -60,11 +60,10 @@ class NoticeQueue:
                 self._publish(notice)
 
     def _publish(self, event: dict) -> None:
-        from .notify import APPROVAL_REQUIRED, persist_receipt
+        from .notify import APPROVAL_REQUIRED, notification_scope, persist_receipt
         if event["kind"] == "publication.applied":
-            event = {"id": event["id"], "kind": event["kind"], "name": event["name"],
-                     "message": "Hermes 已发布 1 项通用技能：" + event["name"],
-                     "receipt": "通用技能：" + event["name"] + "\n共享检查与发布：通过"}
+            event = {**event, "project": None, "message": "Hermes 已发布 1 项通用技能：" + event["name"],
+                     "receipt": event.get("receipt") or "通用技能：" + event["name"] + "\n共享检查与发布：通过"}
         scope = event.get("project") or ("global" if event["kind"] == "publication.applied" else "system")
         applied = event.get("applied_entities", entities(event.get("applied", [])))
         staged = [] if event.get("approval_notice") else entities(event.get("staged", []))
@@ -78,6 +77,7 @@ class NoticeQueue:
         status = "partial" if incomplete and applied else "failed" if incomplete else "applied" if applied else "pending"
         path = persist_receipt(self.state, {**event, "scope": scope})
         payload = {"id": event["id"], "scope": scope, "summary": event["message"], "status": status,
+                   "kind": event["kind"], "notification_scope": notification_scope(event),
                    "applied_entities": sorted(set(applied)), "pending_entities": staged,
                    "receipt": str(path), "stage": "queued", "visibility": "unknown"}
         if event.get("retry"):
@@ -113,8 +113,12 @@ class NoticeQueue:
                 payload = json.loads(row["payload"])
                 if payload.get("retired"):
                     continue
-                items.append({**{key: val for key, val in payload.items() if key != "receipt"},
-                              "seq": row["seq"], "text": self.detail(row["id"], row["scope"])["text"]})
+                detail = self.detail(row["id"], row["scope"])
+                item = {**{key: val for key, val in payload.items() if key != "receipt"},
+                        "seq": row["seq"], "text": detail["text"]}
+                if "presentation" in detail:
+                    item["presentation"] = detail["presentation"]
+                items.append(item)
         return {"protocol_version": 2, "items": items, "cursor": rows[-1]["seq"] if rows else after}
 
     def poll(self, consumer: str, scope: str | None = None, limit: int = 20) -> list[dict]:

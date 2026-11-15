@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hermes_codex_learning.macos_bundle import (APP_ID, LEGACY_APP_ID, APP_EXECUTABLE,
+from hermes_codex_learning.macos_bundle import (APP_ID, GLOBAL_APP_ID, LEGACY_APP_ID, APP_EXECUTABLE, APPROVAL_ICON,
     NotificationAuthorizationError, authorize_notification_app, bundle_identifier, install_notification_app,
     legacy_notifier_app, normalize_bundle_permissions, pending_notifier_app)
 
@@ -37,8 +37,9 @@ class MacOSBundleTests(unittest.TestCase):
             directory.mkdir(exist_ok=True)
             (directory / "CodeResources").write_bytes(b"synthetic resource seal")
         elif Path(argv[0]).name == "open" and "--authorize-result" in argv:
-            Path(argv[-1]).write_text(json.dumps({"bundle_identifier": APP_ID,
-                "bundle_path": argv[argv.index("-a") + 1], "allowed": True, "authorization_status": 2, "error": ""}))
+            app = Path(argv[argv.index("-a") + 1])
+            Path(argv[-1]).write_text(json.dumps({"bundle_identifier": bundle_identifier(app),
+                "bundle_path": str(app), "allowed": True, "authorization_status": 2, "error": ""}))
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     @staticmethod
@@ -188,6 +189,21 @@ class MacOSBundleTests(unittest.TestCase):
             self.assertEqual(registrations[0][-1], str(pending_notifier_app(app)))
             self.assertEqual(registrations[-1][-2:], [str(legacy), str(app)])
 
+    def test_global_icon_upgrade_registers_a_fresh_sender_and_preserves_old_receipts(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary) / "Hermes 全局共享.app"
+            original = self.installed(app, "com.cy.hermes-learning-global-receipts")
+            with patch("hermes_codex_learning.macos_bundle.subprocess.run", side_effect=self.native) as calls:
+                result = install_notification_app(root, app, global_sender=True)
+            self.assertTrue(result["migrated"])
+            self.assertEqual(bundle_identifier(app), "com.cy.hermes-learning-global-receipts-v2")
+            legacy = legacy_notifier_app(app)
+            self.assertEqual((legacy / "Contents/Info.plist").read_bytes(), original)
+            self.assertIn([str(legacy), str(app)], [
+                call.args[0][-2:] for call in calls.call_args_list if Path(call.args[0][0]).name == "lsregister"
+            ])
+
     def test_ssh_installer_exports_readable_app_and_private_receiver_state(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
@@ -212,6 +228,12 @@ class MacOSBundleTests(unittest.TestCase):
             self.assertEqual((app / "Contents/Info.plist").stat().st_mode & 0o777, 0o644)
             self.assertEqual((app / "Contents/MacOS/HermesLearningNotifier").stat().st_mode & 0o777, 0o755)
             self.assertEqual((app / "Contents/_CodeSignature/CodeResources").stat().st_mode & 0o777, 0o644)
+            shared = home / "Applications/Hermes 全局共享.app"
+            project_info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+            global_info = plistlib.loads((shared / "Contents/Info.plist").read_bytes())
+            self.assertEqual(global_info["CFBundleIdentifier"], GLOBAL_APP_ID)
+            self.assertNotEqual(project_info["CFBundleIconFile"], global_info["CFBundleIconFile"])
+            self.assertTrue((shared / "Contents/Resources" / APPROVAL_ICON).is_file())
             state = home / "Library/Application Support/HermesLearningSSH"
             self.assertEqual(state.stat().st_mode & 0o777, 0o700)
             self.assertEqual((state / "config.json").stat().st_mode & 0o777, 0o600)
@@ -253,6 +275,9 @@ class MacOSNotificationRefreshTests(unittest.TestCase):
             assets.mkdir()
             for name in ("review.py", "review.html"):
                 (assets / name).write_text("Synthetic review resource\n")
+            icon_assets = assets.parent / "assets"
+            icon_assets.mkdir()
+            (icon_assets / APPROVAL_ICON).write_bytes(b"synthetic indicator")
             allowed = False
             decisions, settings, posts = [], [], []
 

@@ -128,7 +128,7 @@ class Bridge:
             "last_event":row["id"],"chat":payload.get("session_id"),"turn":payload.get("turn_id"),"captured_at":row["created"]})
         return True
 
-    def observe_turn(self, data: dict, event_id: str) -> None:
+    def observe_turn(self, data: dict, event_id: str, *, retrying_input=False) -> None:
         key = digest([data["source"]["chat"],data["source"]["turn"]])
         if data.get("_skip_observation") == event_id:
             return
@@ -213,9 +213,11 @@ class Bridge:
         if isinstance(receipt,dict):
             self.store.set("observation-receipt:"+key,{"handle":handle,"revision":receipt.get("revision"),"event":event_id,
                 "at":time.time(), **({"background":True} if background else {})})
-        if self.settings.proactive:
+        recovered = retrying_input and data["status"] == "incomplete" and enriched["status"] == "completed" and all(
+            tool["status"] in {"completed", "failed", "interrupted"} for tool in enriched["tools"].values())
+        if self.settings.proactive or recovered:
             from .scheduling import enqueue
-            enqueue(self.store, enriched, handle)
+            enqueue(self.store, enriched, handle, recovered_terminal=recovered)
         revision = digest(enriched)
         key = digest([enriched["source"]["chat"], enriched["source"]["turn"]])
         with self.store.db:
@@ -313,7 +315,7 @@ class Bridge:
                     updated = self.store.db.execute("SELECT payload FROM turns WHERE id=?", (row["id"],)).fetchone()
                     data = json.loads(updated["payload"])
             elif event:
-                self.observe_turn(data, event["id"])
+                self.observe_turn(data, event["id"], retrying_input=True)
             current = self.store.db.execute("SELECT observed_revision,payload FROM turns WHERE id=?",(row["id"],)).fetchone()
             current_tools = json.loads(current["payload"])["tools"].values()
             waiting_exit = any((tool.get("background_session") or {}).get("pending_exit_event") for tool in current_tools)
@@ -551,9 +553,8 @@ class Bridge:
         return versions
 
     def idle_reviews(self) -> None:
-        if self.settings.proactive:
-            from .scheduling import flush
-            flush(self.store, self.api)
+        from .scheduling import flush
+        flush(self.store, self.api, recovery_only=not self.settings.proactive)
         now = time.time()
         last = self.store.get("last_idle_request", 0)
         if now - last < self.settings.idle_interval:
@@ -863,7 +864,7 @@ class Bridge:
                                            "此版本需要确认可跨项目共享。请打开「查看当前待审」核对完整文件。")})
                 else:
                     self.emit({"id": "pending-publication:" + digest([name, decision]), "kind": "publication.pending",
-                               "project": sources[0], "name": name,
+                               "project": sources[0], "name": name, "publication_reason": decision.get("reason"),
                                "receipt": f"通用候选：{name}\n状态：尚未发布\n原因：{decision.get('reason', 'unknown')}"})
             self.store.set("publication-context-version", publication_key)
         for name, item in publications.items():

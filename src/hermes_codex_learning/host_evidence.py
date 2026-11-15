@@ -1,4 +1,4 @@
-"""Bounded Codex 0.167 hook-transcript supplement, never a history scanner."""
+"""Recover bounded evidence from the transcript referenced by a Codex hook."""
 from __future__ import annotations
 
 import json
@@ -42,10 +42,12 @@ def _header(stream, chat, project):
     if len(line.encode()) > HEADER_LIMIT or not line.endswith("\n"):
         raise ValueError("Host transcript metadata exceeds the bounded header")
     first = json.loads(line)
-    meta = first.get("payload", {})
-    if (first.get("type") != "session_meta" or meta.get("id") != chat
-            or not str(meta.get("cli_version", "")).startswith("0.167.")
-            or not Path(meta.get("cwd") or "/").resolve().is_relative_to(Path(project).resolve())):
+    meta = first.get("payload") if isinstance(first, dict) and first.get("type") == "session_meta" else None
+    # Codex releases can change version without changing the evidence format.
+    # Validate the host identity here and match the actual record shapes below.
+    cwd = meta.get("cwd") if isinstance(meta, dict) else None
+    if (not isinstance(cwd, str) or not Path(cwd).is_absolute() or meta.get("id") != chat
+            or not Path(cwd).resolve().is_relative_to(Path(project).resolve())):
         raise ValueError("Host transcript identity or schema is not verified")
     return meta
 
@@ -182,8 +184,12 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                     break  # The host may still be appending the final record.
                 raise
             offset = stream.tell()
-            payload = row.get("payload", {})
-            msg_meta = payload.get("internal_chat_message_metadata_passthrough") or {}
+            payload = row.get("payload") if isinstance(row, dict) else None
+            if not isinstance(payload, dict):
+                continue
+            msg_meta = payload.get("internal_chat_message_metadata_passthrough")
+            if not isinstance(msg_meta, dict):
+                msg_meta = {}
             matches = payload.get("turn_id") == turn or msg_meta.get("turn_id") == turn
             ordinal, stamp = row.get("ordinal"), row.get("timestamp")
             position = {"ordinal":ordinal, "timestamp":stamp} if type(ordinal) is int else {"timestamp":stamp}
@@ -197,12 +203,15 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                 trace.setdefault("request" if role == "user" else "result", position)
                 if role == "assistant":
                     trace["result"] = position
-                if payload.get("id"):
-                    trace.setdefault("messages", {})[payload["id"]] = {**position, "role":role}
+                message_id = payload.get("id")
+                if isinstance(message_id, str) and message_id:
+                    trace.setdefault("messages", {})[message_id] = {**position, "role":role}
             if (row.get("type") != "event_msg" or payload.get("type") != "item_completed"
                     or payload.get("turn_id") != turn):
                 continue
-            item = payload.get("item", {})
+            item = payload.get("item")
+            if not isinstance(item, dict) or not isinstance(item.get("id"), str) or not item["id"]:
+                continue
             if item.get("type") in {"CommandExecution","McpToolCall","FileChange"} and item.get("id"):
                 commands[item["id"]] = {key: item.get(key) for key in ("status", "exit_code", "process_id")}
                 commands[item["id"]]["kind"] = item["type"]
@@ -368,8 +377,8 @@ def supplement(store, data: dict, *, settings=None, include_task=True, event_id=
             if background:
                 tool["background_session"] = {k: v for k, v in background.items() if k != "pending_exit_event"}
                 tool["background_session"]["exit_event"] = background["pending_exit_event"]
-    if resolved and "coverage" in result:
-        result["coverage"] = sorted(set(result["coverage"]) - resolved)
+    if "coverage" in result:
+        result["coverage"] = sorted(set(result["coverage"]) - resolved - {"host_transcript_input_unavailable"})
     if include_task:
         _join_background(store, result, facts, event["transcript_path"])
     if result.get("_ended_by") in {"Stop", "Interrupt"}:

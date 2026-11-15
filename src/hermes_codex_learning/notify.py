@@ -6,14 +6,22 @@ import time
 from pathlib import Path
 
 from .approvals import pending_proposal_id
+from .notice_presentation import notice_presentation
 from .review_input import BUDGET_EXHAUSTED
 from .review_receipt import receipt_text
 from .review_summary import summary_text
 from .store import atomic_json, digest
-from .macos_bundle import (APP_NAME, APP_ID, APP_EXECUTABLE, LEGACY_APP_ID,
-                           bundle_identifier, legacy_notifier_app, notifier_app)
+from .macos_bundle import (APP_ID, APP_EXECUTABLE, GLOBAL_APP_ID, LEGACY_APP_ID, LEGACY_GLOBAL_APP_ID, bundle_identifier,
+                           global_notifier_app, legacy_notifier_app, notifier_app)
 
 APPROVAL_REQUIRED = "approval.required"
+
+
+def notification_scope(event: dict) -> str:
+    if (event["kind"] in {"publication.applied", "publication.pending"}
+            or (event["kind"] == APPROVAL_REQUIRED and event.get("approval_subject") == "publication")):
+        return "global"
+    return "project" if event.get("project") else "system"
 
 
 def approval_notice(settings, event: dict) -> dict | None:
@@ -123,9 +131,12 @@ def persist_receipt(state: Path, event: dict) -> Path:
     if not path.exists():
         detail = event.get("receipt") or receipt_text(event, {}, event.get("created", time.time()))
         receipt = {"id": event["id"], "scope": event.get("scope") or event.get("project") or "global",
-                   "summary": event["message"], "text": detail}
+                   "summary": event["message"], "text": detail, "kind": event["kind"],
+                   "notification_scope": notification_scope(event)}
+        if presentation := notice_presentation(event):
+            receipt["presentation"] = presentation
         if event.get("kind") == APPROVAL_REQUIRED:
-            receipt.update(kind=APPROVAL_REQUIRED, project_approval=event["project_approval"])
+            receipt["project_approval"] = event["project_approval"]
             if event.get("approval_subject"):
                 receipt["approval_subject"] = event["approval_subject"]
         atomic_json(path, receipt)
@@ -137,7 +148,13 @@ def macos_notification(state: Path, event: dict) -> dict:
     record = {"dispatched": False, "visibility": "unknown", "transport": APP_ID}
     try:
         record["receipt_path"] = str(path)
-        app = notifier_app()
+        project_app = notifier_app()
+        app = project_app
+        if notification_scope(event) == "global":
+            sender = global_notifier_app(project_app)
+            if (bundle_identifier(sender) in (GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID)
+                    and (sender / "Contents/MacOS" / APP_EXECUTABLE).is_file()):
+                app = sender
         if not app.exists():
             legacy = legacy_notifier_app(app)
             if bundle_identifier(legacy) == LEGACY_APP_ID:

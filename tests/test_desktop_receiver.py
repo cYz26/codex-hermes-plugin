@@ -13,6 +13,20 @@ spec.loader.exec_module(receiver)
 
 
 class DesktopReceiverTests(unittest.TestCase):
+    def test_existing_receiver_config_uses_the_managed_global_sender_when_installed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "Hermes 学习.app/Contents/MacOS/HermesLearningNotifier"
+            shared = Path(directory) / "Hermes 全局共享.app/Contents/MacOS/HermesLearningNotifier"
+            config = {"notifier": str(project)}
+            self.assertEqual(receiver.batch_notifier(config, "global"), str(project))
+            shared.parent.mkdir(parents=True)
+            shared.touch()
+            for identifier in ("com.cy.hermes-learning-global-receipts", "com.cy.hermes-learning-global-receipts-v2"):
+                with self.subTest(identifier=identifier):
+                    (shared.parents[2] / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": identifier}))
+                    self.assertEqual(receiver.batch_notifier(config, "global"), str(shared))
+                    self.assertEqual(receiver.batch_notifier(config, "project"), str(project))
+
     def test_delivery_resolves_legacy_app_while_canonical_app_is_unavailable(self):
         with tempfile.TemporaryDirectory() as temporary:
             app = Path(temporary) / "Hermes 学习.app"
@@ -68,7 +82,9 @@ class DesktopReceiverTests(unittest.TestCase):
                 publication = {**approval, "id": "publication", "approval_subject": "publication",
                                "summary": "通用技能待审 · portable", "text": "publication detail",
                                "pending_entities": ["publication:portable"]}
-                items = {item["id"]: item for item in (review, approval, skill_approval, publication)}
+                checking = {**review, "id": "checking", "kind": "publication.pending", "notification_scope": "global",
+                            "text": "checking detail", "applied_entities": [], "pending_entities": ["skill:later"]}
+                items = {item["id"]: item for item in (review, approval, skill_approval, publication, checking)}
                 posted = []
 
                 def remote(action, *args, body=None):
@@ -94,11 +110,52 @@ class DesktopReceiverTests(unittest.TestCase):
                     client.poll()
                     client.poll()
 
-                self.assertEqual(len(posted), 3)
-                self.assertEqual(posted[0], {"summary": review["summary"], "scope": "/project", "text": review["text"]})
-                self.assertEqual(posted[1], {"summary": "[project] 2 项提案待审批", "scope": "/project",
+                self.assertEqual(len(posted), 4)
+                self.assertEqual(posted[0], {"summary": review["summary"], "scope": "/project", "text": review["text"],
+                                             "notification_scope": "project"})
+                fields = {key: value for key, value in posted[1].items() if key not in {"presentation", "entries"}}
+                self.assertEqual(fields, {"summary": "[project] 2 项提案待审批", "scope": "/project",
                                              "text": "memory detail\n\nskill detail", "kind": "approval.required",
-                                             "project_approval": True})
+                                             "project_approval": True, "notification_scope": "project"})
+                self.assertEqual(posted[1]["presentation"]["title"], "⚠️ 项目待审批")
+                self.assertEqual([item["text"] for item in posted[1]["entries"]], ["memory detail", "skill detail"])
                 self.assertEqual(posted[2], {"summary": publication["summary"], "scope": "/project",
                                              "text": publication["text"], "kind": "approval.required",
-                                             "project_approval": True, "approval_subject": "publication"})
+                                             "project_approval": True, "approval_subject": "publication",
+                                             "notification_scope": "global"})
+                self.assertEqual(posted[3], {"summary": checking["summary"], "scope": "/project",
+                                             "text": "checking detail", "notification_scope": "global",
+                                             "kind": "publication.pending"})
+
+    def test_both_protocols_prioritize_an_anomaly_and_keep_each_readable_entry(self):
+        for protocol in (1, 2):
+            with self.subTest(protocol=protocol), tempfile.TemporaryDirectory() as directory:
+                client = receiver.Receiver({"state": directory, "host": "devbox", "bridge": "/bridge",
+                                            "settings": "/settings", "notifier": "/notifier"})
+                self.addCleanup(client.db.close)
+                notices = {
+                    "success": {"title": "已生效 1 项", "subtitle": "project", "body": "校验构建版本", "tone": "success", "sections": []},
+                    "failed": {"title": "已达到重试上限", "subtitle": "project", "body": "连接暂时中断", "tone": "error", "sections": []},
+                }
+                items = [{"id": name, "scope": "/project", "summary": name, "kind": "review.finished", "status": name,
+                          "text": name + " detail", "presentation": display} for name, display in notices.items()]
+
+                def remote(action, *args, body=None):
+                    if action == "capabilities":
+                        return {"protocol_version": protocol}
+                    if action == "poll":
+                        return [{key: value for key, value in item.items() if key not in {"text", "presentation"}} for item in items]
+                    if action == "detail":
+                        return next(item for item in items if item["id"] == args[1])
+                    self.assertEqual(action, "sync")
+                    return {"items": items, "cursor": 2}
+
+                with patch.object(client, "remote", side_effect=remote), \
+                     patch.object(receiver.subprocess, "run", return_value=SimpleNamespace(returncode=0)):
+                    client.poll()
+                path, = client.db.execute("SELECT path FROM batches").fetchone()
+                batch = json.loads(Path(path).read_text())
+                self.assertEqual(batch["presentation"]["title"], "已达到重试上限")
+                self.assertEqual(batch["presentation"]["body"], "连接暂时中断 · 2 条回执")
+                self.assertEqual([entry["presentation"] for entry in batch["entries"]], list(notices.values()))
+                self.assertEqual(batch["text"], "success detail\n\nfailed detail")

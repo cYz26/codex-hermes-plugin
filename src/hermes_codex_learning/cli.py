@@ -119,10 +119,11 @@ def launchd(args) -> int:
 
 
 def install_notifier() -> int:
-    from .macos_bundle import install_notification_app
+    from .macos_bundle import install_notification_apps
 
-    result = install_notification_app(Path(__file__).resolve().parents[2])
+    result = install_notification_apps(Path(__file__).resolve().parents[2])
     print(result["app"])
+    print(result["global_sender"]["app"])
     return 0
 
 

@@ -290,6 +290,11 @@ def main():
         with ReviewServer(reviews) as server:
             if not webbrowser.open(server.base_url + "/?" + urlencode({"session": server.session_token})):
                 raise RuntimeError("系统未能打开浏览器")
+            if args.receipt:
+                try:
+                    args.receipt.with_name(args.receipt.name + ".read").write_text("opened")
+                except OSError:
+                    pass
             threading.Thread(target=server.expire, daemon=True).start()
             print("审批页已在浏览器打开。关闭会话或长时间不操作后，入口会自动退出。", flush=True)
             server.serve_forever()

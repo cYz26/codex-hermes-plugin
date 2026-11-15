@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Codex and Hermes global learning</title>
+  <defs>
+    <linearGradient id="tile" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop stop-color="#7841bd"/>
+      <stop offset=".56" stop-color="#542982"/>
+      <stop offset="1" stop-color="#331757"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="488" height="488" rx="114" fill="url(#tile)" stroke="#b994eb" stroke-opacity=".54" stroke-width="3"/>
+  <g fill="none" stroke="#d7bcfc" stroke-width="19" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M110 205C126 151 172 114 231 105M208 86L231 105 214 129"/>
+    <path d="M402 307C386 361 340 398 281 407M304 426L281 407 298 383"/>
+  </g>
+  <use href="../docs/design/hermes-learning-icon/hermes-learning-icon.svg#codex"/>
+  <use href="../docs/design/hermes-learning-icon/hermes-learning-icon.svg#hermes"/>
+  <g transform="translate(418 418)">
+    <circle r="42" fill="#dfc6ff"/>
+    <g fill="none" stroke="#512783" stroke-width="6">
+      <circle r="26"/>
+      <ellipse rx="12" ry="26"/>
+      <path d="M-25 0h50"/>
+    </g>
+  </g>
+</svg>

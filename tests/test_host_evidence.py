@@ -111,9 +111,96 @@ class HostEvidenceTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def write(self, rows):
-        header = {"type": "session_meta", "payload": {"id": "chat", "cwd": str(self.project), "cli_version": "0.167.0"}}
+    def write(self, rows, *, cli_version="0.167.0"):
+        header = {"type": "session_meta", "payload": {"id": "chat", "cwd": str(self.project), "cli_version": cli_version}}
         self.path.write_text("\n".join(json.dumps(row) for row in [header, *rows]) + "\n")
+
+    def test_host_version_change_retains_structurally_compatible_exit_receipts(self):
+        rows = [{"type": "event_msg", "payload": {"type": "item_completed", "turn_id": turn,
+                 "item": {"type": "CommandExecution", "id": name, "status": status, "exit_code": exit_code}}}
+                for turn, name, status, exit_code in [
+                    ("turn", "ok", "completed", 0), ("turn", "search", "failed", 1),
+                    ("other", "unrelated", "failed", 2),
+                ]]
+        for version in ("0.169.0-alpha.11.1", "0.203.0"):
+            with self.subTest(version=version):
+                self.write(rows, cli_version=version)
+                facts = read_turn(self.path, "chat", "turn", str(self.project),
+                                  sessions_root=self.sessions, include_task=False)
+                self.assertEqual({name: result["exit_code"] for name, result in facts["commands"].items()},
+                                 {"ok": 0, "search": 1})
+
+    def test_unknown_record_shapes_leave_compatible_receipts_readable(self):
+        def receipt(item):
+            return {"type": "event_msg", "payload": {"type": "item_completed", "turn_id": "turn", "item": item}}
+
+        self.write([
+            {"type": "new_event", "payload": ["new", "format"]},
+            receipt(["different item encoding"]),
+            receipt({"type": "CommandExecution", "id": ["different identifier"], "status": "completed", "exit_code": 0}),
+            receipt({"type": "CommandExecution", "id": "actual-call", "status": "failed", "exit_code": 1}),
+        ], cli_version="0.203.0")
+        facts = read_turn(self.path, "chat", "turn", str(self.project), sessions_root=self.sessions,
+                          include_task=False)
+        self.assertEqual({name: result["exit_code"] for name, result in facts["commands"].items()},
+                         {"actual-call": 1})
+
+    def test_late_host_evidence_reviews_finished_turn_while_next_turn_runs(self):
+        from hermes_codex_learning.capture import hook
+        from hermes_codex_learning.config import Settings
+        from hermes_codex_learning.daemon import Bridge
+
+        settings = Settings(self.root / "home", self.project, self.root, Path("/usr/bin/python3"),
+                            idle_seconds=0, idle_interval=0)
+        observed, flushes = [], []
+
+        def observe(handle, body, **kwargs):
+            observed.append(body)
+            return {"revision": len(observed)}
+
+        api = SimpleNamespace(open=lambda source: {"handle": source["chat"]}, observe=observe,
+                              maintenance=lambda **kwargs: flushes.append(kwargs) or {"intent": "fixture"})
+        bridge = Bridge(settings, api)
+        scope = {"session_id": "chat", "cwd": str(self.project), "transcript_path": str(self.path)}
+        self.path.write_text("{}\n")  # The host has not yet published a valid header.
+        try:
+            with patch.dict(os.environ, {"CODEX_HOME": str(self.root)}):
+                for kind, fields in [
+                    ("UserPromptSubmit", {"prompt": "Inspect the local build", "turn_id": "old"}),
+                    ("PostToolUse", {"tool_name": "Bash", "tool_use_id": "verify", "tool_response": "plain output",
+                                     "turn_id": "old"}),
+                    ("PostToolUse", {"tool_name": "Bash", "tool_use_id": "check", "tool_response": "plain output",
+                                     "turn_id": "old"}),
+                    ("Stop", {"last_assistant_message": "The inspection is complete", "turn_id": "old"}),
+                    ("UserPromptSubmit", {"prompt": "Research the next part", "turn_id": "new"}),
+                ]:
+                    hook({**scope, "hook_event_name": kind, **fields}, settings)
+                bridge.ingest()
+                self.assertFalse(observed)
+                def receipt(name, status, code):
+                    return {"type": "event_msg", "payload": {"type": "item_completed", "turn_id": "old",
+                            "item": {"type": "CommandExecution", "id": name, "status": status, "exit_code": code}}}
+
+                failed = receipt("verify", "failed", 1)
+                self.write([failed], cli_version="0.169.0-alpha.11.1")
+                bridge.retry_completed_inputs()
+                bridge.idle_reviews()
+                self.assertFalse(observed)
+                self.assertFalse(flushes)
+                with self.path.open("a") as transcript:
+                    transcript.write(json.dumps(receipt("check", "completed", 0)) + "\n")
+                with patch("hermes_codex_learning.daemon.time.time", return_value=bridge.store.get("last_input_retry") + 31):
+                    bridge.retry_completed_inputs()
+                bridge.idle_reviews()
+                bridge.idle_reviews()
+            self.assertEqual([r["source"]["turn"] for r in observed], ["old"])
+            self.assertEqual({t["call_id"]: (t["status"], t["result"]["exit_code"]) for t in observed[0]["tools"]},
+                             {"verify": ("failed", 1), "check": ("completed", 0)})
+            self.assertNotIn("host_transcript_input_unavailable", observed[0]["coverage"])
+            self.assertEqual(flushes, [{"handle": "chat", "idle_flush": True}])
+            self.assertTrue(bridge.has_active_turns())
+        finally:
+            bridge.store.close()
 
     def test_reads_only_bound_turn_task_and_actual_command_exit(self):
         item = {"type": "FunctionCallOutput", "id": "input-item", "namespace": "codex_app", "name": "send_message_to_thread",

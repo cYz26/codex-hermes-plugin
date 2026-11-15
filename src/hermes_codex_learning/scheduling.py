@@ -27,10 +27,12 @@ def record_dialogue_signals(payload: dict, store) -> None:
                              (chat, turn, "user_correction", time.time()))
 
 
-def enqueue(store, data: dict, handle: str):
+def enqueue(store, data: dict, handle: str, *, recovered_terminal=False):
     source = data["source"]
     signals = {row[0] for row in store.db.execute("SELECT kind FROM learning_signals WHERE chat=? AND turn=?",
                                                  (source["chat"], source["turn"]))}
+    if recovered_terminal:
+        signals.add("terminal_evidence_recovered")
     failed, edited = set(), False
     for tool in data["tools"].values():
         if tool.get("action") == "edit" and failed:
@@ -56,8 +58,11 @@ def enqueue(store, data: dict, handle: str):
                          (identity, handle, revision, ",".join(sorted(signals)), time.time()))
 
 
-def flush(store, api):
-    rows = store.db.execute("SELECT * FROM review_priority WHERE requested IS NULL ORDER BY created LIMIT 20").fetchall()
+def flush(store, api, *, recovery_only=False):
+    pending = "requested IS NULL"
+    if recovery_only:
+        pending += " AND instr(',' || reason || ',', ',terminal_evidence_recovered,') > 0"
+    rows = store.db.execute(f"SELECT * FROM review_priority WHERE {pending} ORDER BY created LIMIT 20").fetchall()
     seen = set()
     for row in rows:
         if row["handle"] in seen:
@@ -65,7 +70,7 @@ def flush(store, api):
         seen.add(row["handle"])
         api.maintenance(handle=row["handle"], idle_flush=True)
         targets=[store.get("observation-receipt:"+item[0],{}).get("revision") for item in store.db.execute(
-            "SELECT id FROM review_priority WHERE handle=? AND requested IS NULL",(row["handle"],))]
+            f"SELECT id FROM review_priority WHERE handle=? AND {pending}",(row["handle"],))]
         known=[revision for revision in targets if type(revision) is int]
         if known and callable(getattr(api,"read",None)):
             from .native_reads import status
@@ -76,7 +81,7 @@ def flush(store, api):
                 # Keep the feedback pending so it is retried after that review.
                 continue
         with store.db:
-            store.db.execute("UPDATE review_priority SET requested=? WHERE handle=? AND requested IS NULL",
+            store.db.execute(f"UPDATE review_priority SET requested=? WHERE handle=? AND {pending}",
                              (time.time(), row["handle"]))
 
 
