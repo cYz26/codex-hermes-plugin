@@ -16,6 +16,7 @@ def native_policy() -> dict:
     from agent.background_review import load_background_review_settings
     from hermes_cli.config import load_config_readonly
     from tools.memory_tool import get_builtin_memory_config, get_builtin_memory_store_flags
+    from .skill_growth import native_authoring_limits
 
     configuration = load_config_readonly()
     memory = get_builtin_memory_config(configuration)
@@ -44,6 +45,7 @@ def native_policy() -> dict:
             "enabled": curator.is_enabled(), "consolidate": curator.get_consolidate(),
             "interval_hours": curator.get_interval_hours(), "min_idle_hours": curator.get_min_idle_hours(),
         },
+        "automatic_skill_authoring_limits": native_authoring_limits(),
     }
 
 
@@ -220,10 +222,13 @@ def record_capacity_refusal(store, result, project, timestamp):
 
 
 def snapshot(settings, store, context, project, native):
+    from .scheduling import MAX_WAIT_SECONDS, SETTLE_SECONDS
+
     policy = {
         **learning_policy(settings), "data_admission": data_admission(settings),
         "native_configuration": "read" if native else "unavailable", "native": native,
-        "idle_review_seconds": settings.idle_seconds, "idle_review_interval_seconds": settings.idle_interval,
+        "idle_review_without_signal": False,
+        "review_settle_seconds": SETTLE_SECONDS, "review_max_wait_seconds": MAX_WAIT_SECONDS,
         "skill_counter_basis": "observed_terminal_tool_calls",
         "memory_counter_basis": "observed_user_turns",
     }

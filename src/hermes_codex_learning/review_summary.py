@@ -70,7 +70,13 @@ def capture_review_summary(api, handle):
 
 def install_summary_capture(runtime) -> None:
     """Read the pinned native fork's final response during this serial worker's own review."""
+    from contextlib import nullcontext
+
     from agent import background_review
+
+    from .scheduling import REVIEW_REASONS
+    from .skill_growth import GUIDANCE, constrain_writes
+    from .workflow import EXECUTOR
 
     if isinstance(getattr(runtime, "_notice_review_summary", None), _ReviewSummary):
         return
@@ -78,18 +84,24 @@ def install_summary_capture(runtime) -> None:
     native_review = runtime.review
 
     def review(handle, source, messages, intent):
-        if collector.handle != handle:
+        collect = collector.handle == handle
+        automatic_skills = (intent.get("reason") in REVIEW_REASONS
+                            and (intent.get("skills") or source.get("executor") == EXECUTOR))
+        if not collect and not automatic_skills:
             return native_review(handle, source, messages, intent)
         native_fork = background_review._run_review_fork
 
         def fork(parent, history, prompt, task_cfg, review_run, st, review_memory=False, explicit=False):
             own_review = parent.session_id == handle
-            if own_review:
+            if own_review and automatic_skills:
+                prompt += GUIDANCE
+            if own_review and collect:
                 prompt += SUMMARY_PROMPT
             try:
-                return native_fork(parent, history, prompt, task_cfg, review_run, st, review_memory, explicit)
+                with constrain_writes() if own_review and automatic_skills else nullcontext():
+                    return native_fork(parent, history, prompt, task_cfg, review_run, st, review_memory, explicit)
             finally:
-                if own_review:
+                if own_review and collect:
                     collector.current["text"] = _final_summary(st.result)
 
         # The existing worker serializes reviews and Curator. Restore the native

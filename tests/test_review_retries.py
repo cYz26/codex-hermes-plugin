@@ -106,6 +106,52 @@ class NativeRetryContracts(unittest.TestCase):
         self.assertEqual({item["id"]: item["run_status"] for item in attempts},
                          {"failed-1": "failed", "retry-1": "completed"})
 
+    def newer_threshold(self, *, memory):
+        self.service.runtime.tick = lambda *args, **kwargs: {
+            "memory": memory, "skills": True, "memory_count": 0, "skill_count": 0,
+        }
+        return self.service.observe(self.handle, {
+            "source": {**self.source, "turn": "turn-2"}, "user": "Verify the revised procedure",
+            "assistant": "The followup confirmed the procedure", "status": "completed", "tools": [],
+        }, event_id="capture-2")["intent"]
+
+    def test_compatible_intents_use_one_native_fork_and_keep_both_turns(self):
+        newest = self.newer_threshold(memory=True)
+        self.service.runtime.outcomes = [{"run_status": "completed", "applied": []}]
+        bridge = self.bridge()
+        bridge.reviews()
+        bridge.reviews()
+
+        (messages, intent), = self.service.runtime.reviews
+        self.assertEqual(intent["id"], newest)
+        self.assertIn("Inspect a plugin", str(messages))
+        self.assertIn("Verify the revised procedure", str(messages))
+        status = self.service.read(kind="status")
+        self.assertEqual({item["id"]: item["status"] for item in status["intents"]},
+                         {self.intent: "superseded", newest: "completed"})
+        starts = bridge.store.db.execute(
+            "SELECT COUNT(*) FROM notices WHERE json_extract(payload,'$.kind')='review.started'"
+        ).fetchone()[0]
+        self.assertEqual(starts, 1)
+
+    def test_newer_skills_only_intent_cannot_consume_earlier_memory_scope(self):
+        newest = self.newer_threshold(memory=False)
+        self.service.runtime.outcomes = [{"run_status": "completed", "applied": []}] * 2
+        bridge = self.bridge()
+        bridge.reviews()
+        bridge.reviews()
+        self.assertEqual([item["id"] for _, item in self.service.runtime.reviews], [self.intent, newest])
+
+    def test_coalesced_unknown_attempt_does_not_replay_older_evidence(self):
+        newest = self.newer_threshold(memory=True)
+        self.service.runtime.outcomes = [{"run_status": "unknown", "uncertain": ["unconfirmed write"]}]
+        bridge = self.bridge()
+        bridge.reviews()
+        bridge.reviews()
+        self.assertEqual([item["id"] for _, item in self.service.runtime.reviews], [newest])
+        self.assertEqual({item["id"]: item["status"] for item in self.service.read(kind="status")["intents"]},
+                         {self.intent: "queued", newest: "unknown"})
+
     def fail_review(self, *, status="failed", error="HTTP 429: waiting budget exhausted", uncertain=()):
         self.service.runtime.outcomes = [{"run_status": status, "error": error,
                                          "applied": [], "staged": [], "uncertain": list(uncertain)}]
@@ -297,7 +343,7 @@ class NativeRetryContracts(unittest.TestCase):
             if kwargs["kind"] == "context":
                 return {"version": "fixture", "summary": "", "memories": {}, "skills": []}
             return self.service.read(**kwargs)
-        api = types.SimpleNamespace(version=1, read=read, retry_review=self.service.retry_review,
+        api = types.SimpleNamespace(version=1, _service=self.service, read=read, retry_review=self.service.retry_review,
                                     run_review=self.service.run_review, cancel=self.service.cancel)
         settings = Settings(self.home, self.home, self.home, Path("/usr/bin/python3"), **settings_overrides)
         bridge = Bridge(settings, api)

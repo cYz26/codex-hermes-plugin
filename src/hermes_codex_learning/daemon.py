@@ -158,9 +158,9 @@ class Bridge:
                 terminal = enriched.get("evidence_provenance", {}).get("terminal_event")
                 if terminal:
                     event_id = terminal
-        if (enriched["status"] == "incomplete" and enriched.get("_ended_by") == "Stop" and self.store.db.execute(
-                "SELECT 1 FROM learning_signals WHERE chat=? AND turn=? AND kind IN ('user_followup','user_correction')",
-                (enriched["source"]["chat"],enriched["source"]["turn"])).fetchone()):
+        from .scheduling import is_explicit_correction
+        if (self.settings.proactive and enriched["status"] == "incomplete" and enriched.get("_ended_by") == "Stop"
+                and is_explicit_correction(enriched.get("user"))):
             enriched={**enriched,"status":"completed","learning_basis":"dialogue_with_unresolved_execution",
                       "coverage":sorted(set(enriched.get("coverage",[])) | {"execution_results_unresolved"})}
         projected = observation(enriched)
@@ -417,6 +417,13 @@ class Bridge:
                 continue
             if not learning_dispatch.begin(self, intent):
                 continue
+            if intent.get("reason") in {"native_threshold", "idle_flush"} and type(intent.get("revision")) is int:
+                reviewed = native_reads.reviewed_revision(self.api, intent["handle"])
+                if reviewed is not None and intent["revision"] <= reviewed:
+                    # Retire the old intent through the native owner's guard.
+                    # It can close it without a model call or a started receipt.
+                    self.api.run_review(intent["handle"], intent["id"], attempt_id=str(uuid.uuid4()))
+                    continue
             attempt_id = self.store.get("attempt:" + intent["id"])
             if not attempt_id:
                 attempt_id = str(uuid.uuid4())
@@ -555,32 +562,6 @@ class Bridge:
     def idle_reviews(self) -> None:
         from .scheduling import flush
         flush(self.store, self.api, recovery_only=not self.settings.proactive)
-        now = time.time()
-        last = self.store.get("last_idle_request", 0)
-        if now - last < self.settings.idle_interval:
-            return
-        # A finished chat can learn while another Codex chat is active. Curator below
-        # still requires the whole project to be idle; the review worker remains serial.
-        turns = [row for row in self.latest_turns() if json.loads(row["payload"])["status"] == "completed"
-                 and json.loads(row["payload"])["user"]
-                 and now - row["activity"] >= self.settings.idle_seconds]
-        if not turns:
-            return
-        for row in turns:
-            data = json.loads(row["payload"])
-            if data["status"] == "completed":
-                request_key = "idle-reviewed:" + digest([data["source"]["chat"], data["source"]["turn"]])
-                if self.store.get(request_key) == digest(data):
-                    continue
-                if data.get('_evidence_mode') == 'workflow-v1':
-                    from .workflow import observation as workflow_observation
-                    source = workflow_observation(data)['source']
-                    handle = self.api.open({k: source[k] for k in ('host', 'project', 'chat', 'executor')})['handle']
-                else:
-                    handle = self.handle_for(data['source'])
-                self.api.maintenance(handle=handle, idle_flush=True)
-                self.store.set(request_key, digest(data))
-        self.store.set("last_idle_request", now)
 
     def latest_turns(self):
         latest = {}
@@ -1118,7 +1099,8 @@ class Bridge:
                         "coverage": {
                             "pending_events":store.db.execute("SELECT COUNT(*) FROM events WHERE delivered IS NULL").fetchone()[0],
                             "incomplete_turns":store.db.execute("SELECT COUNT(*) FROM turns WHERE json_extract(payload,'$.status')='incomplete'").fetchone()[0],
-                            "high_value_pending":store.db.execute("SELECT COUNT(*) FROM review_priority WHERE requested IS NULL").fetchone()[0],
+                            "high_value_pending":store.db.execute("SELECT COUNT(*) FROM review_priority "
+                                "WHERE requested IS NULL AND reason<>'user_followup'").fetchone()[0],
                             "application_results":{row[0]:row[1] for row in store.db.execute(
                                 "SELECT json_extract(payload,'$.validation'),COUNT(*) FROM application_evidence GROUP BY 1")}
                         },

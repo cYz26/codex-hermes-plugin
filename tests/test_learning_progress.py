@@ -88,7 +88,7 @@ class LearningProgressTests(unittest.TestCase):
     def test_dialogue_feedback_does_not_wait_for_or_verify_a_running_tool(self):
         self.event('UserPromptSubmit',turn='first',prompt='Compare technical alternatives')
         self.event('Stop',turn='first',last_assistant_message='Public alternatives compared')
-        self.event('UserPromptSubmit',turn='feedback',prompt='还要比较现有内部能力')
+        self.event('UserPromptSubmit',turn='feedback',prompt='更正：还要比较现有内部能力')
         self.event('PreToolUse',turn='feedback',tool_use_id='running',tool_name='exec_command',tool_input={'cmd':'fixture'})
         self.event('Stop',turn='feedback',last_assistant_message='The additional comparison changes the preferred option')
         self.bridge.ingest()
@@ -97,7 +97,7 @@ class LearningProgressTests(unittest.TestCase):
         self.assertEqual(body['tools'][0]['status'],'running')
         self.assertIn('execution_results_unresolved',body['coverage'])
         status=self.status(turn='feedback')['turns'][0]
-        self.assertIn('user_followup',status['dialogue_signal'])
+        self.assertIn('user_correction',status['dialogue_signal'])
         self.assertEqual(status['execution']['correctness'],'not_inferred')
 
     def test_scoped_progress_returns_copyable_test_references_and_mcp_versions(self):

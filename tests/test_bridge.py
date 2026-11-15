@@ -75,7 +75,7 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], 0)
         self.assertIn("Test passed", result["output"])
 
-    def test_idle_flush_requires_terminal_latest_turn_not_silence(self):
+    def test_finished_small_chat_does_not_request_idle_review(self):
         from hermes_codex_learning.daemon import Bridge
         from dataclasses import replace
 
@@ -98,7 +98,7 @@ class BridgeTests(unittest.TestCase):
         self.merge(self.event("UserPromptSubmit", prompt="Retry", turn_id="turn-b"))
         self.merge(self.event("Stop", last_assistant_message="Done", turn_id="turn-b"))
         bridge.idle_reviews()
-        self.assertEqual(len(api.flushes), 1)
+        self.assertEqual(api.flushes, [])
         bridge.store.close()
 
     def test_completed_chat_can_learn_while_another_main_chat_is_running(self):
@@ -112,15 +112,20 @@ class BridgeTests(unittest.TestCase):
             def open(self, source):
                 return {"handle": source["chat"]}
 
+            def observe(self, *args, **kwargs):
+                return {"revision": 1}
+
             def maintenance(self, **kwargs):
                 self.flushes.append(kwargs)
 
         api = API()
-        bridge = Bridge(replace(self.settings, idle_seconds=0, idle_interval=0), api)
+        settings = replace(self.settings, proactive=True)
+        bridge = Bridge(settings, api)
         try:
-            self.merge(self.event("UserPromptSubmit", prompt="Task A"))
-            self.merge(self.event("Stop", last_assistant_message="Done"))
-            self.merge(self.event("UserPromptSubmit", session_id="chat-b", turn_id="turn-b", prompt="Monitor A"))
+            hook(self.event("UserPromptSubmit", prompt="更正：先检查空值再读取"), settings)
+            hook(self.event("Stop", last_assistant_message="Done"), settings)
+            hook(self.event("UserPromptSubmit", session_id="chat-b", turn_id="turn-b", prompt="Monitor A"), settings)
+            bridge.ingest()
             bridge.idle_reviews()
             self.assertEqual(api.flushes, [{"handle": "chat-a", "idle_flush": True}])
         finally:
