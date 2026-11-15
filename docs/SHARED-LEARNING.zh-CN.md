@@ -23,7 +23,7 @@ scripts/bridge shared-learning bind --settings /absolute/pilot/bridge.json --pro
 scripts/bridge shared-learning bind --settings /absolute/pilot/bridge.json --profile /absolute/hermes/profile --apply
 ```
 
-启动正常学习服务，用新会话读取记忆快照。从相应工作区启动 CLI。等正在使用的 Hermes Desktop 正常退出后，用 `desktop` 命令启动已经安装的官方应用，保留原有界面数据。该命令只指定已验证的 Python 后端和 Journey 的管理工作区。使用独立命名 profile 时，在官方应用的 profile 选择器中选中已绑定的 profile，再开启新会话。
+启动正常学习服务，用新会话读取记忆快照。从相应工作区启动 CLI。等正在使用的 Hermes Desktop 正常退出后，用 `desktop` 命令启动已经安装的官方应用，保留原有界面数据。启动参数会指定已验证的 Python 后端、已绑定的 profile，以及 Journey 的管理工作区。从官方项目入口创建聊天，核对聊天本身的项目名称和路径。
 
 ```sh
 scripts/bridge shared-learning cli --settings /absolute/pilot/bridge.json -- chat
@@ -44,6 +44,8 @@ scripts/bridge shared-learning disconnect --settings /absolute/pilot/bridge.json
 ```
 
 兼容性验证以[固定兼容清单](../patches/compatibility.json)和隔离探针为准。探针启用两个临时工作区、一个共享 owner、一个原生 profile 和本机可控模型服务。它运行真实 CLI，检查两端读取的知识版本、两项目隔离、Desktop 后端的 Journey 写入与旧版本冲突。`--live-settings` 使用现有模型和虚构任务验证原生运行时。Codex App hooks、官方 Desktop 界面和自然任务的验收需要分别记录。
+
+Codex 宿主缺少 `Stop` 回执时，服务可以用绑定后已捕获的用户请求、受信本机会话文件，以及同一回合的宿主完成记录恢复终态。测试退出码要求与原工具调用对应的原生记录。
 
 ```sh
 python3 -B probes/shared_learning_contract.py --source /absolute/verified-candidate --python /absolute/runtime/bin/python

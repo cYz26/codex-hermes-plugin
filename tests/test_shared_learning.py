@@ -4,7 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.normalize import merge_event
@@ -61,6 +61,50 @@ class SharedTransportTests(unittest.TestCase):
         value = capture_native(self.settings, self.store, None, {**self.identity, "kind": "prompt", "text": "Private text"})
         self.assertEqual(value["state"], "withheld")
         self.assertFalse(self.store.pending())
+
+    def test_codex_completed_transcript_recovers_missing_hook_without_guessing_tool_exit(self):
+        from hermes_codex_learning.host_evidence import recover_completions, supplement
+        from hermes_codex_learning.normalize import CODEX_COMPLETION
+        import time
+
+        profile = self.settings.shared_profile
+        profile.mkdir()
+        (profile / "shared-learning-client.json").touch()
+        codex = self.root / "codex"
+        transcript = codex / "sessions" / "rollout.jsonl"
+        transcript.parent.mkdir(parents=True)
+        project = str(self.project)
+        records = [
+            {"type":"session_meta", "payload":{"id":"chat", "cwd":project}},
+            {"type":"event_msg", "payload":{"type":"task_complete", "turn_id":"different-turn", "last_agent_message":"Unrelated"}},
+            {"type":"event_msg", "payload":{"type":"item_completed", "turn_id":"run", "item":{
+                "id":"test", "type":"CommandExecution", "status":"completed", "exit_code":0}}},
+        ]
+        def write_native_records():
+            transcript.write_text("".join(json.dumps(item) + "\n" for item in records))
+        write_native_records()
+        base = {"cwd":project,"bridge_project":project,"bridge_host":"h","session_id":"chat","turn_id":"run",
+                "transcript_path":str(transcript)}
+        prompt = self.store.capture({**base,"hook_event_name":"UserPromptSubmit","prompt":"Run the project tests"})
+        end = self.store.capture({**base,"hook_event_name":"PostToolUse","tool_name":"Bash","tool_use_id":"test",
+                                  "tool_response":"output without an exit field","tool_input":{"command":"python3 -m unittest"}})
+        for item in self.store.pending():
+            merge_event(self.store,item)
+        initial = time.time()
+        with patch.dict(os.environ, {"CODEX_HOME":str(codex)}), patch("time.time", return_value=initial + 25):
+            recover_completions(self.settings,self.store)
+        self.assertEqual([item["id"] for item in self.store.pending()], [prompt,end])
+        records.append({"type":"event_msg", "payload":{"type":"task_complete", "turn_id":"run", "last_agent_message":"Tests ran."}})
+        write_native_records()
+        with patch.dict(os.environ, {"CODEX_HOME":str(codex)}), patch("time.time", return_value=initial + 50):
+            recover_completions(self.settings,self.store)
+            raw = self.store.pending()[-1]
+            data = merge_event(self.store,raw)
+            enriched = supplement(self.store,data)
+        self.assertEqual(enriched["_ended_by"],CODEX_COMPLETION)
+        self.assertEqual(data["status"],"incomplete")
+        self.assertEqual(enriched["status"],"completed")
+        self.assertEqual(enriched["tools"]["test"]["result"]["exit_code"],0)
 
 
 @unittest.skipUnless(os.getenv("HERMES_LEARNING_NATIVE_SOURCE"), "requires the patched native test runtime")

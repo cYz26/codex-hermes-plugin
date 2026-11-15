@@ -10,6 +10,8 @@ from .store import Store, digest, dumps
 
 _EXECUTION_TOOLS = {"bash", "exec_command", "write_stdin", "exec", "wait", "terminal"}
 BACKGROUND_EXIT_PENDING = "background_exit_pending"
+CODEX_COMPLETION = "CodexTranscriptComplete"
+TERMINAL_EVENTS = {"Stop", "Interrupt", CODEX_COMPLETION}
 LEARNING_STATUS_TOOLS = {"mcp__hermes_learning__learning_status", "mcp__hermes_learning__feedback_status",
                          "mcp__hermes_learning__record_application"}
 
@@ -74,7 +76,7 @@ def settle_turn(data: dict) -> None:
     data["coverage"] = sorted(coverage)
     if ended_by == "Interrupt":
         data["status"] = "interrupted"
-    elif ended_by == "Stop":
+    elif ended_by in {"Stop", CODEX_COMPLETION}:
         unresolved = len(pending) != len(background) or (background and "missing_tool_use_id" in coverage)
         data["status"] = "incomplete" if unresolved else "completed"
         if data.get('_evidence_mode') == 'workflow-v1':
@@ -236,14 +238,21 @@ def merge_event(store: Store, row: dict) -> dict | None:
             }
             if gap:
                 data["coverage"] = sorted(set(data["coverage"]) | {gap + ":" + target_id})
-    elif name == "Stop":
+    elif name in {"Stop", CODEX_COMPLETION}:
+        if name == CODEX_COMPLETION and (data.get("_ended_by") or not isinstance(event.get("bridge_completion"), str)):
+            return None
+        if name == "Stop" and data.get("_ended_by") == CODEX_COMPLETION and previous["observed_revision"] is not None:
+            # A late Stop confirms an already accepted host terminal record.
+            return None
         if data.get("_ended_by") == "Stop" and any(tool.get("background_session") for tool in data["tools"].values()):
             data["_skip_observation"] = row["id"]
             return data
         data["assistant"] = event.get("last_assistant_message", "")
         provenance.update(terminal_event=row["id"], terminal_at=captured_at)
+        if name == CODEX_COMPLETION and event.get("bridge_executor") == "Codex CLI":
+            data["source"]["executor"] = "Codex CLI"
         if data.get("_ended_by") != "Interrupt" and data["status"] != "interrupted":
-            data["_ended_by"] = "Stop"
+            data["_ended_by"] = name
     elif name == "Interrupt":
         data["_ended_by"] = "Interrupt"
         if event.get("bridge_executor") == "Hermes":

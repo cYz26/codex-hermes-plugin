@@ -284,7 +284,7 @@ class Bridge:
                 continue
             event = self.store.db.execute("SELECT id FROM events WHERE json_extract(payload,'$.session_id')=? "
                                           "AND json_extract(payload,'$.turn_id')=? "
-                                          "AND json_extract(payload,'$.hook_event_name') IN ('Stop','Interrupt') "
+                                          "AND json_extract(payload,'$.hook_event_name') IN ('Stop','Interrupt','CodexTranscriptComplete') "
                                           "ORDER BY created DESC LIMIT 1", (data["source"]["chat"], data["source"]["turn"])).fetchone()
             if event:
                 self.observe_turn(data, event["id"])
@@ -306,7 +306,7 @@ class Bridge:
             prepared = self.store.get("background-observation:" + row["id"])
             event = self.store.db.execute("SELECT id FROM events WHERE json_extract(payload,'$.session_id')=? "
                                           "AND json_extract(payload,'$.turn_id')=? "
-                                          "AND json_extract(payload,'$.hook_event_name') IN ('Stop','Interrupt') "
+                                          "AND json_extract(payload,'$.hook_event_name') IN ('Stop','Interrupt','CodexTranscriptComplete') "
                                           "ORDER BY created DESC LIMIT 1", (data["source"]["chat"], data["source"]["turn"])).fetchone()
             if prepared:
                 self.observe_turn(prepared["turn"], prepared["event"])
@@ -938,6 +938,9 @@ class Bridge:
                 drain_client(self)
                 self.ingest()
                 drain_shared_writes(self)
+                if self.settings.shared_profile is not None:
+                    from .host_evidence import recover_completions
+                    recover_completions(self.settings, self.store)
                 self.retry_completed_inputs()
                 self.recover_context()
                 from .learning_dispatch import prepare

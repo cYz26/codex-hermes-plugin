@@ -10,6 +10,7 @@ from pathlib import Path
 from .config import Settings
 from .delegation import exclude_internal
 from .knowledge import context_view
+from .normalize import CODEX_COMPLETION
 from .store import Store, digest, dumps
 
 ADDITIONAL_CONTEXT_LIMIT = 256
@@ -71,7 +72,7 @@ def chat_workspace(store: Store, payload: dict) -> str | None:
 
 
 def hook(payload: dict, settings: Settings) -> dict:
-    if payload.get("agent_id"):
+    if payload.get("agent_id") or payload.get("hook_event_name") == CODEX_COMPLETION:
         return {}
     command_cwd = payload.get("cwd")
     command_project = settings.project_for(command_cwd)

@@ -106,7 +106,7 @@ class Store:
         session, turn = payload.get("session_id"), payload.get("turn_id")
         tool_id = payload.get("tool_use_id")
         source = None
-        if session and turn and (tool_id or event in {"UserPromptSubmit", "Stop", "Interrupt"}):
+        if session and turn and (tool_id or event in {"UserPromptSubmit", "Stop", "Interrupt", "CodexTranscriptComplete"}):
             # Same identity + different content is a revision, not silently discarded.
             source = digest([session, turn, event, tool_id, digest(payload)])
         event_id = str(uuid.uuid4())

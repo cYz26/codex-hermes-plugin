@@ -160,9 +160,11 @@ def _launch(args, settings):
     stamp = json.loads(stamp_path.read_text())
     if stamp.get("commit") != recipe["base_commit"] or stamp.get("payload") == "bundled":
         raise ValueError("The installed Hermes Desktop version does not match the verified Python backend")
+    launch_profile = "default"
     if profile.parent.name == "profiles":
         # The official profile picker resolves the bound profile from its existing Hermes root.
         environment["HERMES_HOME"] = str(profile.parent.parent)
+        launch_profile = profile.name
     environment.update(HERMES_DESKTOP_HERMES_ROOT=str(settings.source),
                        HERMES_DESKTOP_PYTHON=str(settings.interpreter),
                        HERMES_DESKTOP_CDP_PORT="off")
@@ -171,7 +173,7 @@ def _launch(args, settings):
         if project is None:
             raise ValueError("The Desktop workspace is excluded from learning")
         environment.update(HERMES_DESKTOP_CWD=project, HERMES_SHARED_LEARNING_MANAGEMENT_CWD=project)
-    os.execve(binary, [str(binary)], environment)
+    os.execve(binary, [str(binary), "--profile", launch_profile], environment)
 
 
 def execute(args):

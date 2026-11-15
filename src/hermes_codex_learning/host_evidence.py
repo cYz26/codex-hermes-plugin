@@ -10,7 +10,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-from .normalize import settle_turn
+from .normalize import CODEX_COMPLETION, TERMINAL_EVENTS, settle_turn
 from .store import digest
 
 LIMIT = 16 * 1024 * 1024
@@ -154,11 +154,12 @@ def _record_code_exec(calls, row, payload, position):
 
 
 def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: Path | None = None,
-              include_task: bool = True, cursor: dict | None = None) -> dict:
+              include_task: bool = True, cursor: dict | None = None, completion_only: bool = False) -> dict:
     stat = _verify_path(path, sessions_root)
     if include_task and stat.st_size > LIMIT:
         raise ValueError("Host transcript ownership or bounded-read limit failed")
     inputs, commands, trace, code_execs = [], {}, {}, {}
+    completion = None
     with path.open() as stream:
         meta = _header(stream, chat, project)
         identity = [stat.st_dev, stat.st_ino, chat, turn]
@@ -191,6 +192,15 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
             if not isinstance(msg_meta, dict):
                 msg_meta = {}
             matches = payload.get("turn_id") == turn or msg_meta.get("turn_id") == turn
+            if completion_only:
+                if row.get("type") == "event_msg" and payload.get("turn_id") == turn and payload.get("type") == "task_complete":
+                    identity = digest(payload)
+                    if completion and completion["id"] != identity:
+                        raise ValueError("Conflicting native completion records")
+                    message = payload.get("last_agent_message")
+                    completion = {"id": identity, "message": message[:12288] if isinstance(message, str) else "",
+                                  "executor": "Codex CLI" if meta.get("source") == "exec" else "Codex App"}
+                continue
             ordinal, stamp = row.get("ordinal"), row.get("timestamp")
             position = {"ordinal":ordinal, "timestamp":stamp} if type(ordinal) is int else {"timestamp":stamp}
             if (row.get("type") == "response_item" and msg_meta.get("turn_id") == turn
@@ -233,6 +243,8 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
             if xml.tag == "codex_delegation" and xml.findtext("input") and xml.findtext("source_thread_id"):
                 inputs.append({"prompt": xml.findtext("input"), "source_thread": xml.findtext("source_thread_id"),
                                "item_id": item["id"], "item_hash": digest(item), "method": item["name"]})
+    if completion_only:
+        return completion or {}
     if len(inputs) > 1:
         raise ValueError("Ambiguous task specifications in one host turn")
     result = {"input": inputs[0] if inputs else None, "commands": commands, "relation":_relation(meta), "trace":trace,
@@ -248,6 +260,55 @@ def _at(position):
         return stamp.timestamp() if stamp.tzinfo is not None else None
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
+
+
+def recover_completions(settings, store):
+    """Use an exact, owned Codex terminal record when a live hook omitted Stop."""
+    import time
+    from .policy import admit
+    if settings.shared_profile is None:
+        return
+    marker = settings.shared_profile / "shared-learning-client.json"
+    if not marker.is_file():
+        return
+    since = marker.stat().st_mtime
+    now = time.time()
+    rows = store.db.execute("""
+        SELECT t.id,t.payload,e.payload AS request FROM turns t
+        JOIN events e ON e.id=json_extract(t.payload,'$.evidence_provenance.request_event')
+        LEFT JOIN meta m ON m.key='codex-completion-check:'||t.id
+        WHERE t.observed_revision IS NULL AND e.created >= ?
+          AND t.activity <= ? AND COALESCE(CAST(m.value AS REAL), 0) <= ?
+          AND json_extract(t.payload,'$._ended_by') IS NULL
+          AND json_extract(t.payload,'$.source.executor') = 'Codex App'
+          AND json_extract(e.payload,'$.transcript_path') IS NOT NULL
+          AND json_extract(t.payload,'$._evidence_mode') IS NOT 'workflow-v1'
+        ORDER BY COALESCE(CAST(m.value AS REAL),0),t.activity LIMIT 6
+    """, (since, now-4, now-15)).fetchall()
+    for row in rows:
+        store.set("codex-completion-check:" + row["id"], now)
+        turn, request = json.loads(row["payload"]), json.loads(row["request"])
+        source = turn["source"]
+        if store.get("withheld-turn:" + row["id"]):
+            continue
+        if (request.get("bridge_host"), request.get("bridge_project"), request.get("session_id"), request.get("turn_id")) != (
+                source["host"], source["project"], source["chat"], source["turn"]):
+            continue
+        try:
+            completion = read_turn(Path(request["transcript_path"]), source["chat"], source["turn"],
+                                   source["project"], include_task=False, completion_only=True)
+        except (OSError, ValueError, TypeError):
+            continue
+        if not completion:
+            continue
+        event = {key:request[key] for key in ("cwd", "transcript_path", "session_id", "turn_id", "bridge_project", "bridge_host")}
+        event.update(hook_event_name=CODEX_COMPLETION, last_assistant_message=completion["message"],
+                     bridge_completion=completion["id"], bridge_executor=completion["executor"])
+        assessment = admit(event, settings.data_policy, source["project"])
+        if assessment.get("allowed"):
+            if assessment.get("schema_version") == 2:
+                event = {**assessment.pop("payload"), "bridge_evidence_mode":"semantic-v2"}
+            store.capture({**event, "bridge_admission":assessment})
 
 
 def _join_background(store, data, facts, transcript_path):
@@ -381,6 +442,6 @@ def supplement(store, data: dict, *, settings=None, include_task=True, event_id=
         result["coverage"] = sorted(set(result["coverage"]) - resolved - {"host_transcript_input_unavailable"})
     if include_task:
         _join_background(store, result, facts, event["transcript_path"])
-    if result.get("_ended_by") in {"Stop", "Interrupt"}:
+    if result.get("_ended_by") in TERMINAL_EVENTS:
         settle_turn(result)
     return result
