@@ -6,7 +6,7 @@
 
 - 项目记忆按当前工作区的 Git 根或目录读取。无工作区时，仅提供用户记忆和已发布通用技能。两端使用相同项目路径时，共用同一个原生 MemoryStore。
 - 每个项目的 `MEMORY.md` 和用户的 `USER.md` 各有独立容量。用户级写入走原生待审队列。两端的技能读取使用相同的已发布或当前项目专属版本。
-- `/memory pending`、`/memory diff <id>`、`/memory approve <id>`、`/memory reject <id>` 查询同一个队列。原生 `/skills` 的发布前写入审批和既有 Codex 通用技能发布审批仍各自承担原本的职责。
+- Desktop 和 CLI 使用 `/memory pending` 查看共享队列，以及 `/memory approve <id>`、`/memory reject <id>` 处理单条提案。Desktop 的待审列表附内容摘要，经典 CLI 可用 `/memory diff <id>` 查看提案详情。原生 `/skills` 的发布前写入审批和既有 Codex 通用技能发布审批仍各自承担原本的职责。
 - Journey 编辑、删除和技能归档携带当前版本。Desktop 启动时通过 `--cwd` 选定 Journey 的管理工作区。聊天的学习与记忆使用实际会话工作区。切换工作区后创建新会话加载对应快照。
 - 在现有官方 Desktop 中，从 Journey 编辑共享技能。旧的技能详情编辑表单只传技能名，无法校验打开表单时的版本。技能详情仍可直接读取。
 - 共享历史通过原生 SessionDB 读取该项目获准保留的观察记录。技能加载及宿主测试结果按精确版本关联。状态显示加载证据，不以加载次数判断业务效果。
