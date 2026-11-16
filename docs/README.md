@@ -21,6 +21,7 @@
 | [原生学习与维护](./NATIVE-LIFECYCLE.zh-CN.md) | 完整复用原生能力、Curator 来源与发布衔接、快照留存及验证 |
 | [Codex 与原生 Hermes 共用学习服务](./SHARED-LEARNING.zh-CN.md) | 本机执行 profile、共享记忆与技能、绑定迁移、状态和断开 |
 | [Codex 与原生 Hermes 机制对照](./NATIVE-PARITY-REVIEW-2026-11-13.zh-CN.md) | v0.23.1 基线、接入层差异和后续优化 |
+| [双 Agent 自进化成果共享方案](./CROSS-AGENT-SELF-EVOLUTION-SHARING.zh-CN.md) | 实施前的共享范围、原生接入设想和分阶段验收标准 |
 | [自进化定期审查方案](./SELF-EVOLUTION-REVIEW-PLAN.zh-CN.md) | 前两周每日审查、每周机制 review、产物质量标准与落地步骤（方案） |
 | [待审记忆处理与验证](./PENDING-REVIEWS.zh-CN.md) | 项目范围内的差异、批准／丢弃、重复清理及 Mac 验收入口 |
 | [复盘恢复与重试](./REVIEW-RETRIES.zh-CN.md) | 自动复盘冷却、失败回执保留、手动提前与 schema 2 回退边界 |
@@ -59,6 +60,8 @@
 | [历史实施](../IMPLEMENTATION.md) | 当时部署、测试和源码指针 |
 
 ## 研究档案
+
+[双 Agent 共享的原生能力核验](./RESEARCH-NATIVE-SHARED-LEARNING-2026-11-15.zh-CN.md)记录固定源码下的 MemoryProvider、会话检索、技能目录、Curator、写入通知及恢复边界。
 
 [最初研究](../HERMES-CODEX-RESEARCH.md)、[集成方式比较](../HERMES-CODEX-OPTIONS.md)、[原生能力差异](../HERMES-CODEX-NATIVE-PARITY.md) 与 [历史探针](../HERMES-CODEX-PROBE.json) 保留研究时的版本依据。
 
