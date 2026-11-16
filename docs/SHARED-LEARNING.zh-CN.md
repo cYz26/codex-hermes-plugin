@@ -23,7 +23,9 @@ scripts/bridge shared-learning bind --settings /absolute/pilot/bridge.json --pro
 scripts/bridge shared-learning bind --settings /absolute/pilot/bridge.json --profile /absolute/hermes/profile --apply
 ```
 
-启动正常学习服务，用新会话读取记忆快照。从相应工作区启动 CLI。等正在使用的 Hermes Desktop 正常退出后，用 `desktop` 命令启动已经安装的官方应用，保留原有界面数据。启动参数会指定已验证的 Python 后端、已绑定的 profile，以及 Journey 的管理工作区。从官方项目入口创建聊天，核对聊天本身的项目名称和路径。
+启动正常学习服务，用新会话读取记忆快照。从相应工作区启动 CLI。已配置 Dock 接入的 Mac 可照常打开原来的官方 Hermes App，并在 `shared-learning` profile 下创建项目会话。启动会核对 App 与已验证后端的源码版本。聊天按实际会话工作区读取，Journey 按启动时配置的管理工作区读取。
+
+首次配置或临时核对可以使用下列 `desktop` 命令。先等正在使用的 Hermes Desktop 正常退出。命令选择已安装的原官方应用、已验证的后端和已绑定的 profile，并接受 Journey 的管理工作区参数。
 
 ```sh
 scripts/bridge shared-learning cli --settings /absolute/pilot/bridge.json -- chat
@@ -35,7 +37,7 @@ scripts/bridge shared-learning status --settings /absolute/pilot/bridge.json --c
 
 ## 撤回、恢复与验证
 
-指定项目后可使用 Journey 删除相应记忆或归档技能。CLI 清空须指定 `--target memory` 或 `--target user`，并确认显示的范围。已删除的项目记忆内容留下无正文指纹，避免旧请求或复盘重新写入。恢复技能使用原生归档机制，跨项目仍经过当前发布检查。
+指定项目后可使用 Journey 删除相应记忆或归档技能。CLI 清空须指定 `--target memory` 或 `--target user`，并确认显示的范围。确认后的清空在原生 MemoryStore 锁内检查版本并原子清除该范围的全部条目。普通记忆批处理继续使用原生防清空保护。已删除的条目留下无正文指纹，避免旧请求或复盘重新写入。恢复技能使用原生归档机制，跨项目仍经过当前发布检查。
 
 通过下列命令停用原生客户端。关闭已连接的原生会话后重启即可单独使用原生 profile。共享知识、写入回执、待审和撤回记录留在 owner 中。服务端软件回退沿用现有 `update rollback`，目标必须支持当前共享存储格式。
 
@@ -45,7 +47,9 @@ scripts/bridge shared-learning disconnect --settings /absolute/pilot/bridge.json
 
 兼容性验证以[固定兼容清单](../patches/compatibility.json)和隔离探针为准。探针启用两个临时工作区、一个共享 owner、一个原生 profile 和本机可控模型服务。它运行真实 CLI，检查两端读取的知识版本、两项目隔离、Desktop 后端的 Journey 写入与旧版本冲突。`--live-settings` 使用现有模型和虚构任务验证原生运行时。Codex App hooks、官方 Desktop 界面和自然任务的验收需要分别记录。
 
-Codex 宿主缺少 `Stop` 回执时，服务可以用绑定后已捕获的用户请求、受信本机会话文件，以及同一回合的宿主完成记录恢复终态。测试退出码要求与原工具调用对应的原生记录。
+Codex 宿主缺少 `Stop` 回执时，服务可以用绑定后已捕获的用户请求、受信本机会话文件，以及同一回合的宿主完成记录恢复终态。先核对原工具调用 ID 和宿主完成记录，再把属于已识别测试的终态关联到技能版本。
+
+排查待重放写入时，先用 `shared-learning status` 选择实际工作区并核对请求状态。相同请求应沿用原请求 ID。若服务在写入时中断并报告需核对，先按回执核对当前目标版本再决定后续写入。恢复后的读取以对应版本和范围的实际读回为准。
 
 ```sh
 python3 -B probes/shared_learning_contract.py --source /absolute/verified-candidate --python /absolute/runtime/bin/python

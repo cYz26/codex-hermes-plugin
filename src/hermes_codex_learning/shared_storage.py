@@ -507,6 +507,26 @@ def _skills_args(args):
     return args
 
 
+def _clear_memory(memory, target, base):
+    from tools.memory_tool import _memory_target_error
+
+    if error := _memory_target_error(memory, target):
+        return error
+
+    def clear_entries(entries, _limit):
+        version = digest(entries)
+        if version != base:
+            return {"success": False, "conflict": True, "version": version,
+                    "error": "Shared memory changed; refresh its version"}
+        if not entries:
+            return {"success": True}
+        return [], "Cleared the confirmed memory scope."
+
+    # Reuse native locking, atomic writes and removal intents. Ordinary consolidation
+    # batches continue to reject removing every entry.
+    return memory._mutate(target, clear_entries)
+
+
 def _apply_memory(bridge, project, operation, args, base):
     from tools.memory_tool import load_on_disk_store, memory_tool
     settings, store = bridge.settings, bridge.store
@@ -522,8 +542,9 @@ def _apply_memory(bridge, project, operation, args, base):
         if operation == "clear":
             if args.get("confirmed") is not True:
                 raise PermissionError("Confirm the exact scope to clear")
-            result = (memory.apply_batch(target, [{"action": "remove", "old_text": item, "matched_entry": item}
-                                                  for item in before[target]]) if before[target] else {"success": True})
+            result = _clear_memory(memory, target, base)
+            if result.get("conflict"):
+                return "conflict", {"version": result["version"], "error": result["error"]}
         else:
             result = json.loads(memory_tool(store=memory, **_memory_args(args)))
     after = _memory_snapshot(settings, store, project)

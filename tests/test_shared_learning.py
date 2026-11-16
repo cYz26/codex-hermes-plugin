@@ -178,6 +178,47 @@ class SharedNativeStoreTests(unittest.TestCase):
         self.assertNotIn("MEMORY.md", self.view(self.a)["memories"])
         self.assertEqual(self.write(self.a, "memory", {"action": "add", "content": entry}, digest([]))[0], "failed")
 
+    def test_confirmed_clear_removes_all_entries_in_only_the_requested_scope(self):
+        from hermes_codex_learning.shared_storage import native_scope, read
+        from tools.memory_tool import load_on_disk_store
+
+        project_entries = ["Local preview uses the cobalt palette.", "Replay seed is recorded with each pass."]
+        user_entries = ["Prefer short progress updates.", "Prefer the official workflow."]
+        other_entry = "Other workspace uses separate validation."
+        for content in project_entries:
+            version = self.view(self.a)["memory_versions"]["memory"]
+            state, _ = self.write(self.a, "memory", {"action": "add", "content": content}, version)
+            self.assertEqual(state, "applied")
+        self.assertEqual(self.write(self.b, "memory", {"action": "add", "content": other_entry}, digest([]))[0], "applied")
+        for content in user_entries:
+            version = self.view(None)["memory_versions"]["user"]
+            state, staged = self.write(self.a, "memory", {"action": "add", "target": "user", "content": content}, version)
+            self.assertEqual(state, "pending_review")
+            pending = read(self.bridge, self.bridge.store, "pending", self.a, {})["records"]
+            proposal = next(item for item in pending if item["id"] == staged["pending_id"])
+            decision = {"subsystem": "memory", "id": proposal["id"], "revision": proposal["revision"], "decision": "approve"}
+            self.assertEqual(self.write(self.a, "decide", decision)[0], "applied")
+        original_user = self.view(None)["memories"]["USER.md"]
+        with native_scope(self.bridge.settings, self.a):
+            ordinary_batch = [{"action": "remove", "old_text": entry, "matched_entry": entry} for entry in project_entries]
+            result = load_on_disk_store().apply_batch("memory", ordinary_batch)
+        self.assertFalse(result["success"])
+        self.assertIn("Refusing to empty", result["error"])
+
+        version = self.view(self.a)["memory_versions"]["memory"]
+        self.assertEqual(self.write(self.a, "clear", {"target": "memory", "confirmed": True}, digest([]))[0], "conflict")
+        self.assertEqual(self.write(self.a, "clear", {"target": "memory", "confirmed": True}, version)[0], "applied")
+        self.assertNotIn("MEMORY.md", self.view(self.a)["memories"])
+        self.assertEqual(self.view(self.b)["memories"]["MEMORY.md"], other_entry)
+        self.assertEqual(self.view(None)["memories"]["USER.md"], original_user)
+        for content in project_entries:
+            self.assertEqual(self.write(self.a, "memory", {"action": "add", "content": content}, digest([]))[0], "failed")
+
+        version = self.view(None)["memory_versions"]["user"]
+        self.assertEqual(self.write(self.a, "clear", {"target": "user", "confirmed": True}, version)[0], "applied")
+        self.assertNotIn("USER.md", self.view(None)["memories"])
+        self.assertEqual(self.view(self.b)["memories"]["MEMORY.md"], other_entry)
+
     def test_owner_recovery_records_delete_before_reviewing_a_restored_file(self):
         from hermes_codex_learning.shared_storage import _intent_key, memory_path, native_scope, read, recover_memory_intents
         from tools.memory_tool import load_on_disk_store
