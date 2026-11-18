@@ -5,10 +5,10 @@ from unittest.mock import patch
 from dataclasses import replace
 from pathlib import Path
 
-from hermes_codex_learning.adaptation import Adapter, validate_workspace
+from hermes_codex_learning.adaptation import Adapter, validate_recipe, validate_workspace
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.store import atomic_json
-from hermes_codex_learning.updates import UpdateError, Updater
+from hermes_codex_learning.updates import UpdateError, Updater, file_hash
 
 
 class AdaptationGuardTests(unittest.TestCase):
@@ -89,3 +89,41 @@ class AdaptationGuardTests(unittest.TestCase):
         self.assertEqual(invoke.call_count, 2)
         self.assertEqual(verify.call_count, 2)
         self.assertFalse((updater.directory / "request.json").exists())
+
+    def test_site_only_adapter_preserves_reviewed_release_and_verifies_site_patch(self):
+        commit = "3b421578588243f920886e6fe79a6faa87ea026e"
+        for root in (self.trusted, self.workspace):
+            tag_dir = root / "patches/v0.23.1"
+            tag_dir.mkdir(parents=True, exist_ok=True)
+            patch_file = tag_dir / "native-learning-api-v1.patch"
+            patch_file.write_text("diff --git a/agent/learning_api.py b/agent/learning_api.py\n")
+            manifest = {
+                "upstream": "https://github.com/NousResearch/hermes-agent.git",
+                "tag": "v0.23.1",
+                "base_commit": commit,
+                "patch_file": "native-learning-api-v1.patch",
+                "patch_sha256": file_hash(patch_file),
+                "files": {"agent/learning_api.py": "a" * 64},
+                "mechanism_review": {"classification": "adapted", "reason": "shared learning", "agreed_plan": "docs/SHARED-LEARNING.zh-CN.md"},
+                "shared_learning_protocol": 1,
+            }
+            (tag_dir / "manifest.json").write_text(json.dumps(manifest))
+            (root / "patches/compatibility.json").write_text(json.dumps({
+                "schema": 1, "learning_api": 1, "releases": {"v0.23.1": "v0.23.1/manifest.json"},
+                "native_tests": ["tests/native.py"],
+            }))
+        site_patch = self.workspace / "patches/v0.23.1/site.patch"
+        site_patch.write_text("diff --git a/agent/route_binding.py b/agent/route_binding.py\n")
+        candidate_manifest = json.loads((self.workspace / "patches/v0.23.1/manifest.json").read_text())
+        candidate_manifest["site_patch_file"] = "site.patch"
+        candidate_manifest["site_patch_sha256"] = file_hash(site_patch)
+        (self.workspace / "patches/v0.23.1/manifest.json").write_text(json.dumps(candidate_manifest))
+
+        recipe = validate_recipe(self.trusted, self.workspace, "v0.23.1", commit)
+        self.assertEqual(recipe["site_patch_file"], "site.patch")
+        self.assertEqual(recipe["shared_learning_protocol"], 1)
+
+        tampered = {**candidate_manifest, "shared_learning_protocol": 2}
+        (self.workspace / "patches/v0.23.1/manifest.json").write_text(json.dumps(tampered))
+        with self.assertRaisesRegex(UpdateError, "cannot alter a reviewed upstream learning recipe"):
+            validate_recipe(self.trusted, self.workspace, "v0.23.1", commit)

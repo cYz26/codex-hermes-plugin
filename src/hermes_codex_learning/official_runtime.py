@@ -128,19 +128,22 @@ def reviewed_update_host(source: Path, before: str, recipe: dict | None = None) 
                for path, checksum in contract["files"].items())
 
 
-def guarded_native_update(source: Path, before: str, tag: str, commit: str, recipe: dict | None = None) -> int:
+def guarded_native_update(source: Path, before: str, tag: str, commit: str, recipe: dict | None = None,
+                          *, defer_gateway_restart: bool = False) -> int:
     """Run the official updater with a process-local check at target selection."""
-    from .updates import git
+    from .config import NETWORK_ENV_KEYS, Settings
+    from .updates import fetch_release, git, ls_remote_tag_commit, version
 
     if not reviewed_update_host(source, before, recipe) or git(source, "rev-parse", "HEAD") != before:
         raise RuntimeError("The official updater host changed or its update contract has not been reviewed")
     sys.path.insert(0, str(source))
-    sys.argv = ["hermes", "update", "--channel", "stable", "--yes"]
-    from hermes_cli import source_releases
-    from hermes_cli.main import PROJECT_ROOT, main
+    # PM may relaunch with its store Python. Preserve the caller's entry point
+    # until activation finishes so that relaunch re-enters this guarded runner.
+    import hermes_bootstrap
 
-    if PROJECT_ROOT.resolve() != source:
-        raise RuntimeError("Native updater resolved a different installation")
+    sys.argv = ["hermes", "update", "--channel", "stable", "--yes",
+                *(["--no-gateway-restart", "--no-backup"] if defer_gateway_restart else [])]
+    from hermes_cli import source_releases
     resolve = source_releases.resolve_source_target
 
     def checked_target(channel, git_cmd=None, cwd=None, **kwargs):
@@ -148,14 +151,46 @@ def guarded_native_update(source: Path, before: str, tag: str, commit: str, reci
             raise ValueError("Native updater selected a different channel or installation")
         if git(source, "rev-parse", "HEAD") != before or git(source, "status", "--porcelain", "--untracked-files=no"):
             raise ValueError("Official checkout changed before native update target selection")
-        return verify_update_target(resolve(channel, git_cmd, cwd, **kwargs), tag, commit)
+        if kwargs.get("forward_only") and (source / "pyproject.toml").is_file():
+            import tomllib
+            installed = tomllib.loads((source / "pyproject.toml").read_text(encoding="utf-8")).get("project", {}).get("version", "")
+            if installed:
+                if version("v" + installed) >= version(tag) and before != commit:
+                    raise ValueError("Hermes selected a different target than the tested official release")
+                kwargs = {**kwargs, "forward_only": False}
+        try:
+            target = resolve(channel, git_cmd, cwd, **kwargs)
+        except ValueError as exc:
+            if "rate limit" not in str(exc).lower():
+                raise
+            net_env = {key: os.environ[key] for key in NETWORK_ENV_KEYS if os.environ.get(key)}
+            probe_settings = Settings(source, source, source, Path(sys.executable), network_environment=net_env)
+            latest = fetch_release(probe_settings)
+            origin_commit = ls_remote_tag_commit("origin", tag, cwd=source)
+            if latest.get("tag") != tag or origin_commit != commit:
+                raise ValueError("Hermes selected a different target than the tested official release") from exc
+            ahead = False
+            selected_commit = commit
+            if kwargs.get("forward_only") and git_cmd is not None:
+                head = source_releases._head_containing(git_cmd, cwd, commit, source_releases.OFFICIAL_REPOSITORY)
+                if head is not None and head != commit:
+                    selected_commit, ahead = head, True
+            target = source_releases.SourceTarget(
+                "stable", "stable", source_releases.OFFICIAL_REPOSITORY,
+                commit=selected_commit, version=tag.removeprefix("v"), ahead=ahead,
+            )
+        return verify_update_target(target, tag, commit)
 
     source_releases.resolve_source_target = checked_target
+    from hermes_cli.main import PROJECT_ROOT, main
+
+    if PROJECT_ROOT.resolve() != source:
+        raise RuntimeError("Native updater resolved a different installation")
     return main() or 0
 
 
 def run_official_update(binding: dict, tag: str, commit: str, *, root: Path, env: dict, log: Path,
-                        host_recipe: dict | None = None) -> None:
+                        host_recipe: dict | None = None, defer_gateway_restart: bool = False) -> None:
     from .updates import UpdateError
 
     source = Path(binding["source"])
@@ -165,13 +200,21 @@ def run_official_update(binding: dict, tag: str, commit: str, *, root: Path, env
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from hermes_codex_learning.official_runtime import guarded_native_update
-raise SystemExit(guarded_native_update(Path(sys.argv[2]), *sys.argv[3:6], json.loads(sys.argv[6])))
+raise SystemExit(guarded_native_update(Path(sys.argv[2]), *sys.argv[3:6], json.loads(sys.argv[6]),
+                                       defer_gateway_restart=json.loads(sys.argv[7])))
 """
     env = {**env, "HERMES_HOME": str(source.parent)}
     env.pop("HERMES_RUNTIME_DIR", None)  # The official installation owns its own tool store.
+    if "GIT_CONFIG_COUNT" not in env:
+        env.update(
+            GIT_CONFIG_COUNT="2",
+            GIT_CONFIG_KEY_0="http.version", GIT_CONFIG_VALUE_0="HTTP/1.1",
+            GIT_CONFIG_KEY_1="credential.helper", GIT_CONFIG_VALUE_1="",
+        )
     with log.open("ab") as output:
         process = subprocess.run([binding["python"], "-I", "-B", "-c", program, str(root / "src"),
-                                  str(source), binding["commit"], tag, commit, json.dumps(host_recipe)], cwd=source, env=env,
+                                  str(source), binding["commit"], tag, commit, json.dumps(host_recipe),
+                                  json.dumps(bool(defer_gateway_restart))], cwd=source, env=env,
                                  stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
                                  start_new_session=True)
     if process.returncode:

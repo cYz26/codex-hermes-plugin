@@ -4,13 +4,18 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import urllib.parse
 from pathlib import Path
 
-from .config import Settings
+from .config import NETWORK_ENV_KEYS, Settings
 from .store import Store, atomic_json, digest
 
 
 def add_parsers(commands):
+    network = commands.add_parser("network-config", help="Preview or persist standard proxy environment variables for systemd/launchd updates")
+    network.add_argument("--settings")
+    network.add_argument("--clear", action="store_true", help="Remove persisted proxy environment variables")
+    network.add_argument("--apply", action="store_true")
     curator = commands.add_parser('curator-config', help='Preview or enable native Curator consolidation')
     curator.add_argument('--settings')
     curator.add_argument('--apply', action='store_true')
@@ -87,6 +92,26 @@ def add_parsers(commands):
 
 
 def execute(args):
+    if args.command == "network-config":
+        from .updates import Updater, exclusive
+        path = Settings.configuration_path(args.settings)
+        settings = Settings.load(path)
+        proposed = {} if args.clear else {key: os.environ[key] for key in sorted(NETWORK_ENV_KEYS) if os.environ.get(key)}
+        for key, value in proposed.items():
+            if "://" in value:
+                parsed = urllib.parse.urlsplit(value)
+                if parsed.username or parsed.password:
+                    raise ValueError(f"Proxy environment variable {key} cannot embed credentials")
+        backup = path.with_name("bridge.before-network-config.json")
+        if args.apply:
+            with exclusive(Updater(settings).lock):
+                current = json.loads(path.read_text())
+                if not backup.exists():
+                    atomic_json(backup, {"network_environment": current.get("network_environment", {})})
+                current["network_environment"] = proposed
+                atomic_json(path, current)
+        return {"settings": str(path), "network_environment": proposed,
+                "applied": args.apply, "service_reload_required": args.apply}
     if args.command == "publication-review":
         from .ipc import request
         params = {"cwd": args.cwd, "action": args.action, "name": args.name, "revision": args.revision, "file": args.file}

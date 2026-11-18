@@ -14,26 +14,56 @@ from .store import atomic_json
 from .updates import UpdateError, file_hash, git
 
 
-def prepare_site(updater, recipe: dict, record: dict, interpreter: Path, command) -> None:
-    manifest_path = updater.settings.site_manifest
-    if manifest_path is None:
-        return
+def resolve_site_manifest(manifest_path: Path, recipe: dict) -> tuple[dict, Path, str]:
     current = manifest_path.parent / "current-site.json"
-    manifest = json.loads((current if current.exists() else manifest_path).read_text())
-    if manifest.get("state") not in {"prepared", "verified"} or not manifest.get("source_tree"):
-        raise UpdateError("Site migration needs sealed source and preserved regression tests")
-    patch = Path(manifest.get("patch_path") or manifest_path.parent / "site.patch")
     if recipe.get("site_patch_file"):
+        manifest = json.loads((current if current.exists() else manifest_path).read_text())
+        if manifest.get("state") not in {"prepared", "verified"} or not manifest.get("source_tree"):
+            raise UpdateError("Site migration needs sealed source and preserved regression tests")
         patch = Path(recipe["patch_path"]).parent / recipe["site_patch_file"]
         if not patch.resolve().is_relative_to(Path(recipe["patch_path"]).parent.resolve()):
             raise UpdateError("Site patch escapes the accepted adapter")
         expected = recipe.get("site_patch_sha256")
-    else:
-        if manifest["base_commit"] != recipe["base_commit"]:
-            raise UpdateError("New official release needs a rebased site adapter")
-        expected = manifest["patch_sha256"]
-    if file_hash(patch) != expected:
-        raise UpdateError("Site adapter patch changed")
+        if not patch.is_file() or file_hash(patch) != expected:
+            raise UpdateError("Site adapter patch changed")
+        return manifest, patch, expected
+    candidates = []
+    if isinstance(recipe.get("tag"), str):
+        candidates.append(manifest_path.parent / "releases" / recipe["tag"] / "migration.json")
+    candidates.extend([manifest_path, current])
+    saw_sealed = False
+    for candidate in dict.fromkeys(candidates):
+        if not candidate.is_file() or candidate.is_symlink():
+            continue
+        manifest = json.loads(candidate.read_text())
+        if manifest.get("state") not in {"prepared", "verified"} or not manifest.get("source_tree"):
+            continue
+        saw_sealed = True
+        if manifest.get("base_commit") != recipe["base_commit"]:
+            continue
+        patch = Path(manifest.get("patch_path") or candidate.parent / "site.patch")
+        expected = manifest.get("patch_sha256")
+        if not patch.is_file() or patch.is_symlink() or file_hash(patch) != expected:
+            raise UpdateError("Site adapter patch changed")
+        return manifest, patch, expected
+    if not saw_sealed:
+        raise UpdateError("Site migration needs sealed source and preserved regression tests")
+    raise UpdateError("New official release needs a rebased site adapter")
+
+
+def has_site_adapter(manifest_path: Path, recipe: dict) -> bool:
+    try:
+        resolve_site_manifest(manifest_path, recipe)
+        return True
+    except (OSError, ValueError, KeyError, UpdateError):
+        return False
+
+
+def prepare_site(updater, recipe: dict, record: dict, interpreter: Path, command) -> None:
+    manifest_path = updater.settings.site_manifest
+    if manifest_path is None:
+        return
+    manifest, patch, expected = resolve_site_manifest(manifest_path, recipe)
     folder = Path(record["source"]).parent
     source = folder / "site-source"
     command("site-clone", ["git", "clone", "--quiet", "--no-hardlinks", record["source"], source])

@@ -87,6 +87,7 @@ class SystemdTests(unittest.TestCase):
         self.assertIn('WorkingDirectory=' + str(self.settings.project) + '\n', unit)
         self.assertIn('plugin %%n $$HOME \\"quoted\\"', unit)
         self.assertIn('Environment="HERMES_HOME=' + str(self.settings.home) + '"', unit)
+        self.assertIn(str(Path.home() / ".local/bin"), unit)
         self.assertIn("TimeoutStopSec=60s", unit)
         self.assertNotIn("osascript", unit)
 

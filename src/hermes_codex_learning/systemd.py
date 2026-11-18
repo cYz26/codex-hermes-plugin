@@ -80,7 +80,8 @@ def _quoted(value: str | Path, *, command: bool = False) -> str:
 
 def render_unit(settings: Settings, settings_path: Path, *, plugin_root: Path = ROOT) -> str:
     argv = [Path(sys.executable).absolute(), "-I", "-B", plugin_root / "scripts/serve.py", settings_path.absolute()]
-    environment = {**settings.native_environment(), "PYTHONUNBUFFERED": "1"}
+    service_path = f"{Path.home() / '.local/bin'}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    environment = {"PATH": service_path, **settings.native_environment(), "PYTHONUNBUFFERED": "1"}
     # WorkingDirectory takes one path verbatim; unlike ExecStart it does not remove quotes.
     _quoted(settings.project)  # Reject newlines/NUL before writing a unit.
     directory = str(settings.project).replace("%", "%%")

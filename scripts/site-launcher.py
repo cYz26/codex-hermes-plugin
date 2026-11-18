@@ -16,6 +16,20 @@ if not python.is_file():
 if not python.is_file():
     raise SystemExit("Verified Hermes interpreter is unavailable; inspect bridge update status")
 root = Path(__file__).resolve().parent.parent
+own_root = root
+pointer = Path.home() / ".hermes-codex-learning/installation.json"
+if pointer.is_file() and not pointer.is_symlink():
+    try:
+        installed_root = Path(json.loads(pointer.read_text()).get("root") or "")
+        if installed_root.is_absolute() and (installed_root / "src/hermes_codex_learning").is_dir():
+            root = installed_root
+    except (OSError, ValueError, TypeError):
+        pass
+if root != own_root:
+    active_launcher = root / "scripts/site-launcher.py"
+    if not active_launcher.is_file():
+        raise SystemExit("Installed managed Hermes launcher is unavailable")
+    os.execv(sys.executable, [sys.executable, "-I", "-B", str(active_launcher), str(binding_path), *args])
 sys.path.insert(0, str(root / "src"))
 if args and args[0] == "update":
     if any(value not in {"--yes", "--channel", "stable"} for value in args[1:]):
@@ -27,11 +41,16 @@ if args and args[0] == "update":
 # discovery. A private script name alone is not proof of gateway ownership.
 program = (
     "import sys\nfrom pathlib import Path\n"
-    + "sys.path.insert(0, " + repr(str(root / "src")) + ")\n"
     + "sys.path.insert(0, " + repr(binding["source"]) + ")\n"
+    + "sys.path.insert(1, " + repr(str(root / "src")) + ")\n"
 )
 if str(python) == binding["python"] and binding.get("fallback_python"):
     program += ("from hermes_codex_learning.official_runtime import lease_official_python\n"
                 + "lease_official_python(Path(" + repr(str(python)) + "))\n")
-program += "from hermes_cli.main import main\nsys.argv[0] = 'hermes'\nmain()\n"
+program += (
+    "from hermes_codex_learning.site_runtime import bind_site_cli\n"
+    + "bind_site_cli(Path(" + repr(binding["source"]) + "), Path(" + repr(str(binding_path))
+    + "), Path(" + repr(str(root / "scripts/site-launcher.py")) + "))\n"
+    + "from hermes_cli.main import main\nsys.argv[0] = 'hermes'\nmain()\n"
+)
 os.execv(str(python), [str(python), "-I", "-B", "-c", program, *args])

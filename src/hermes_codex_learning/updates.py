@@ -16,6 +16,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 import uuid
 from pathlib import Path
 
@@ -159,14 +160,24 @@ def require_shared_source(source: Path) -> dict:
     raise UpdateError("Select a verified Hermes backend with shared learning protocol 1")
 
 
-def github_json(settings: Settings, url: str) -> dict:
-    proxies = {key.removesuffix("_proxy"): value for key, value in
-               {**os.environ, **settings.network_environment}.items() if key in {"http_proxy", "https_proxy"}}
+def _url_opener(settings: Settings, url: str):
+    merged = {**os.environ, **settings.network_environment}
+    host = urllib.parse.urlsplit(url).hostname or ""
+    no_proxy = (settings.network_environment.get("no_proxy") or settings.network_environment.get("NO_PROXY")
+                or os.environ.get("no_proxy") or os.environ.get("NO_PROXY") or "")
+    if host and no_proxy and urllib.request.proxy_bypass_environment(host, {"no": no_proxy}):
+        return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    proxies = {key.removesuffix("_proxy"): value for key, value in merged.items()
+               if key in {"http_proxy", "https_proxy"} and value}
     for key in ("HTTP_PROXY", "HTTPS_PROXY"):
         value = settings.network_environment.get(key) or os.environ.get(key)
         if value:
             proxies.setdefault(key.lower().removesuffix("_proxy"), value)
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
+    return urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
+
+
+def github_json(settings: Settings, url: str) -> dict:
+    opener = _url_opener(settings, url)
     request = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
                                                           "User-Agent": "hermes-codex-learning"})
     with opener.open(request, timeout=20) as response:
@@ -180,9 +191,9 @@ def fetch_release(settings: Settings) -> dict:
     except urllib.error.HTTPError as exc:
         if exc.code not in {403, 429}:
             raise
-        request = urllib.request.Request("https://github.com/NousResearch/hermes-agent/releases/latest",
-                                         headers={"User-Agent": "hermes-codex-learning"})
-        with urllib.request.urlopen(request, timeout=20) as response:
+        latest_url = "https://github.com/NousResearch/hermes-agent/releases/latest"
+        request = urllib.request.Request(latest_url, headers={"User-Agent": "hermes-codex-learning"})
+        with _url_opener(settings, latest_url).open(request, timeout=20) as response:
             target = response.geturl()
         prefix = "https://github.com/NousResearch/hermes-agent/releases/tag/"
         if not target.startswith(prefix):
@@ -199,6 +210,27 @@ def fetch_release(settings: Settings) -> dict:
             "url": f"https://github.com/NousResearch/hermes-agent/releases/tag/{tag}"}
 
 
+def ls_remote_tag_commit(remote: str, tag: str, *, env: dict | None = None, cwd: Path | None = None) -> str:
+    version(tag)
+    run_env = {**(os.environ if env is None else env), "GIT_TERMINAL_PROMPT": "0"}
+    argv = ["git", "-c", "http.version=HTTP/1.1", "-c", "credential.helper=", "ls-remote", "--tags",
+            remote, "refs/tags/" + tag, "refs/tags/" + tag + "^{}"]
+    last_error = None
+    for attempt in range(3):
+        try:
+            result = subprocess.run(argv, cwd=cwd, env=run_env, capture_output=True, text=True, timeout=60, check=True)
+            refs = {line.split()[1]: line.split()[0] for line in result.stdout.splitlines() if len(line.split()) == 2}
+            commit = refs.get("refs/tags/" + tag + "^{}") or refs.get("refs/tags/" + tag)
+            if commit and re.fullmatch(r"[a-f0-9]{40}", commit):
+                return commit
+            raise UpdateError("Official Git ref did not resolve")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(attempt + 1)
+    raise last_error
+
+
 def official_commit(settings: Settings, tag: str) -> str:
     version(tag)
     base = "https://api.github.com/repos/NousResearch/hermes-agent/git/"
@@ -207,15 +239,7 @@ def official_commit(settings: Settings, tag: str) -> str:
     except urllib.error.HTTPError as exc:
         if exc.code not in {403, 429}:
             raise
-        result = subprocess.run(["git", "-c", "credential.helper=", "ls-remote", UPSTREAM,
-                                 "refs/tags/" + tag, "refs/tags/" + tag + "^{}"],
-                                env={**os.environ, **settings.network_environment, "GIT_TERMINAL_PROMPT": "0"},
-                                capture_output=True, text=True, timeout=60, check=True)
-        refs = {line.split()[1]: line.split()[0] for line in result.stdout.splitlines() if len(line.split()) == 2}
-        commit = refs.get("refs/tags/" + tag + "^{}") or refs.get("refs/tags/" + tag)
-        if not commit or not re.fullmatch(r"[a-f0-9]{40}", commit):
-            raise UpdateError("Official Git ref did not resolve") from exc
-        return commit
+        return ls_remote_tag_commit(UPSTREAM, tag, env={**os.environ, **settings.network_environment})
     for _ in range(4):
         if obj.get("type") == "commit" and re.fullmatch(r"[a-f0-9]{40}", obj.get("sha", "")):
             return obj["sha"]
@@ -353,7 +377,14 @@ class Updater:
                         except UpdateError as exc:
                             state, assessment = "plan_required", {"state": "plan_required", "reason": str(exc)}
                         else:
-                            if official_commit_id and official_commit_id != recipes[tag]["base_commit"]:
+                            if self.settings.site_manifest:
+                                from .site_updates import has_site_adapter
+                                if not has_site_adapter(self.settings.site_manifest, recipes[tag]):
+                                    state = "adaptation_required"
+                                    assessment = {"state": "adaptation_required", "from": current, "to": tag,
+                                                  "site_only": True,
+                                                  "reason": "New official release needs a rebased site adapter"}
+                            if state == "available" and official_commit_id and official_commit_id != recipes[tag]["base_commit"]:
                                 state = "waiting_for_official"
                                 result["reason"] = "The official installation has not selected this release"
                     else:
@@ -381,7 +412,9 @@ class Updater:
                             state, tag = "available", current
                 result.update(state=state, current=current, latest=release,
                               last_successful_check=result["checked_at"])
-                if state == "available":
+                if state in {"available", "adaptation_required"} and version(tag) > version(current):
+                    result["target"] = tag
+                elif state == "available":
                     result["target"] = tag
                 if state == "current" and self.settings.source.parent.parent == self.directory / "candidates":
                     active = self.runtime_info(self.settings.source)
@@ -442,6 +475,10 @@ class Updater:
                       "source": str(source), "python": str(runtime / "bin/python"),
                       "commit": recipe["base_commit"], "recipe": recipe["recipe"],
                       "plugin": plugin_hash(self.root), "gates": [], "logs": str(folder)}
+            if self.settings.site_manifest:
+                from .site_updates import resolve_site_manifest
+                with contextlib.suppress(UpdateError, OSError, ValueError, KeyError):
+                    record["site_adapter"] = resolve_site_manifest(self.settings.site_manifest, recipe)[2]
             if preflight:
                 record["preflight_only"] = True
             atomic_json(self.directory / "candidate.json", record)
@@ -452,6 +489,7 @@ class Updater:
                     atomic_json(self.directory / "candidate.json", record)
 
                 binding = None
+                cache = None
                 if official_source:
                     from .official_runtime import inspect_official
 
@@ -465,11 +503,33 @@ class Updater:
                     fetch_from = str(cache) if cache.exists() else UPSTREAM
                     ref = recipe["base_commit"] if cache.exists() else "refs/tags/" + tag
                 command("git-init", ["git", "init", source])
-                command("fetch", ["git", "-c", "http.version=HTTP/1.1", "-C", source, "fetch", "--depth=1",
-                                  fetch_from, ref], timeout=900)
+                fetch_argv = ["git", "-c", "http.version=HTTP/1.1", "-c", "credential.helper=",
+                              "-C", source, "fetch", "--depth=1", fetch_from, ref]
+                for attempt in range(3 if fetch_from == UPSTREAM else 1):
+                    try:
+                        command("fetch", fetch_argv, timeout=900)
+                        break
+                    except (UpdateError, subprocess.TimeoutExpired):
+                        if attempt == 2 or fetch_from != UPSTREAM:
+                            raise
+                        time.sleep(attempt + 1)
                 command("checkout", ["git", "-C", source, "checkout", "--detach", "FETCH_HEAD"])
                 if git(source, "rev-parse", "HEAD") != recipe["base_commit"]:
                     raise UpdateError("Official tag moved: fetched commit differs from approved recipe")
+                if cache is not None and not cache.exists():
+                    cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    stage_cache = cache.with_name(f".{recipe['base_commit']}.{uuid.uuid4().hex}")
+                    try:
+                        run_command(["git", "clone", "--quiet", "--no-hardlinks", source, stage_cache],
+                                    cwd=folder, env=env, log=folder / "fetch.log", timeout=120)
+                        if git(stage_cache, "rev-parse", "HEAD") == recipe["base_commit"] and not cache.exists():
+                            stage_cache.rename(cache)
+                    except Exception:
+                        pass
+                    finally:
+                        if stage_cache.exists():
+                            import shutil
+                            shutil.rmtree(stage_cache, ignore_errors=True)
                 command("patch-check", ["git", "-C", source, "apply", "--check", recipe["patch_path"]])
                 command("patch", ["git", "-C", source, "apply", "--index", recipe["patch_path"]])
                 record["source_tree"] = source_seal(source, recipe)
@@ -625,7 +685,8 @@ class Updater:
                 binding = inspect_official(source, before)
                 run_official_update(binding, candidate["tag"], candidate["commit"], root=self.root,
                                     env=self.environment(source.parent), log=Path(record["log"]),
-                                    host_recipe=next((value for value in self.recipes().values() if value["base_commit"] == before), None))
+                                    host_recipe=next((value for value in self.recipes().values() if value["base_commit"] == before), None),
+                                    defer_gateway_restart=bool(settings.site_manifest))
                 if git(source, "rev-parse", "HEAD") != candidate["commit"]:
                     raise UpdateError("Official installer did not publish the tested commit")
                 record["state"] = "published"
@@ -656,9 +717,15 @@ class Updater:
         previous = read_json(self.directory / "candidate.json", {})
         old_binding = previous.get("official_runtime") or {}
         selected = result.get("official", {})
+        site_adapter = None
+        if self.settings.site_manifest and target in self.recipes():
+            from .site_updates import resolve_site_manifest
+            with contextlib.suppress(UpdateError, OSError, ValueError, KeyError):
+                site_adapter = resolve_site_manifest(self.settings.site_manifest, self.recipes()[target])[2]
         if (previous.get("state") in {"failed", "failed_activation"}
                 and previous.get("tag") == target
                 and previous.get("plugin") == plugin_hash(self.root)
+                and previous.get("site_adapter") == site_adapter
                 and previous.get("preflight_only", False) == preflight
                 and old_binding.get("stamp") == selected.get("stamp")
                 and old_binding.get("python") == selected.get("python")):
