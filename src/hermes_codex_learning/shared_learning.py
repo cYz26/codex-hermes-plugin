@@ -23,6 +23,18 @@ class Rejected(PermissionError):
     """A validated client request that will be refused on every retry."""
 
 
+def _require_enterprise_boundary(settings):
+    if settings is None:
+        return None
+    from .enterprise import MODE, boundary
+    if settings.data_policy.get("mode") != MODE:
+        return None
+    approved = boundary(settings.data_policy)
+    if not approved:
+        raise PermissionError("Enterprise learning boundary is unavailable or changed")
+    return approved
+
+
 def _id(value):
     if not isinstance(value, str) or not REQUEST_ID.fullmatch(value):
         raise ValueError("Invalid shared learning identifier")
@@ -155,13 +167,16 @@ def capture_native(settings, store, project, params):
             "event_id": event_id, "cursor": row[0] if row else None}
 
 
-def enqueue(store, project, params, *, executor="Hermes"):
+def enqueue(store, project, params, *, executor="Hermes", settings=None):
     request_id = _id(params.get("request_id"))
     operation, args = params.get("operation"), params.get("args", {})
     if operation not in WRITES or not isinstance(args, dict) or len(dumps(args).encode()) > 128 * 1024:
         raise ValueError("Invalid shared learning operation")
-    from .enterprise import explicitly_restricted
+    from .enterprise import MODE, explicitly_restricted, scrub
+    _require_enterprise_boundary(settings)
     if redact(args) != args or explicitly_restricted(args):
+        raise PermissionError("Shared write contains restricted data")
+    if settings is not None and settings.data_policy.get("mode") == MODE and scrub(args) != args:
         raise PermissionError("Shared write contains restricted data")
     if params.get("base") is not None and not re.fullmatch(r"[a-f0-9]{64}", str(params["base"])):
         raise ValueError("Invalid shared knowledge version")
@@ -185,7 +200,9 @@ def receipt(store, project, request_id):
             if row else {"request_id": request_id, "state": "unknown"})
 
 
-def status(store, project):
+def status(store, project, *, settings=None):
+    from .enterprise import boundary
+    active = boundary(settings.data_policy) if settings is not None else None
     counts = dict(store.db.execute("SELECT state,COUNT(*) FROM shared_writes WHERE project IS ? GROUP BY state", (project,)))
     rows = store.db.execute(
         "SELECT id,state,payload,result FROM shared_writes WHERE project IS ? ORDER BY rowid DESC LIMIT 15", (project,))
@@ -203,8 +220,15 @@ def status(store, project):
         "SELECT json_extract(value,'$.source_event[0]'),json_extract(value,'$.name'),json_extract(value,'$.version') "
         "FROM meta WHERE key LIKE 'issued-delivery:%' AND json_extract(value,'$.project') IS ? ORDER BY rowid DESC LIMIT 10",
         (project,))]
-    published = [{"name": name, "version": item["artifact"]["version"]} for name, item in
-                 sorted(store.get("publications-v1", {}).items()) if item.get("check", {}).get("audience") != "enterprise"]
+    published = []
+    for name, item in sorted(store.get("publications-v1", {}).items()):
+        check = item.get("check", {})
+        audience = check.get("audience", "public")
+        if audience == "enterprise":
+            if not active or check.get("boundary_id") != active["id"]:
+                continue
+        published.append({"name": name, "version": item["artifact"]["version"],
+                          **({"audience": "enterprise"} if audience == "enterprise" else {})})
     return {"project": project, "writes": counts, "recent": jobs, "contributions": contributions,
             "deliveries": deliveries, "published": published, "protocol": VERSION}
 
@@ -272,7 +296,7 @@ def rpc(bridge, method, params):
             with closing(Store(settings.state)) as store:
                 if kind == "event":
                     return capture_native(settings, store, project, params)
-                return enqueue(store, project, params)
+                return enqueue(store, project, params, settings=settings)
         except (ValueError, PermissionError) as exc:
             raise Rejected(str(exc)) from exc
     project = _project(settings, params.get("cwd"))
@@ -283,7 +307,7 @@ def rpc(bridge, method, params):
         if kind == "receipt":
             return receipt(store, project, params.get("request_id"))
         if kind == "status":
-            return status(store, project)
+            return status(store, project, settings=settings)
         if kind not in READS:
             raise ValueError("Unknown shared learning request")
         if not bridge.resume.is_set() or not bridge.ready.is_set():

@@ -106,6 +106,60 @@ class SharedTransportTests(unittest.TestCase):
         self.assertEqual(enriched["status"],"completed")
         self.assertEqual(enriched["tools"]["test"]["result"]["exit_code"],0)
 
+    def test_trusted_enterprise_shared_learning_enforces_boundary_and_scrubs_writes(self):
+        from dataclasses import replace
+        from hermes_codex_learning.enterprise import boundary
+        from hermes_codex_learning.shared_learning import status
+        from hermes_codex_learning.shared_storage import _memory_boundary_key, _visible_entries
+        from test_enterprise_policy import enterprise_fixture
+
+        policy, model_config = enterprise_fixture(self.root)
+        enterprise_settings = replace(self.settings, data_policy=policy)
+        approved = boundary(policy)
+        self.assertIsNotNone(approved)
+
+        with self.assertRaisesRegex(PermissionError, "restricted"):
+            enqueue(self.store, str(self.project), {
+                "operation": "memory", "request_id": "cookie-write", "surface": "cli",
+                "args": {"action": "add", "content": "Cookie: session=secret-value"},
+            }, settings=enterprise_settings)
+
+        accepted = enqueue(self.store, str(self.project), {
+            "operation": "memory", "request_id": "ok-write", "surface": "cli",
+            "args": {"action": "add", "content": "Internal build uses make check."},
+        }, settings=enterprise_settings)
+        self.assertEqual(accepted["state"], "queued")
+
+        self.store.set("publications-v1", {
+            "learned-enterprise-ops": {
+                "artifact": {"version": "v-ent"},
+                "check": {"audience": "enterprise", "boundary_id": approved["id"]},
+            }
+        })
+        visible_status = status(self.store, str(self.project), settings=enterprise_settings)
+        self.assertEqual(visible_status["published"],
+                         [{"name": "learned-enterprise-ops", "version": "v-ent", "audience": "enterprise"}])
+
+        entry = "Internal build uses make check."
+        self.store.set("shared-enterprise-memory-boundaries", {
+            _memory_boundary_key(str(self.project), "memory", digest(entry)): approved["id"],
+        })
+        self.assertEqual(_visible_entries(enterprise_settings, self.store, str(self.project), "memory", [entry]), [entry])
+
+        # Switching to non-enterprise mode hides enterprise-scoped shared memories without deleting them.
+        public_settings = replace(enterprise_settings, data_policy={"enabled": True, "workflow_projection": True})
+        self.assertEqual(_visible_entries(public_settings, self.store, str(self.project), "memory", [entry]), [])
+
+        # Tampering with model_config invalidates the enterprise boundary and blocks new shared writes and reads.
+        model_config.write_text("model: changed\n")
+        self.assertEqual(_visible_entries(enterprise_settings, self.store, str(self.project), "memory", [entry]), [])
+        self.assertEqual(status(self.store, str(self.project), settings=enterprise_settings)["published"], [])
+        with self.assertRaisesRegex(PermissionError, "Enterprise learning boundary"):
+            enqueue(self.store, str(self.project), {
+                "operation": "memory", "request_id": "blocked-write", "surface": "cli",
+                "args": {"action": "add", "content": "Another note."},
+            }, settings=enterprise_settings)
+
 
 @unittest.skipUnless(os.getenv("HERMES_LEARNING_NATIVE_SOURCE"), "requires the patched native test runtime")
 class SharedNativeStoreTests(unittest.TestCase):

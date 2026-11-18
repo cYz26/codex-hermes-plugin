@@ -18,8 +18,9 @@ from .updates import ROOT, UpdateError, Updater, catalog, exclusive, read_json, 
 # These are the stores used by Learning API v1, native review and Curator.
 # Never restore the hook outbox or any shared/root authentication store.
 DATA_PATHS = ("config.yaml", "SOUL.md", "memories", "skills", "learning", "sessions", "state",
-              ".curator_backups", "state.db", "state.db-wal", "state.db-shm")
+              "pending", "shared-knowledge", ".curator_backups", "state.db", "state.db-wal", "state.db-shm")
 DERIVED_KEYS = ("knowledge-index-v1", "publications-v1", "publication-decisions", "publication-context-version",
+               "publication-reviews-v1", "shared-enterprise-memory-boundaries",
                "skill-versions-v1", "workflow-skill-attestations", "semantic-skill-attestations",
                "semantic-memory-attestations", "publication-aliases", "artifact-read-cache",
                "native-lifecycle-cursor", "native-lifecycle-status", "archived-skill-origins",
@@ -232,6 +233,8 @@ class Supervisor:
             self.worker.drain()
             if read_json(self.config) != before:
                 raise UpdateError("Settings changed while draining; update deferred")
+            model_config_path = updater.settings.home / "config.yaml"
+            before_model_config = model_config_path.read_bytes() if model_config_path.is_file() and not model_config_path.is_symlink() else None
             backup = updater.directory / "snapshots" / uuid.uuid4().hex
             snapshot(updater.settings, backup)
             if read_json(self.config) != before:
@@ -249,6 +252,8 @@ class Supervisor:
                 atomic_json(transaction_path, transaction)
                 self.worker.start(Settings.load(self.config), self.config, paused=True)
                 self.worker.ready()
+                from .enterprise import refresh_schema_only_boundary
+                refresh_schema_only_boundary(Settings.load(self.config).data_policy, before_model_config)
                 atomic_json(updater.directory / "previous.json", previous)
                 # Commit BEFORE resuming. A crash after this point restarts the new
                 # worker, never restores a snapshot over newly learned artifacts.

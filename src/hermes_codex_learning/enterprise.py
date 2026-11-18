@@ -46,6 +46,45 @@ def make_boundary(settings):
             "body_learning":True,"internal_sharing":True,"approved_at":time.time()}
 
 
+def _without_schema_version(raw: bytes) -> tuple[bytes, int]:
+    text = raw.decode("utf-8")
+    cleaned, count = re.subn(r"(?m)^_config_version:\s*\d+\s*$", "_config_version: 0", text)
+    return cleaned.encode("utf-8"), count
+
+
+def refresh_schema_only_boundary(policy: dict, before_bytes: bytes | None) -> bool:
+    """Preserve an active enterprise boundary across pure _config_version bumps."""
+    if before_bytes is None or policy.get("mode") != MODE:
+        return False
+    try:
+        path = Path(policy["enterprise_boundary"])
+        if not path.is_absolute() or path.is_symlink() or path.stat().st_uid != os.getuid() or path.stat().st_size > 16384:
+            return False
+        record = json.loads(path.read_text())
+        config = Path(record["model_config"])
+        if (record.get("schema_version") != 1 or record.get("authority") != AUTHORITY
+                or record.get("hostname") != socket.gethostname() or record.get("uid") != os.getuid()
+                or record.get("body_learning") is not True or not config.is_absolute()
+                or config.is_symlink() or config.stat().st_uid != os.getuid()):
+            return False
+        before_sha = hashlib.sha256(before_bytes).hexdigest()
+        if record.get("model_config_sha256") != before_sha:
+            return False
+        after_bytes = config.read_bytes()
+        after_sha = hashlib.sha256(after_bytes).hexdigest()
+        if after_sha == before_sha:
+            return False
+        norm_before, c1 = _without_schema_version(before_bytes)
+        norm_after, c2 = _without_schema_version(after_bytes)
+        if c1 != 1 or c2 != 1 or norm_before != norm_after:
+            return False
+        from .store import atomic_json
+        atomic_json(path, {**record, "model_config_sha256": after_sha})
+        return True
+    except (OSError, ValueError, KeyError, TypeError, UnicodeDecodeError):
+        return False
+
+
 def explicitly_restricted(value):
     if isinstance(value,dict):
         for key,item in value.items():

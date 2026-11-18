@@ -5,6 +5,7 @@
 ## 使用范围
 
 - 项目记忆按当前工作区的 Git 根或目录读取。无工作区时，仅提供用户记忆和已发布通用技能。两端使用相同项目路径时，共用同一个原生 MemoryStore。
+- 在已绑定[企业专用学习策略](./ENTERPRISE-LEARNING.zh-CN.md)（`trusted_enterprise`）的开发机上，共享学习沿用同一主机、账号与模型配置摘要边界：企业内共享技能保留 `audience=enterprise`，企业期间写入的共享记忆绑定该边界标识；模型配置变化或停用企业模式后自动隐藏企业共享记忆并拒绝越界写入，不会转为公开内容。
 - 每个项目的 `MEMORY.md` 和用户的 `USER.md` 各有独立容量。用户级写入走原生待审队列。两端的技能读取使用相同的已发布或当前项目专属版本。
 - Desktop 和 CLI 使用 `/memory pending` 查看共享队列，以及 `/memory approve <id>`、`/memory reject <id>` 处理单条提案。Desktop 的待审列表附内容摘要，经典 CLI 可用 `/memory diff <id>` 查看提案详情。原生 `/skills` 的发布前写入审批和既有 Codex 通用技能发布审批仍各自承担原本的职责。
 - Journey 编辑、删除和技能归档携带当前版本。Desktop 启动时通过 `--cwd` 选定 Journey 的管理工作区。聊天的学习与记忆使用实际会话工作区。切换工作区后创建新会话加载对应快照。

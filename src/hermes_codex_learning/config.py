@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -51,8 +52,7 @@ class Settings:
             if (self.shared_profile is None or not self.shared_profile.is_absolute()
                     or self.shared_profile.resolve() == self.home.resolve()
                     or not re.fullmatch(r"[a-f0-9]{48}", self.shared_client_id or "")
-                    or self.capture_scope != "global" or not self.checked_publication
-                    or self.data_policy.get("mode") == "trusted_enterprise"):
+                    or self.capture_scope != "global" or not self.checked_publication):
                 raise ValueError("Shared learning requires an independent local profile, global capture and checked publication")
         if any(not isinstance(value, bool) for value in (self.proactive,self.quality_checks,self.retention_enabled,
                                                        self.review_retry_enabled)):
@@ -130,9 +130,19 @@ class Settings:
         if self.capture_scope != "global":
             return None
         # A .git file is also a root (worktree/submodule). No shell or network lookup.
+        # Ignore sticky/shared directories (such as /tmp) and directories or .git markers
+        # owned by another UID so stray shared-host markers cannot merge unrelated workspaces.
+        uid = os.getuid()
         for candidate in (path, *path.parents):
-            if (candidate / ".git").exists():
-                return str(candidate)
+            try:
+                cand_stat = candidate.stat()
+                if cand_stat.st_uid != uid or (cand_stat.st_mode & stat.S_ISVTX):
+                    continue
+                marker = candidate / ".git"
+                if marker.exists() and marker.lstat().st_uid == uid:
+                    return str(candidate)
+            except OSError:
+                continue
         return str(path)  # Non-Git and projectless chats keep their actual host cwd.
 
     @classmethod

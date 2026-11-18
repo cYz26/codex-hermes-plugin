@@ -55,15 +55,33 @@ def _removals(store, project, target):
                                              (_target_scope(project, target), target))}
 
 
-def _visible_entries(store, project, target, entries):
+def _memory_boundary_key(project, target, item_digest):
+    return f"{_target_scope(project, target)}:{target}:{item_digest}"
+
+
+def _visible_entries(settings, store, project, target, entries):
+    from .enterprise import MODE, boundary
+    active = boundary(settings.data_policy)
+    if settings.data_policy.get("mode") == MODE and not active:
+        return []
     removed = _removals(store, project, target)
-    return [entry for entry in dict.fromkeys(entries) if digest(entry) not in removed]
+    enterprise_map = store.get("shared-enterprise-memory-boundaries", {})
+    visible = []
+    for entry in dict.fromkeys(entries):
+        item_digest = digest(entry)
+        if item_digest in removed:
+            continue
+        required = enterprise_map.get(_memory_boundary_key(project, target, item_digest))
+        if required and (not active or active["id"] != required):
+            continue
+        visible.append(entry)
+    return visible
 
 
 def _entries(settings, store, project, target):
     if project is None and target == "memory":
         return []
-    return _visible_entries(store, project, target, _raw_entries(memory_path(settings, project, target)))
+    return _visible_entries(settings, store, project, target, _raw_entries(memory_path(settings, project, target)))
 
 
 def memory_view(settings, store, project):
@@ -75,6 +93,9 @@ def memory_view(settings, store, project):
 
 
 def _guard_memory(settings, project, target, before, after):
+    from .enterprise import MODE, boundary
+    if settings.data_policy.get("mode") == MODE and not boundary(settings.data_policy):
+        return "Enterprise learning boundary is unavailable or changed"
     with closing(Store(settings.state)) as store:
         if store.get(_intent_key(project, target)):
             return "An earlier memory write requires recovery"
@@ -95,8 +116,15 @@ def _finish_memory_intent(settings, store, key, record):
         return False
     with store.db:
         if current == record["after"]:
-            store.db.executemany("INSERT OR IGNORE INTO shared_memory_removals VALUES (?,?,?)",
-                                 ((_target_scope(project, target), target, item) for item in record["removed"]))
+            if record.get("removed"):
+                store.db.executemany("INSERT OR IGNORE INTO shared_memory_removals VALUES (?,?,?)",
+                                     ((_target_scope(project, target), target, item) for item in record["removed"]))
+            if record.get("added") and record.get("enterprise_boundary"):
+                boundaries = store.get("shared-enterprise-memory-boundaries", {})
+                for item in record["added"]:
+                    boundaries[_memory_boundary_key(project, target, item)] = record["enterprise_boundary"]
+                store.db.execute("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                                 ("shared-enterprise-memory-boundaries", dumps(boundaries)))
         store.db.execute("DELETE FROM meta WHERE key=?", (key,))
     return True
 
@@ -109,15 +137,19 @@ def recover_memory_intents(settings, store):
 
 @contextmanager
 def _commit_memory(settings, project, target, before, after):
+    from .enterprise import boundary
+    approved = boundary(settings.data_policy)
     removed = sorted(digest(entry) for entry in set(before) - set(after))
-    if not removed:
+    added = sorted(digest(entry) for entry in set(after) - set(before)) if approved else []
+    if not removed and not added:
         yield
         return
     key = _intent_key(project, target)
     with closing(Store(settings.state)) as store:
         record = {"target": target, "project": project if target == "memory" else None,
                   "before": digest(_raw_entries(memory_path(settings, project, target))),
-                  "after": digest(after), "removed": removed}
+                  "after": digest(after), "removed": removed,
+                  **({"added": added, "enterprise_boundary": approved["id"]} if added else {})}
         store.set(key, record)
         try:
             yield
@@ -186,7 +218,7 @@ def native_scope(settings, project, filters=None):
     can_edit, visible, load_skill = filters or (None, None, None)
     def filter_memory(target, entries):
         with closing(Store(settings.state)) as store:
-            return _visible_entries(store, project, target, entries)
+            return _visible_entries(settings, store, project, target, entries)
 
     with use(Scope(memory, user, directory / "pending", project,
                    lambda target, before, after: _guard_memory(settings, project, target, before, after),
@@ -273,27 +305,42 @@ def _snapshot(settings):
 
 
 def _pending(settings, project, args):
+    from .enterprise import MODE, boundary, scrub
     from tools import write_approval as wa
 
     subsystem = args.get("subsystem", "memory")
     if subsystem not in {wa.MEMORY, wa.SKILLS}:
         raise ValueError("Invalid pending subsystem")
+    enterprise_mode = settings.data_policy.get("mode") == MODE
+    if enterprise_mode and not boundary(settings.data_policy):
+        return {"subsystem": subsystem, "scope": project or "user", "records": [],
+                "reason": "enterprise_boundary_unavailable_or_changed"}
     with native_scope(settings, project):
         records = wa.list_pending(subsystem)
+    sanitize = scrub if enterprise_mode else redact
     return {"subsystem": subsystem, "scope": project or "user",
-            "records": [{**redact(record), "revision": digest(record)} for record in records]}
+            "records": [{**sanitize(record), "revision": digest(record)} for record in records]}
 
 
 def approval_list(settings, store, project, identifier=None):
     from collections import Counter
     from .approvals import STATES, change_fingerprint, inspect_record
+    from .enterprise import MODE, boundary, scrub
     from .shared_learning import status
     from tools import write_approval as wa
     from tools.memory_tool_store import _patch_entry
 
+    enterprise_mode = settings.data_policy.get("mode") == MODE
+    if enterprise_mode and not boundary(settings.data_policy):
+        return {"project": project, "proposals": [], "review_revision": digest([]),
+                "counts": {state: 0 for state in STATES}, "decisions": [],
+                "automatic_approval": False, "state": "withheld",
+                "reason": "enterprise_boundary_unavailable_or_changed",
+                "shared_learning": status(store, project, settings=settings)}
     with native_scope(settings, project):
         records = wa.list_pending("memory")
     targets = _memory_snapshot(settings, store, project)
+    sanitize = scrub if enterprise_mode else redact
     proposals, seen = [], {}
     for record in records:
         target = record["payload"].get("target")
@@ -306,10 +353,10 @@ def approval_list(settings, store, project, identifier=None):
                 variant = "duplicate"
             else:
                 seen[stamp] = record["id"]
-        safe_changes = redact(item["changes"])
+        safe_changes = sanitize(item["changes"])
         proposals.append({"id": record["id"], "project": project, "target": target,
                           "revision": digest(record), "created_at": record.get("created_at"), "state": variant,
-                          "summary": redact(record.get("summary") or ""), "reason": item["reason"],
+                          "summary": sanitize(record.get("summary") or ""), "reason": item["reason"],
                           "operations": safe_changes, "duplicate_of": duplicate,
                           "can_approve": variant == "pending" and safe_changes == item["changes"], "can_reject": True})
     counts = Counter(item["state"] for item in proposals)
@@ -322,12 +369,13 @@ def approval_list(settings, store, project, identifier=None):
     return {"project": project, "proposals": [p for p in proposals if identifier is None or p["id"] == identifier],
             "review_revision": digest([(p["id"], p["revision"], p["state"]) for p in proposals]),
             "counts": {state: counts[state] for state in STATES}, "decisions": list(reversed(history)),
-            "automatic_approval": False, "shared_learning": status(store, project)}
+            "automatic_approval": False, "shared_learning": status(store, project, settings=settings)}
 
 
 def approval_decision(bridge, project, params):
-    from .shared_learning import enqueue, receipt
+    from .shared_learning import _require_enterprise_boundary, enqueue, receipt
     settings = bridge.settings
+    _require_enterprise_boundary(settings)
     decision = params["decision"]
     args = {"id": params["id"], "revision": params["revision"], "decision": decision, "subsystem": "memory"}
     if (not project or decision not in {"approve", "reject"}):
@@ -342,7 +390,7 @@ def approval_decision(bridge, project, params):
             if decision == "approve" and not proposals[0]["can_approve"]:
                 raise ValueError("The proposal is not currently eligible for approval")
             enqueue(store, project, {"operation": "decide", "request_id": request_id, "args": args,
-                                     "surface": "codex_approval"}, executor="Codex App")
+                                     "surface": "codex_approval"}, executor="Codex App", settings=settings)
         deadline = time.monotonic() + 4
         while time.monotonic() < deadline:
             value = receipt(store, project, request_id)
@@ -463,10 +511,12 @@ def _history(bridge, store, project, args):
 
 
 def read(bridge, store, kind, project, args):
+    from .shared_learning import _require_enterprise_boundary
     settings = bridge.settings
     if kind == "view":
         return scoped_context(settings, store, _snapshot(settings), project, args.get("query", ""))
     if kind == "skill":
+        _require_enterprise_boundary(settings)
         from .skill_reads import load
         return load(settings, args["name"], project, args.get("file_path"),
                     artifact_version=args.get("artifact_version"), expose_path=False)
@@ -733,6 +783,8 @@ def _refine(bridge, project, body):
 
 
 def apply_write(bridge, project, body):
+    from .shared_learning import _require_enterprise_boundary
+    _require_enterprise_boundary(bridge.settings)
     operation, args, base = body["operation"], body["args"], body["base"]
     if operation in {"memory", "clear"}:
         return _apply_memory(bridge, project, operation, args, base)
