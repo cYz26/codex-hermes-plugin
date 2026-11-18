@@ -1,3 +1,5 @@
+import ast
+import builtins
 import importlib.util
 import json
 import plistlib
@@ -159,3 +161,38 @@ class DesktopReceiverTests(unittest.TestCase):
                 self.assertEqual(batch["presentation"]["body"], "连接暂时中断 · 2 条回执")
                 self.assertEqual([entry["presentation"] for entry in batch["entries"]], list(notices.values()))
                 self.assertEqual(batch["text"], "success detail\n\nfailed detail")
+
+    def test_receiver_and_macos_entrypoints_work_with_python39_zip_and_syntax(self):
+        root = Path(__file__).resolve().parents[1]
+        checked = sorted((root / "desktop").glob("*.py")) + [
+            root / "src/hermes_codex_learning/macos_bundle.py",
+            root / "src/hermes_codex_learning/store.py",
+        ]
+        for path in checked:
+            tree = ast.parse(path.read_text(), filename=str(path), feature_version=(3, 9))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "zip":
+                    self.assertEqual(node.keywords, [], f"{path} uses Python 3.10+ zip keyword arguments")
+
+        real_zip = builtins.zip
+
+        def py39_zip(*iterables, **kwargs):
+            if kwargs:
+                raise TypeError("zip() takes no keyword arguments")
+            return real_zip(*iterables)
+
+        with tempfile.TemporaryDirectory() as directory:
+            client = receiver.Receiver({"state": directory, "host": "devbox", "bridge": "/bridge",
+                                        "settings": "/settings", "notifier": "/notifier"})
+            self.addCleanup(client.db.close)
+            item = {"id": "n1", "scope": "system", "notification_scope": "system", "kind": "update.notice",
+                    "status": "pending", "summary": "已切换", "text": "detail",
+                    "applied_entities": [], "pending_entities": []}
+            with patch.object(builtins, "zip", side_effect=py39_zip), \
+                 patch.object(client, "remote", side_effect=lambda action, *a, **kw:
+                              {"protocol_version": 2} if action == "capabilities" else {"items": [item], "cursor": 1}), \
+                 patch.object(receiver.subprocess, "run", return_value=SimpleNamespace(returncode=0)) as display:
+                client.poll()
+                self.assertEqual(display.call_count, 1)
+                with self.assertRaises(ValueError):
+                    client.write_batch("system", [item], [])

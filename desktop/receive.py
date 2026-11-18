@@ -152,10 +152,12 @@ class Receiver:
                 self.db.execute("UPDATE batches SET state=? WHERE id=?", (target, identifier))
 
     def write_batch(self, scope, group, details):
+        if len(group) != len(details):
+            raise ValueError("Receipt details must match the notice group")
         ids = sorted(item["id"] for item in group)
         identifier = identity([scope, ids])
         display = display_scope(group[0])
-        entries = [receipt_entry(item, detail) for item, detail in zip(group, details, strict=True)]
+        entries = [receipt_entry(item, detail) for item, detail in zip(group, details)]
         receipt = {"summary": group[0]["summary"], "scope": scope,
                    "text": "\n\n".join(entry["text"] for entry in entries), "notification_scope": display}
         approval = approval_group(group[0])
@@ -310,7 +312,7 @@ def main():
             status = {"state": "connected", "at": time.time(), "visibility": "not_inferred",
                       "unknown_dispatches": unknown, "chat_ui": "unavailable"}
             delay = 5
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        except (OSError, ValueError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as exc:
             status = {"state": "retrying", "at": time.time(), "error_type": type(exc).__name__, "chat_ui": "unavailable"}
             delay = min(delay * 2, 60)
         (receiver.state / "status.json").write_text(json.dumps(status))
