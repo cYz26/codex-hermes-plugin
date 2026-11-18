@@ -1,8 +1,10 @@
 # Hermes Learning for Codex
 
-主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.10.2**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0** 和 **v0.23.1**。
+主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.11.0**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0**、**v0.23.1** 和 **v0.23.2**。
 
 Codex 执行任务，独立 Hermes 从获准的执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。安装插件和启动学习服务应在实际执行 Codex 任务的宿主完成。
+
+0.11.0 整合 [Codex 与原生 Hermes 共用学习服务](./docs/SHARED-LEARNING.zh-CN.md)、**Hermes v0.23.2** 兼容适配、后台进程待退出回合观察、精确版本发布审查与只读日审，并完成云端开发机与跨端维护修复：企业出口代理与 GitHub 限流恢复、原生更新重入保护、分版本 site 适配与受管 CLI 绑定、企业专用环境下的共享学习边界保护，以及 macOS Python 3.9 通知接收器兼容。见 [0.11.0 发布说明](./docs/RELEASE-0.11.0.zh-CN.md)。
 
 0.10.2 修复生成安装元数据导致候选指纹不一致的问题，并使发布测试在 macOS 临时目录别名下使用真实路径。见 [发布与升级结果](./docs/RELEASE-0.10.2.zh-CN.md)。
 

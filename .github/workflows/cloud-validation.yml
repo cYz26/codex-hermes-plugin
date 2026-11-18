@@ -56,11 +56,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: NousResearch/hermes-agent
-          ref: 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19
+          ref: ae2a81ccc00e9b7c06301523e5bb09608397149c
           path: upstream
           persist-credentials: false
       - name: Apply pinned Learning API patch
-        run: git -C upstream apply --index "$GITHUB_WORKSPACE/patches/v0.23.0/native-learning-api-v1.patch"
+        run: git -C upstream apply --index "$GITHUB_WORKSPACE/patches/v0.23.2/native-learning-api-v1.patch"
       - name: Build isolated native test environment
         working-directory: upstream
         env:

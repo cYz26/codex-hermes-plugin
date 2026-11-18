@@ -1,4 +1,4 @@
-# Linux／SSH 全局学习与更新（0.10.1）
+# Linux／SSH 全局学习与更新（0.11.0）
 
 主分支的 Linux 方案提供独立原生学习实例、systemd 用户服务、固定流程采集、检查后的共享、候选适配和 SSH 桌面通知。Codex 执行任务，Hermes 串行学习；通用实现与状态语义见 [实现整理](./SELF-EVOLUTION.zh-CN.md)。
 
@@ -25,6 +25,8 @@ hooks 使用真实 cwd，Git 根目录／worktree 或非 Git 工作目录保留�
 ## systemd 与诊断
 
 ```sh
+scripts/bridge network-config --settings /ABS/pilot/bridge.json
+scripts/bridge network-config --settings /ABS/pilot/bridge.json --apply
 scripts/bridge systemd --settings /ABS/pilot/bridge.json --dry-run
 scripts/bridge systemd --settings /ABS/pilot/bridge.json
 scripts/bridge systemd --settings /ABS/pilot/bridge.json --start
@@ -34,7 +36,7 @@ systemctl --user status hermes-learning-pilot.service
 journalctl --user -u hermes-learning-pilot.service -n 80
 ```
 
-`systemd` 默认生成候选定义，`--dry-run` 只输出定义；`--start` 仅在 Linux 上执行，先使用 systemd parser 验证，再写入用户服务并启动。已有定义需要 `--replace`，替换前保存前一份定义。服务使用私有权限、5 秒失败重启与 60 秒退出超时。工作区、解释器与服务参数均使用显式路径。
+`network-config` 默认只预览当前环境的标准代理变量（`HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 等），拒绝携带内嵌凭据的代理地址；`--apply` 保留备份并写入 `bridge.json`，以便 systemd 用户服务在缺少交互 Shell 环境变量时继续通过企业出口代理完成版本检查与源码拉取，同时按 `NO_PROXY` 绕过本机和内网模型地址。`systemd` 默认生成候选定义，`--dry-run` 只输出定义；`--start` 仅在 Linux 上执行，先使用 systemd parser 验证，再写入用户服务并启动。已有定义需要 `--replace`，替换前保存前一份定义。服务使用私有权限、5 秒失败重启与 60 秒退出超时。工作区、解释器与服务参数均使用显式路径。
 
 `doctor` 分别报告配置、provider 配置／认证、IPC、陈旧快照、采集缺口和已有模型探针。可达性不等于模型验证通过。worker 不可用时，监督进程继续保留更新与恢复入口；hooks 不等待模型调用。
 
@@ -69,6 +71,8 @@ scripts/bridge update adapt --settings /ABS/pilot/bridge.json --version vX.Y.Z
 ## 本机适配与回退
 
 `migration.prepare` 把原安装的改动合并到干净官方副本，保留原树并记录冲突／遗漏；`seal` 将人工解决理由绑定文件摘要，封存不等于测试通过。site 适配保留固定回归集合，provider、模型、推理档位、输出预算、fallback 和 gateway 行为属于验证边界，机器配置与凭据不进入仓库。
+
+跨版本升级时，可在 `site-migration/releases/<tag>/migration.json` 预置目标版本的封存 site 补丁与回归清单，保留当前运行版本的 `current-site.json` 作为回退基线。官方基座升级在存在 `site_manifest` 时延迟网关重启，待候选与 site 回归验证通过并提交新绑定后，再由监督进程在空闲窗口通过原生排空与 `SIGUSR1` 平滑切换网关。
 
 官方安装、site 适配层和学习 worker 分别验证。监督进程等待复盘结束后，暂停学习启动候选，核对实际解释器、API 和召回再提交。提交前失败恢复原生数据和派生来源／发布／流程凭证索引；事件箱、交付与通知队列、根账号认证保留当前状态。提交后的回退用当前数据检查旧运行时，不覆盖新知识。
 
