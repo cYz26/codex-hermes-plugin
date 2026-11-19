@@ -210,9 +210,48 @@ def main() -> int:
     login.add_argument("--settings")
     auth_status = commands.add_parser("auth-status")
     auth_status.add_argument("--settings")
+    projection = commands.add_parser("projection", help="Inspect or sync native read-only skill projections")
+    projection_actions = projection.add_subparsers(dest="projection_action", required=True)
+    proj_status = projection_actions.add_parser("status")
+    proj_status.add_argument("--settings")
+    proj_sync = projection_actions.add_parser("sync")
+    proj_sync.add_argument("--settings")
+    proj_sync.add_argument("--codex-skills-dir", type=Path)
+    proj_sync.add_argument("--hermes-profile", type=Path, help="Optional non-owner Hermes profile to mount skills.external_dirs")
+    proj_sync.add_argument("--apply", action="store_true")
     from .shared_cli import add_parser as shared_parser
     shared_parser(commands)
     args = parser.parse_args()
+    if args.command == "projection":
+        from dataclasses import replace
+        from .native_projection import configure_hermes_external_dir, projection_status, sync_published_skills
+        from .store import ReadStore, Store
+        try:
+            settings = Settings.load(args.settings)
+            if getattr(args, "codex_skills_dir", None) is not None:
+                settings = replace(settings, codex_skills_dir=args.codex_skills_dir.expanduser().absolute())
+            if args.projection_action == "status":
+                store = ReadStore(settings.state)
+                try:
+                    result = projection_status(settings, store)
+                finally:
+                    store.close()
+            else:
+                apply = bool(args.apply)
+                store = Store(settings.state) if apply else ReadStore(settings.state)
+                try:
+                    result = sync_published_skills(settings, store, dry_run=not apply)
+                finally:
+                    store.close()
+                if args.hermes_profile is not None:
+                    result["hermes_external_dir"] = configure_hermes_external_dir(
+                        settings, args.hermes_profile, apply=apply,
+                    )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(json.dumps({"state": "failed", "error_type": type(exc).__name__, "error": str(exc)}, ensure_ascii=False))
+            return 2
     if args.command == "shared-learning":
         from .shared_cli import execute
         try:

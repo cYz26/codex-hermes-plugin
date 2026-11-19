@@ -112,7 +112,7 @@ def hook(payload: dict, settings: Settings) -> dict:
             from .scheduling import record_dialogue_signals
             record_dialogue_signals(payload, store)
         from .delivery import capture_delivery
-        capture_delivery(store, payload, project)
+        capture_delivery(store, payload, project, settings=settings)
         admission = admit(payload, settings.data_policy, project)
         if admission.get("allowed") and admission.get("schema_version") == 2:
             payload = admission.pop("payload")
@@ -157,7 +157,15 @@ def hook(payload: dict, settings: Settings) -> dict:
         cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
         from .enterprise import scope_view, requires_scoping
         cache=scope_view(cache,settings.data_policy)
+        current_projected = sorted(set(cache.get("native_projected_skills") or []))
         session = payload.get("session_id", "unknown")
+        projected_key = f"session-projected-skills:{session}"
+        baseline_projected = store.get(projected_key)
+        if event == "SessionStart" or baseline_projected is None:
+            baseline_projected = current_projected
+            if baseline_projected:
+                store.set(projected_key, baseline_projected)
+        baseline_set = set(baseline_projected or [])
         if event == "UserPromptSubmit":
             query = str(payload.get("prompt") or "")[:4000] if admission.get("body_retained") is not False else ""
             if not query and transient_query and cache.get("checked_publication"):
@@ -182,12 +190,13 @@ def hook(payload: dict, settings: Settings) -> dict:
         recommended = cache.get("recommended_skills", [])
         if not scoped and cache.get("skills"):
             recommended = context_view(cache, project, query)["recommended_skills"]
+        hook_recommended = [name for name in recommended if name not in baseline_set]
         memory = ("\n".join(cache["memories"].values())[:340] if "memories" in cache
                   else cache.get("summary", ""))
-        text, offered = model_context(memory, project if settings.capture_scope == "global" else None, recommended)
+        text, offered = model_context(memory, project if settings.capture_scope == "global" else None, hook_recommended)
         version = cache.get("version")
-        has_context = memory or offered or settings.capture_scope == "global"
-        delivery_version = digest([version, text]) if version and has_context else None
+        has_context = bool(memory or offered or (settings.capture_scope == "global" and not baseline_set))
+        delivery_version = digest([text]) if version and has_context else None
         key = f"context-delivered:{session}:{project}" if settings.capture_scope == "global" else f"context-delivered:{session}"
         turn = payload.get("turn_id")
         if not delivery_version or (event != "UserPromptSubmit" and store.get(key) == delivery_version):

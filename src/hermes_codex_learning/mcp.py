@@ -34,13 +34,18 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "file_path": {"type": "string"},
                      "cwd": {"type": "string"}, "artifact_version": {"type": "string"}},
                      "required": ["name"], "additionalProperties": False}},
+    {"name": "history_search", "description": "Search workspace-scoped past learning observations and troubleshooting excerpts via Hermes native SessionDB FTS5. Pass the current chat's absolute cwd and a concise query.",
+     "inputSchema": {"type": "object", "properties": {"cwd": {"type": "string"}, "query": {"type": "string"},
+                     "session_id": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                     "role_filter": {"type": "string"}},
+                     "required": ["cwd"], "additionalProperties": False}},
 ]
 
 from .learning_tools import TOOLS as LEARNING_TOOLS
 TOOLS.extend(LEARNING_TOOLS)
 
 for tool in TOOLS:
-    readonly=tool["name"] in {"context","skill_load","learning_status","feedback_status","update_status","learning_request_status","pending_reviews"}
+    readonly=tool["name"] in {"context","skill_load","history_search","learning_status","feedback_status","update_status","learning_request_status","pending_reviews"}
     tool["annotations"]={"readOnlyHint":readonly,"destructiveHint":False,
                          "openWorldHint":tool["name"]=="update_check"}
     if tool["name"] in {"record_application", *(item["name"] for item in LEARNING_TOOLS)}:

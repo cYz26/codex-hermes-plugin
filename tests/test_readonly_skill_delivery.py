@@ -13,7 +13,7 @@ class ReadonlyDeliveryTests(unittest.TestCase):
     def test_annotations_distinguish_reads_from_state_changing_operations(self):
         from hermes_codex_learning.mcp import TOOLS
         tools={t["name"]:t for t in TOOLS}
-        for name in ("context","skill_load","learning_status","update_status"):
+        for name in ("context","skill_load","history_search","learning_status","update_status"):
             self.assertTrue(tools[name]["annotations"]["readOnlyHint"])
         for name in ("record_application","update_check"):
             self.assertFalse(tools[name]["annotations"]["readOnlyHint"])

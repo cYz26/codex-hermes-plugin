@@ -335,7 +335,8 @@ class Bridge:
                     self.store.get("turn-admission:"+row["id"],{}).get("reason","terminal_input_unavailable")})
 
     def usage(self, payload: dict) -> None:
-        if not payload.get("tool_name", "").endswith("skill_load"):
+        tool_name = payload.get("tool_name", "")
+        if not (tool_name.endswith("skill_load") or tool_name == "native_skill_file_read"):
             return
         result = payload.get("tool_response", {})
         if isinstance(result, str):
@@ -373,7 +374,8 @@ class Bridge:
                 evidence={"stage":"body_delivered","source_event":[payload["session_id"],payload.get("turn_id"),payload["tool_use_id"]]}
                 if native:
                     self.api.record_usage(native,evidence)
-                self.store.set("issued-delivery:"+token,{**value,"project":payload["bridge_project"],"source_event":evidence["source_event"]})
+                delivery_meta = {"delivery_mode": delivered["delivery_mode"]} if delivered.get("delivery_mode") else {}
+                self.store.set("issued-delivery:"+token,{**value,**delivery_meta,"project":payload["bridge_project"],"source_event":evidence["source_event"]})
                 self.store.set(key,{"recorded":True,"native_token":native})
                 return
             if token.startswith("bridge:"):
@@ -395,6 +397,7 @@ class Bridge:
         enterprise=boundary(self.settings.data_policy)
         if self.settings.data_policy.get("mode")==MODE and not enterprise:
             self.store.set("enterprise-policy-state","boundary_changed")
+            self.last_publish = 0.0
             return
         self.store.set("enterprise-policy-state","ready" if enterprise else "not_enabled")
         retry_available = callable(getattr(self.api, "retry_review", None))
@@ -634,7 +637,11 @@ class Bridge:
         else:
             context = self.cache_artifacts(context)
         from .enterprise import scope_view
+        from .native_projection import sync_published_skills
+        projection = sync_published_skills(self.settings, self.store)
         context=scope_view({**context,
+            "native_projected_skills": projection["projected_skills"],
+            "native_projection": {k: projection[k] for k in ("enabled", "catalog_dir", "codex_skills_dir", "projected_skills", "shadowed")},
             "enterprise_memory_boundaries":{key:proof["boundary_id"] for key,proof in self.store.get("semantic-memory-attestations",{}).items() if proof.get("boundary_id")},
             "enterprise_skill_boundaries":{key:proof["boundary_id"] for key,proof in self.store.get("semantic-skill-attestations",{}).items() if proof.get("boundary_id")}},
             self.settings.data_policy)
@@ -1135,7 +1142,9 @@ class Bridge:
                 if self.settings.shared_profile is not None:
                     from .shared_learning import status as shared_status
                     shared = shared_status(store, project)
+                from .native_projection import projection_status
                 return {"snapshot": snapshot, "shared_learning": shared,
+                        "native_projection": projection_status(self.settings, store),
                         **learning_health(self.settings, store, context, project, self.native_policy),
                         "progress":progress,
                         "review_retries": ReviewRetryQueue(self.settings, store).summary(),
@@ -1194,6 +1203,23 @@ class Bridge:
             from .skill_reads import load
             return load(self.settings, params["name"], self.request_project(params), params.get("file_path"),
                         artifact_version=params.get("artifact_version"))
+        if method == "history_search":
+            from .history_reads import search_history
+            with StoreConnection(self.settings, read_only=True) as store:
+                return search_history(
+                    self.settings, store, self.request_project(params),
+                    query=params.get("query", ""), session_id=params.get("session_id"),
+                    limit=params.get("limit", 10), role_filter=params.get("role_filter", "user,assistant"),
+                )
+        if method == "projection_status":
+            from .native_projection import projection_status
+            with StoreConnection(self.settings, read_only=True) as store:
+                return projection_status(self.settings, store)
+        if method == "projection_sync":
+            from .native_projection import sync_published_skills
+            dry_run = bool(params.get("dry_run", True))
+            with self.publication_lock, StoreConnection(self.settings, read_only=dry_run) as store:
+                return sync_published_skills(self.settings, store, dry_run=dry_run)
         raise ValueError("Unknown bridge method")
 
     def request_project(self, params: dict) -> str | None:

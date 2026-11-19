@@ -458,56 +458,12 @@ def _journey(bridge, store, project, args):
 
 def _history(bridge, store, project, args):
     """Select scoped admitted sessions before opening messages through native SessionDB."""
-    if project is None:
-        return {"success": True, "results": [], "reason": "workspace_required"}
-    from hermes_state import SessionDB
-    query = args.get("query", "")
-    if not isinstance(query, str) or len(query) > 1000:
-        raise ValueError("Invalid history query")
-    term = query.casefold().strip()
-    requested = args.get("session_id")
-    limit = args.get("limit") or 10
-    if type(limit) is not int:
-        raise ValueError("Invalid history limit")
-    limit = max(1, min(limit, 20))
-    roles = set((args.get("role_filter") or "user,assistant").split(","))
-    if not roles <= {"user", "assistant"}:
-        raise ValueError("Shared history returns user and assistant excerpts")
-    result = []
-    path = bridge.settings.home / "state.db"
-    if not path.is_file():
-        return {"success": True, "results": []}
-    allowed = store.db.execute(
-        "SELECT key,value FROM meta WHERE key LIKE 'scope:%' AND json_extract(value,'$.project')=? "
-        "ORDER BY rowid DESC LIMIT 50", (project,))
-    db = SessionDB(db_path=path, read_only=True)
-    try:
-        for entry in allowed:
-            handle, source = entry[0][len("scope:"):], json.loads(entry[1])
-            if requested and requested != handle:
-                continue
-            from .enterprise import boundary, scope_boundary
-            required = scope_boundary(store, handle)
-            active = boundary(bridge.settings.data_policy)
-            if required and (not active or required != active["id"]):
-                continue
-            matches = []
-            for message in reversed(db.get_messages(handle, include_ancestors=False)):
-                body = message.get("content")
-                if message.get("role") in roles and isinstance(body, str) and (not term or term in body.casefold()):
-                    offset = body.casefold().find(term) if term else 0
-                    matches.append({"role": message["role"], "content": redact(body[max(0, offset - 160):offset + 500]),
-                                    "timestamp": message.get("timestamp")})
-                if len(matches) >= 6:
-                    break
-            if matches:
-                result.append({"session_id": handle, "source": source.get("executor", "Codex App"),
-                               "messages": list(reversed(matches)), "project": project})
-            if len(result) >= limit:
-                break
-    finally:
-        db.close()
-    return {"success": True, "results": result}
+    from .history_reads import search_history
+    return search_history(
+        bridge.settings, store, project,
+        query=args.get("query", ""), session_id=args.get("session_id"),
+        limit=args.get("limit") or 10, role_filter=args.get("role_filter") or "user,assistant",
+    )
 
 
 def read(bridge, store, kind, project, args):

@@ -46,6 +46,8 @@ class Settings:
     review_timeout_seconds: float = 900
     shared_profile: Path | None = None
     shared_client_id: str | None = field(default=None, repr=False)
+    native_skill_projection: bool = True
+    codex_skills_dir: Path | None = None
 
     def __post_init__(self):
         if self.shared_profile is not None or self.shared_client_id is not None:
@@ -55,7 +57,7 @@ class Settings:
                     or self.capture_scope != "global" or not self.checked_publication):
                 raise ValueError("Shared learning requires an independent local profile, global capture and checked publication")
         if any(not isinstance(value, bool) for value in (self.proactive,self.quality_checks,self.retention_enabled,
-                                                       self.review_retry_enabled)):
+                                                       self.review_retry_enabled,self.native_skill_projection)):
             raise ValueError("Learning and retention switches must be booleans")
         if isinstance(self.review_retry_limit, bool) or not isinstance(self.review_retry_limit, int) or not 1 <= self.review_retry_limit <= 10:
             raise ValueError("Review retries must be bounded between one and ten")
@@ -82,6 +84,12 @@ class Settings:
         if not isinstance(self.data_policy, dict) or ('workflow_projection' in self.data_policy
                 and not isinstance(self.data_policy['workflow_projection'], bool)):
             raise ValueError('data_policy.workflow_projection must be a boolean')
+        if self.codex_skills_dir is not None:
+            resolved_target = self.codex_skills_dir.resolve()
+            resolved_home = self.home.resolve()
+            if (not self.codex_skills_dir.is_absolute() or resolved_target == Path("/")
+                    or resolved_target == resolved_home or resolved_target.is_relative_to(resolved_home / "skills")):
+                raise ValueError("codex_skills_dir must be an independent absolute host skills directory")
 
     @property
     def interpreter(self) -> Path:
@@ -164,15 +172,42 @@ class Settings:
         config = cls.configuration_path(path)
         data = json.loads(config.read_text())
         shared = data.get("shared_learning") or {}
+        projection = data.get("projection") or {}
+        if not isinstance(projection, dict):
+            raise ValueError("projection configuration must be an object")
+        projection_enabled = projection.get("enabled", True)
+        capture_scope = data.get("capture_scope", "project")
+        checked_publication = data.get("checked_publication", False)
+        resolved_home = Path(data["home"]).expanduser().resolve()
+        default_root = (Path.home() / ".hermes-codex-learning").resolve()
+        installed_cfg = None
+        pointer = Path.home() / ".hermes-codex-learning/installation.json"
+        if pointer.is_file() and not pointer.is_symlink():
+            try:
+                sel = json.loads(pointer.read_text()).get("settings")
+                if isinstance(sel, str) and Path(sel).is_absolute():
+                    installed_cfg = Path(sel).resolve()
+            except (OSError, ValueError):
+                pass
+        is_host_owner = resolved_home.is_relative_to(default_root) or (
+            installed_cfg is not None and config.resolve() == installed_cfg
+        )
+        if "codex_skills_dir" in projection:
+            raw_skills_dir = projection["codex_skills_dir"]
+            codex_skills_dir = Path(raw_skills_dir).expanduser().absolute() if raw_skills_dir else None
+        elif projection_enabled is True and capture_scope == "global" and checked_publication is True and is_host_owner:
+            codex_skills_dir = (Path.home() / ".agents" / "skills").absolute()
+        else:
+            codex_skills_dir = None
         return cls(
-            home=Path(data["home"]).resolve(), project=Path(data["project"]).resolve(),
+            home=resolved_home, project=Path(data["project"]).resolve(),
             source=Path(data["source"]).resolve(), python=Path(data["python"]).absolute(),
             idle_seconds=float(data.get("idle_seconds", 120)),
             idle_interval=float(data.get("idle_interval", 600)),
             notifications=bool(data.get("notifications", True)),
             profile_home=Path(data["profile_home"]).expanduser().absolute() if data.get("profile_home") else None,
             network_environment=data.get("network_environment", {}),
-            capture_scope=data.get("capture_scope", "project"),
+            capture_scope=capture_scope,
             excluded_projects=tuple(data.get("excluded_projects", [])),
             update_mode=data.get("updates", {}).get("mode", "auto"),
             update_interval=float(data.get("updates", {}).get("interval_seconds", 86400)),
@@ -183,7 +218,7 @@ class Settings:
             auto_adapt=data.get("updates", {}).get("auto_adapt", False),
             adaptation_timeout=float(data.get("updates", {}).get("adaptation_timeout", 1800)),
             data_policy=data.get("data_policy", {}),
-            checked_publication=data.get("checked_publication", False),
+            checked_publication=checked_publication,
             site_manifest=Path(data["updates"]["site_manifest"]).resolve() if data.get("updates", {}).get("site_manifest") else None,
             runtime_extras=tuple(data.get("runtime_extras", [])),
             proactive=data.get("learning", {}).get("proactive", False),
@@ -196,4 +231,6 @@ class Settings:
             review_timeout_seconds=data.get("learning", {}).get("review_timeout_seconds", 900),
             shared_profile=Path(shared["profile"]).expanduser().resolve() if "profile" in shared else None,
             shared_client_id=shared.get("client_id"),
+            native_skill_projection=projection_enabled,
+            codex_skills_dir=codex_skills_dir,
         )
