@@ -219,9 +219,81 @@ def main() -> int:
     proj_sync.add_argument("--codex-skills-dir", type=Path)
     proj_sync.add_argument("--hermes-profile", type=Path, help="Optional non-owner Hermes profile to mount skills.external_dirs")
     proj_sync.add_argument("--apply", action="store_true")
+    model_cmd = commands.add_parser("model", help="Inspect or switch the learning model in sync with devbox Codex")
+    model_actions = model_cmd.add_subparsers(dest="model_action", required=True)
+    m_status = model_actions.add_parser("status")
+    m_status.add_argument("--settings")
+    m_set = model_actions.add_parser("set")
+    m_set.add_argument("target_model", help="Catalog slug or alias, e.g. gemini-4-carbon or ark:gpt-6-astra")
+    m_set.add_argument("--settings")
+    m_set.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max", "ultra"])
+    m_set.add_argument("--pin", action="store_true", help="Pin this model instead of following subsequent Codex switches")
+    m_set.add_argument("--no-probe", action="store_true", help="Skip live Responses protocol verification probe")
+    m_set.add_argument("--apply", action="store_true")
+    m_sync = model_actions.add_parser("sync", help="Align pilot model with current devbox Codex selection")
+    m_sync.add_argument("--settings")
+    m_sync.add_argument("--no-probe", action="store_true")
+    m_sync.add_argument("--apply", action="store_true")
     from .shared_cli import add_parser as shared_parser
     shared_parser(commands)
     args = parser.parse_args()
+    if args.command == "model":
+        from contextlib import closing
+        from .ipc import request as ipc_request
+        from .model_sync import model_status, read_codex_catalog, switch_pilot_model
+        from .review_retries import ReviewRetryQueue
+        from .store import ReadStore, Store
+        try:
+            settings = Settings.load(args.settings)
+            if args.model_action == "status":
+                try:
+                    result = ipc_request(settings, "model_status", {}, timeout=2)
+                except (OSError, RuntimeError):
+                    with closing(ReadStore(settings.state)) as store:
+                        result = model_status(settings, store)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return 0
+            apply = bool(args.apply)
+            verify_probe = not bool(args.no_probe)
+            if args.model_action == "sync":
+                with closing(ReadStore(settings.state)) as rstore:
+                    observed = (rstore.get("codex-observed-model") or {}).get("model")
+                info = read_codex_catalog()
+                target = observed or info.get("review_model") or info.get("model")
+                if not target:
+                    raise ValueError("No active Codex model found to synchronize")
+                reason = "codex_sync"
+                pin = False
+                effort = None
+            else:
+                target = args.target_model
+                reason = "manual_switch"
+                pin = bool(args.pin)
+                effort = args.effort
+            try:
+                result = ipc_request(settings, "model_switch", {
+                    "model": target, "effort": effort, "apply": apply,
+                    "verify_probe": verify_probe, "pin": pin, "reason": reason,
+                }, timeout=45)
+            except (OSError, RuntimeError) as exc:
+                if "Protocol gate rejected" in str(exc) or "ValueError" in str(exc):
+                    raise
+                store_cls = Store if apply else ReadStore
+                store = store_cls(settings.state)
+                try:
+                    queue = ReviewRetryQueue(settings, store) if apply else None
+                    result = switch_pilot_model(
+                        settings, store, target, requested_effort=effort,
+                        apply=apply, verify_probe=verify_probe, pin=pin, reason=reason,
+                        retry_queue=queue,
+                    )
+                finally:
+                    store.close()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(json.dumps({"state": "failed", "error_type": type(exc).__name__, "error": str(exc)}, ensure_ascii=False))
+            return 2
     if args.command == "projection":
         from dataclasses import replace
         from .native_projection import configure_hermes_external_dir, projection_status, sync_published_skills

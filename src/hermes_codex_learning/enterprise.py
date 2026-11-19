@@ -85,6 +85,53 @@ def refresh_schema_only_boundary(policy: dict, before_bytes: bytes | None) -> bo
         return False
 
 
+def _comparable_config(doc: dict) -> dict:
+    import copy
+    cleaned = copy.deepcopy(doc)
+    cleaned.pop("_config_version", None)
+    if isinstance(cleaned.get("model"), dict):
+        cleaned["model"] = {k: v for k, v in cleaned["model"].items() if k != "default"}
+    if isinstance(cleaned.get("agent"), dict):
+        cleaned["agent"] = {k: v for k, v in cleaned["agent"].items() if k != "reasoning_effort"}
+    return cleaned
+
+
+def refresh_catalog_model_boundary(policy: dict, before_bytes: bytes | None,
+                                   before_doc: dict, after_doc: dict,
+                                   allowed_models: set[str]) -> bool:
+    """Preserve an active enterprise boundary when switching models inside the same authorized catalog/route."""
+    if before_bytes is None or policy.get("mode") != MODE or not allowed_models:
+        return False
+    try:
+        path = Path(policy["enterprise_boundary"])
+        if not path.is_absolute() or path.is_symlink() or path.stat().st_uid != os.getuid() or path.stat().st_size > 16384:
+            return False
+        record = json.loads(path.read_text())
+        config = Path(record["model_config"])
+        if (record.get("schema_version") != 1 or record.get("authority") != AUTHORITY
+                or record.get("hostname") != socket.gethostname() or record.get("uid") != os.getuid()
+                or record.get("body_learning") is not True or not config.is_absolute()
+                or config.is_symlink() or config.stat().st_uid != os.getuid()):
+            return False
+        before_sha = hashlib.sha256(before_bytes).hexdigest()
+        if record.get("model_config_sha256") != before_sha:
+            return False
+        target_model = (after_doc.get("model") or {}).get("default")
+        if not isinstance(target_model, str) or target_model not in allowed_models:
+            return False
+        if _comparable_config(before_doc) != _comparable_config(after_doc):
+            return False
+        after_bytes = config.read_bytes()
+        after_sha = hashlib.sha256(after_bytes).hexdigest()
+        if after_sha == before_sha:
+            return True
+        from .store import atomic_json
+        atomic_json(path, {**record, "model_config_sha256": after_sha})
+        return True
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
 def explicitly_restricted(value):
     if isinstance(value,dict):
         for key,item in value.items():

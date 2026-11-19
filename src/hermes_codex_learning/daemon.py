@@ -192,6 +192,9 @@ class Bridge:
                 with self.store.db:
                     self.store.db.execute("UPDATE turns SET payload=?,revision=? WHERE id=?", (dumps(enriched), digest(enriched), key))
             return
+        if enriched.get("source", {}).get("executor") != "Hermes":
+            from .model_sync import record_observed_codex_model
+            record_observed_codex_model(self.store, enriched)
         handle = self.handle_for(enriched["source"])
         from .enterprise import scope_boundary
         required=scope_boundary(self.store,handle)
@@ -393,6 +396,8 @@ class Bridge:
                            "project": payload["bridge_project"], "chat": payload["session_id"]})
 
     def reviews(self) -> None:
+        from .model_sync import record_review_model_failure, sync_with_codex
+        sync_with_codex(self)
         from .enterprise import MODE, boundary, scope_boundary
         enterprise=boundary(self.settings.data_policy)
         if self.settings.data_policy.get("mode")==MODE and not enterprise:
@@ -536,6 +541,10 @@ class Bridge:
                          "applied_entities": sorted(set(applied_entities)), "review_summary": summary["text"]}
                 if retry_available:
                     event["retry"] = self.retry_queue.record(intent, {**result, "id": attempt_id}, local)
+                if result["run_status"] == "failed":
+                    failover = record_review_model_failure(self, result.get("error"))
+                    if failover and failover.get("applied") and retry_available:
+                        event["model_failover"] = {k: failover[k] for k in ("previous_model", "target_model", "requeued_blocked_reviews")}
                 self.emit(event, calls=calls)
             self.store.set("state", "publishing")
             if result["run_status"] in {"completed","failed","interrupted","unknown","superseded"}:
@@ -1220,6 +1229,23 @@ class Bridge:
             dry_run = bool(params.get("dry_run", True))
             with self.publication_lock, StoreConnection(self.settings, read_only=dry_run) as store:
                 return sync_published_skills(self.settings, store, dry_run=dry_run)
+        if method == "model_status":
+            from .model_sync import model_status
+            with StoreConnection(self.settings, read_only=True) as store:
+                return model_status(self.settings, store)
+        if method == "model_switch":
+            from .model_sync import switch_pilot_model
+            apply = bool(params.get("apply", False))
+            with self.publication_lock, StoreConnection(self.settings, read_only=not apply) as store:
+                queue = ReviewRetryQueue(self.settings, store) if apply else None
+                return switch_pilot_model(
+                    self.settings, store, params["model"],
+                    requested_effort=params.get("effort"),
+                    apply=apply, verify_probe=bool(params.get("verify_probe", True)),
+                    pin=bool(params.get("pin", False)),
+                    reason=params.get("reason") or "manual_switch",
+                    retry_queue=queue, api=self.api if apply else None,
+                )
         raise ValueError("Unknown bridge method")
 
     def request_project(self, params: dict) -> str | None:

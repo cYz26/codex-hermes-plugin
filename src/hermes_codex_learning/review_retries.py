@@ -11,6 +11,14 @@ from .review_input import BUDGET_EXHAUSTED, is_pending_tool_reply
 from .enterprise import scrub
 from .store import dumps
 
+_MODEL_UNAVAILABLE_RE = re.compile(
+    r"(?i)requested model is currently unavailable|try another model|model_not_available|endpoint.*unavailable"
+)
+
+
+def is_model_unavailable_error(error: str | None) -> bool:
+    return bool(error and _MODEL_UNAVAILABLE_RE.search(str(error)))
+
 
 def retry_reason(outcome):
     if outcome.get("run_status") == "unknown" or outcome.get("uncertain"):
@@ -20,6 +28,8 @@ def retry_reason(outcome):
     error = str(outcome.get("error") or "")
     if outcome.get("failure_reason") == BUDGET_EXHAUSTED:
         return "non_transient"
+    if is_model_unavailable_error(error):
+        return "model_unavailable"
     if re.search(r"(?i)\b(?:401|403)\b|permission denied|access denied|authentication|invalid.api.key", error):
         return "non_transient"
     if outcome.get("run_status") == "interrupted":
@@ -94,6 +104,10 @@ class ReviewRetryQueue:
             return old
         if old.get("state") in {"superseded", "closed_without_retry"}:
             return old
+        if (old.get("last_attempt") == attempt.get("id")
+                and old.get("unblocked_for_model")
+                and old.get("state") in {"waiting", "queued"}):
+            return old
         if state in {"completed", "superseded"}:
             if not old and not intent.get("retry_root"):
                 return None
@@ -113,7 +127,7 @@ class ReviewRetryQueue:
             value["failure_reason"] = REVIEW_DEADLINE
         if not self.settings.review_retry_enabled:
             value["state"] = "disabled"
-        elif reason in {"non_transient", "unconfirmed_outcome", REVIEW_DEADLINE}:
+        elif reason in {"non_transient", "model_unavailable", "unconfirmed_outcome", REVIEW_DEADLINE}:
             value["state"] = "blocked"
         elif index >= self.settings.review_retry_limit:
             value["state"] = "exhausted"
@@ -218,6 +232,38 @@ class ReviewRetryQueue:
             if result["status"] == "queued":
                 dispatched.append({**result, "root_intent": row["id"]})
         return dispatched
+
+    def requeue_model_unavailable(self, new_model: str) -> list[str]:
+        """Unblock reviews that failed solely because the prior model was unavailable."""
+        if not self.settings.review_retry_enabled or not isinstance(new_model, str) or not new_model:
+            return []
+        now = self.clock()
+        requeued = []
+        rows = self.store.db.execute(
+            "SELECT id, payload FROM review_retries WHERE state='blocked' ORDER BY updated DESC LIMIT 50"
+        ).fetchall()
+        for row_id, raw in rows:
+            value = json.loads(raw)
+            if value.get("child_intent") or value.get("retry_index", 0) >= self.settings.review_retry_limit:
+                continue
+            if value.get("reason") != "model_unavailable" and not is_model_unavailable_error(value.get("error")):
+                continue
+            if value.get("unblocked_for_model") == new_model:
+                continue
+            updated = {
+                **value,
+                "reason": "model_unavailable",
+                "state": "waiting",
+                "next_retry_at": now,
+                "unblocked_for_model": new_model,
+            }
+            with self.store.db:
+                self.store.db.execute(
+                    "UPDATE review_retries SET state='waiting', due=?, payload=?, updated=? WHERE id=? AND state='blocked'",
+                    (now, dumps(updated), now, row_id),
+                )
+            requeued.append(row_id)
+        return requeued
 
     def summary(self):
         counts = dict(self.store.db.execute("SELECT state,COUNT(*) FROM review_retries GROUP BY state"))
