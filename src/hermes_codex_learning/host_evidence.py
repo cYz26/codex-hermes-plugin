@@ -15,7 +15,8 @@ from .store import digest
 
 LIMIT = 16 * 1024 * 1024
 HEADER_LIMIT = 2 * 1024 * 1024
-CURSOR_VERSION = 2
+CURSOR_VERSION = 3
+_EXECUTION_FUNCTION_NAMES = {"exec_command", "write_stdin", "bash", "exec", "shell", "terminal"}
 # The only code-mode form joined without an inner tool ID is a literal call
 # whose return is emitted directly. Never evaluate or search arbitrary JS.
 _DIRECT_EXEC = re.compile(
@@ -158,7 +159,7 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
     stat = _verify_path(path, sessions_root)
     if include_task and stat.st_size > LIMIT:
         raise ValueError("Host transcript ownership or bounded-read limit failed")
-    inputs, commands, trace, code_execs = [], {}, {}, {}
+    inputs, commands, trace, code_execs, tool_names = [], {}, {}, {}, {}
     completion = None
     with path.open() as stream:
         meta = _header(stream, chat, project)
@@ -171,6 +172,7 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
             commands = dict(cursor.get("commands", {}))
             trace = dict(cursor.get("trace", {}))
             code_execs = dict(cursor.get("code_execs", {}))
+            tool_names = dict(cursor.get("tool_names", {}))
             inputs = list(cursor.get("inputs", [])) if include_task else []
         elif not include_task and stat.st_size > LIMIT:
             stream.seek(max(stream.tell(), stat.st_size - LIMIT))
@@ -208,6 +210,11 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                 _record_code_exec(code_execs, row, payload, position)
             if matches and (row.get("type") == "turn_context" or payload.get("type") == "task_started"):
                 trace.setdefault("start", position)
+                if row.get("type") == "turn_context":
+                    if isinstance(payload.get("model"), str) and 0 < len(payload["model"]) <= 160:
+                        trace["model"] = payload["model"]
+                    if isinstance(payload.get("effort"), str) and 0 < len(payload["effort"]) <= 32:
+                        trace["effort"] = payload["effort"]
             if matches and row.get("type") == "response_item" and payload.get("role") in {"user","assistant"}:
                 role = payload["role"]
                 trace.setdefault("request" if role == "user" else "result", position)
@@ -216,6 +223,26 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
                 message_id = payload.get("id")
                 if isinstance(message_id, str) and message_id:
                     trace.setdefault("messages", {})[message_id] = {**position, "role":role}
+            if matches and row.get("type") == "response_item":
+                rtype = payload.get("type")
+                cid = payload.get("call_id")
+                if rtype in {"custom_tool_call", "function_call"} and isinstance(cid, str) and cid and isinstance(payload.get("name"), str):
+                    tool_names[cid] = payload["name"]
+                elif rtype == "custom_tool_call_output" and isinstance(cid, str) and cid and cid not in commands:
+                    tname = tool_names.get(cid, "").rsplit(".", 1)[-1].lower()
+                    out = payload.get("output")
+                    if tname and tname != "exec" and isinstance(out, str):
+                        if out.startswith("Exit code: 0\n"):
+                            commands[cid] = {"status": "completed", "exit_code": None, "process_id": None, "kind": "FileChange", **position}
+                        elif out.startswith(("apply_patch verification failed:", "Error:", "error:")) or re.match(r"^Exit code: (?!0\b)-?\d+\n", out):
+                            commands[cid] = {"status": "failed", "exit_code": None, "process_id": None, "kind": "FileChange", **position}
+                elif rtype == "function_call_output" and isinstance(cid, str) and cid and cid not in commands:
+                    tname = tool_names.get(cid, "").rsplit(".", 1)[-1].lower()
+                    if tname and tname not in _EXECUTION_FUNCTION_NAMES and not tname.startswith(("c_exec_command", "c_write_stdin")):
+                        out = payload.get("output")
+                        failed = isinstance(out, dict) and (out.get("isError") is True or bool(out.get("error")))
+                        commands[cid] = {"status": "failed" if failed else "completed", "exit_code": None,
+                                         "process_id": None, "kind": "McpToolCall", **position}
             if (row.get("type") != "event_msg" or payload.get("type") != "item_completed"
                     or payload.get("turn_id") != turn):
                 continue
@@ -250,6 +277,7 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
     result = {"input": inputs[0] if inputs else None, "commands": commands, "relation":_relation(meta), "trace":trace,
               "code_execs":code_execs,"cwd_hash":digest(meta.get("cwd"))}
     result["cursor"] = {"version":CURSOR_VERSION,"identity":identity,"offset":offset,"commands":commands,"trace":trace,"code_execs":code_execs,
+                        "tool_names":tool_names,
                         "include_task":include_task, "inputs":inputs if include_task else [],"boundary_hash":_boundary_hash(path,offset)}
     return result
 

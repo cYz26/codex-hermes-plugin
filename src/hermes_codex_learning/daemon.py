@@ -43,6 +43,11 @@ class Bridge:
         self.startup_status = None
         from .identity import build_identity
         self.build = build_identity()
+        if self.store.get("input-retry-build") != self.build["digest"]:
+            with self.store.db:
+                self.store.db.execute("DELETE FROM meta WHERE key LIKE 'input-retry:%'")
+            self.store.set("last_input_retry", 0)
+            self.store.set("input-retry-build", self.build["digest"])
         self.last_publish = 0.0
         self.native_capabilities = {}
         self.native_policy = None

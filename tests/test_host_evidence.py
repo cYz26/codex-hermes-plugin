@@ -99,6 +99,42 @@ class HostEvidenceTests(unittest.TestCase):
         self.assertEqual(result["commands"]["edit"]["status"],"completed")
         self.assertNotIn("PRIVATE",str(result))
 
+    def test_failed_apply_patch_and_builtin_function_output_settle_without_post_hook(self):
+        from hermes_codex_learning.config import Settings
+        from hermes_codex_learning.daemon import Bridge
+        from hermes_codex_learning.normalize import merge_event
+        settings = Settings(self.root / "home", self.project, self.root, Path("/usr/bin/python3"))
+        observed = []
+        api = SimpleNamespace(open=lambda source: {"handle": "h"}, observe=lambda *a, **kw: observed.append((a, kw)))
+        bridge = Bridge(settings, api)
+        try:
+            for event in [
+                {"hook_event_name": "UserPromptSubmit", "prompt": "Patch and inspect"},
+                {"hook_event_name": "PreToolUse", "tool_use_id": "bad-patch", "tool_name": "apply_patch"},
+                {"hook_event_name": "PreToolUse", "tool_use_id": "img", "tool_name": "view_image"},
+                {"hook_event_name": "Stop", "last_assistant_message": "Done"},
+            ]:
+                value = {**event, "session_id": "chat", "turn_id": "turn", "cwd": str(self.project),
+                         "bridge_project": str(self.project), "bridge_host": "host", "transcript_path": str(self.path)}
+                identity = bridge.store.capture(value)
+                merge_event(bridge.store, bridge.store.db.execute("SELECT * FROM events WHERE id=?", (identity,)).fetchone())
+            meta = {"internal_chat_message_metadata_passthrough": {"turn_id": "turn"}}
+            self.write([
+                {"type": "response_item", "payload": {"type": "custom_tool_call", "name": "apply_patch", "call_id": "bad-patch", "status": "completed", **meta}},
+                {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "bad-patch", "output": "apply_patch verification failed: SECRET context mismatch", **meta}},
+                {"type": "response_item", "payload": {"type": "function_call", "name": "view_image", "call_id": "img", "status": "completed", **meta}},
+                {"type": "response_item", "payload": {"type": "function_call_output", "call_id": "img", "output": [{"type": "input_image"}], **meta}},
+            ])
+            with patch.dict(os.environ, {"CODEX_HOME": str(self.root)}):
+                bridge.retry_completed_inputs()
+            self.assertEqual(len(observed), 1)
+            self.assertEqual(observed[0][0][1]["status"], "completed")
+            self.assertEqual({tool["call_id"]: tool["status"] for tool in observed[0][0][1]["tools"]},
+                             {"bad-patch": "failed", "img": "completed"})
+            self.assertNotIn("SECRET", json.dumps(observed))
+        finally:
+            bridge.store.close()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name).resolve()
