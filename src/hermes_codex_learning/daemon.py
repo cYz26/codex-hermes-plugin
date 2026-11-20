@@ -513,7 +513,10 @@ class Bridge:
                             previous_publication = self.store.get("publications-v1",{}).get(name,{})
                             proofs[name] = {**proof, "version":after_versions[name], "catalog_version":catalog_versions.get(name),
                                             "prior_published_version":previous_publication.get("artifact",{}).get("version")}
-                            if "learning_candidates" in result:
+                            if result.get("review_protocol") == "native":
+                                proofs[name].update(evidence_contract=0, review_handle=intent["handle"],
+                                                    learning_evidence={"state": "native_review", "review_input": intent["id"]})
+                            elif "learning_candidates" in result:
                                 supported = [item for item in result["learning_candidates"] if item.get("state") == "accepted"
                                              and item.get("tool") == "skill_manage" and item.get("name") == name]
                                 proofs[name].update(evidence_contract=1,review_handle=intent["handle"],learning_evidence={"state":"passed" if supported else "missing",
@@ -541,8 +544,9 @@ class Bridge:
                          "applied_entities": sorted(set(applied_entities)), "review_summary": summary["text"]}
                 if retry_available:
                     event["retry"] = self.retry_queue.record(intent, {**result, "id": attempt_id}, local)
-                if result["run_status"] == "failed":
-                    failover = record_review_model_failure(self, result.get("error"))
+                if result["run_status"] in {"failed", "interrupted"}:
+                    failover = record_review_model_failure(
+                        self, result.get("error"), failure_reason=result.get("failure_reason"))
                     if failover and failover.get("applied") and retry_available:
                         event["model_failover"] = {k: failover[k] for k in ("previous_model", "target_model", "requeued_blocked_reviews")}
                 self.emit(event, calls=calls)
@@ -600,7 +604,12 @@ class Bridge:
         return list(latest.values())
 
     def has_active_turns(self):
+        now = time.time()
+        cutoff = now - self.settings.active_turn_timeout_seconds
         for row in self.latest_turns():
+            activity = row["activity"] if "activity" in row.keys() else None
+            if isinstance(activity, (int, float)) and activity < cutoff:
+                continue
             data = json.loads(row['payload'])
             if data['status'] == 'running':
                 return True
@@ -608,6 +617,37 @@ class Bridge:
                     and not data.get('assistant')):
                 return True
         return False  # Unknown tool outcomes do not reopen a terminated host turn.
+
+    def reap_stale_turns(self) -> int:
+        """Finalize abandoned running turns whose activity exceeded active_turn_timeout_seconds."""
+        now = time.time()
+        if now - getattr(self, "_last_stale_turn_reap", 0.0) < 60.0:
+            return 0
+        self._last_stale_turn_reap = now
+        cutoff = now - self.settings.active_turn_timeout_seconds
+        rows = self.store.db.execute(
+            "SELECT id, payload FROM turns WHERE (stopped IS NULL OR stopped = 0) AND activity < ? "
+            "AND json_extract(payload, '$.status') IN ('running', 'incomplete')",
+            (cutoff,),
+        ).fetchall()
+        if not rows:
+            return 0
+        reaped = 0
+        with self.store.db:
+            for row in rows:
+                data = json.loads(row["payload"])
+                if data.get("status") not in {"running", "incomplete"}:
+                    continue
+                if data.get("_ended_by") in {"Stop", "Interrupt", "stale_timeout"}:
+                    continue
+                data["status"] = "incomplete"
+                data["_ended_by"] = "stale_timeout"
+                self.store.db.execute(
+                    "UPDATE turns SET payload=?, stopped=COALESCE(stopped, ?) WHERE id=?",
+                    (dumps(data), now, row["id"]),
+                )
+                reaped += 1
+        return reaped
 
     def update_knowledge(self, context: dict, *, persist=True, **kwargs) -> dict:
         stored_index = self.store.get("knowledge-index-v1", {})
@@ -745,9 +785,12 @@ class Bridge:
                     reviewed = publication_reviews.get(name)
                     disposition = publication_review.disposition(reviewed, candidate)
                     intent = self.store.get('native-candidate-intents', {}).get(name, {})
+                    native_review_candidate = (
+                        self.settings.review_protocol == "native" and bool(enterprise)
+                    )
                     decision = sharing_check(value, origins, markers, executable_candidate=self.settings.quality_checks,
                                              enterprise=bool(enterprise),
-                                             native_candidate=intent.get('version') == value['version'] and bool(intent.get('sources')))
+                                             native_candidate=native_review_candidate or (intent.get('version') == value['version'] and bool(intent.get('sources'))))
                     lifecycle_block = self.store.get('lifecycle-withheld', {}).get(name)
                     if lifecycle_block:
                         decision = {'allowed': False, **lifecycle_block}
@@ -983,6 +1026,7 @@ class Bridge:
                     if self.api.close(handle=handle, event_id=event_id)["status"] != "deferred":
                         del closing[event_id]
                 self.store.set("closing", closing)
+                self.reap_stale_turns()
                 if not self.has_active_turns():
                     from .lifecycle import maintenance
                     maintenance(self)

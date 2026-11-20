@@ -2,7 +2,7 @@
   "upstream": "https://github.com/NousResearch/hermes-agent.git",
   "tag": "v0.23.2",
   "base_commit": "ae2a81ccc00e9b7c06301523e5bb09608397149c",
-  "patch_sha256": "de2d184d11dcf93b1dc2b24cac6cb438141d6198ac092fca7ba556c07ec86669",
+  "patch_sha256": "ed701e3330fc608557eb63e310baaa2bfed5cf7c552f96c1322258e2e2ad2c15",
   "replay_matches_working_source": true,
   "files": {
     "agent/agent_init.py": "967380adaf748c71516496fde19f4939a812fa78221ad71431e5f975723e134a",
@@ -46,7 +46,7 @@
     "tools/memory_tool.py": "577ad349faa68578cc7ecda59d3f35df12c25f3673c4db61e826c2ca1e523411",
     "tools/memory_tool_store.py": "b83d9b20ef51230741ac066acf307717fe1ac2739a2767a1821dd3eaa283a545",
     "tools/skill_manager_tool.py": "ca79b444a46e5f8744582961e7b1f60bfe3f1dc21115fed209e82c2aa5dab8e6",
-    "tools/skills_tool.py": "c5b935edfe477284f2fd694efd28d5d5bd48a62add0980ea8e04aafec0c5172f",
+    "tools/skills_tool.py": "fcb8edaddaad2990bf94f3735ccd0918ebacb6c6cf1ae8e9a22d803f3f4d5b5b",
     "tools/write_approval.py": "cf7808797b6771dff5e4daa4d8861d1ee73a009909c836b4e9d4a12291ca0f6e",
     "tui_gateway/methods_tools.py": "eb867e9486155a69df5d7cde8740ac5115d8dfdd54adedd6aba62037546199b9"
   },
@@ -58,7 +58,7 @@
     "reason": "The pinned v0.23.2 changes preserve the approved shared Learning API v1 owner and project scopes, memory/skill approvals, native review counters and Curator semantics. The new review signals and idle helpers are additive; both revisions use state schema 33. Native updater target selection still uses resolve_source_target-v1 with exact tag/commit validation. Site changes are routine API rebases; the replay-window guard remains intact and its older valid-signature fixture now uses current time exactly as upstream does. No learning workflow redesign or irreversible data migration is required.",
     "from_commit": "3b421578588243f920886e6fe79a6faa87ea026e",
     "to_commit": "ae2a81ccc00e9b7c06301523e5bb09608397149c",
-    "source_tree": "79211313493bed9c741bfeee01b86812ae087ceb"
+    "source_tree": "957cebf0f80c387062d2a350bac9b01748bc8d9d"
   },
   "additional_native_tests": [
     "tests/agent/test_learning_cloud_contracts.py",

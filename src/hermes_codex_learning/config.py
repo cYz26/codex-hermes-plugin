@@ -10,6 +10,8 @@ from pathlib import Path
 
 NETWORK_ENV_KEYS = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
                               "http_proxy", "https_proxy", "all_proxy", "no_proxy"})
+REVIEW_PROTOCOLS = frozenset({"strict_evidence", "native"})
+REASONING_EFFORTS = frozenset({"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"})
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,14 @@ class Settings:
     shared_client_id: str | None = field(default=None, repr=False)
     native_skill_projection: bool = True
     codex_skills_dir: Path | None = None
+    review_protocol: str = "strict_evidence"
+    review_reasoning_effort: str | None = None
+    model_sync_enabled: bool = True
+    review_fallback_models: tuple[str, ...] = ()
+    allow_cross_project_shared_skill_edits: bool = False
+    active_turn_timeout_seconds: float = 1800
+    raw_event_retention_days: float = 7
+    session_context_limit: int = 256
 
     def __post_init__(self):
         if self.shared_profile is not None or self.shared_client_id is not None:
@@ -90,6 +100,27 @@ class Settings:
             if (not self.codex_skills_dir.is_absolute() or resolved_target == Path("/")
                     or resolved_target == resolved_home or resolved_target.is_relative_to(resolved_home / "skills")):
                 raise ValueError("codex_skills_dir must be an independent absolute host skills directory")
+        if self.review_protocol not in REVIEW_PROTOCOLS:
+            raise ValueError("learning.review_protocol must be native or strict_evidence")
+        if self.review_reasoning_effort is not None and (
+                not isinstance(self.review_reasoning_effort, str)
+                or self.review_reasoning_effort.strip().lower() not in REASONING_EFFORTS):
+            raise ValueError("learning.review_reasoning_effort must be a valid reasoning effort level")
+        if not isinstance(self.model_sync_enabled, bool):
+            raise ValueError("learning.model_sync.enabled must be a boolean")
+        if not isinstance(self.allow_cross_project_shared_skill_edits, bool):
+            raise ValueError("learning.allow_cross_project_shared_skill_edits must be a boolean")
+        if any(not isinstance(m, str) or not m.strip() for m in self.review_fallback_models):
+            raise ValueError("learning.fallback_models must contain non-empty model strings")
+        active_timeout = self.active_turn_timeout_seconds
+        if type(active_timeout) not in (int, float) or not math.isfinite(active_timeout) or not 60 <= active_timeout <= 86400:
+            raise ValueError("learning.active_turn_timeout_seconds must be between 60 and 86400 seconds")
+        raw_days = self.raw_event_retention_days
+        if type(raw_days) not in (int, float) or not math.isfinite(raw_days) or not 1 <= raw_days <= 90:
+            raise ValueError("retention.raw_event_days must be between 1 and 90 days")
+        if (isinstance(self.session_context_limit, bool) or not isinstance(self.session_context_limit, int)
+                or not 256 <= self.session_context_limit <= 4096):
+            raise ValueError("hook.session_context_limit must be an integer between 256 and 4096 bytes")
 
     @property
     def interpreter(self) -> Path:
@@ -233,4 +264,12 @@ class Settings:
             shared_client_id=shared.get("client_id"),
             native_skill_projection=projection_enabled,
             codex_skills_dir=codex_skills_dir,
+            review_protocol=data.get("learning", {}).get("review_protocol", "strict_evidence"),
+            review_reasoning_effort=(data.get("learning", {}).get("review_reasoning_effort") or None),
+            model_sync_enabled=data.get("learning", {}).get("model_sync", {}).get("enabled", True),
+            review_fallback_models=tuple(data.get("learning", {}).get("fallback_models", ())),
+            allow_cross_project_shared_skill_edits=data.get("learning", {}).get("allow_cross_project_shared_skill_edits", False),
+            active_turn_timeout_seconds=float(data.get("learning", {}).get("active_turn_timeout_seconds", 1800)),
+            raw_event_retention_days=float(data.get("retention", {}).get("raw_event_days", 7)),
+            session_context_limit=int(data.get("hook", {}).get("session_context_limit", 256)),
         )

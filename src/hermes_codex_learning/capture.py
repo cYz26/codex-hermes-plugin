@@ -16,7 +16,31 @@ from .store import Store, digest, dumps
 ADDITIONAL_CONTEXT_LIMIT = 256
 
 
-def model_context(memory: str, project: str | None, recommended: list[str]) -> tuple[str, list[str]]:
+def _trim_utf8_cleanly(text: str, max_bytes: int) -> str:
+    """Trim UTF-8 text within max_bytes without splitting multi-byte chars or mid-word ASCII tokens."""
+    text = text.strip()
+    if max_bytes <= 0 or not text:
+        return ""
+    raw = text.encode("utf-8", errors="replace")
+    if len(raw) <= max_bytes:
+        return text
+    ellipsis = "…"
+    ellipsis_bytes = len(ellipsis.encode("utf-8"))
+    if max_bytes <= ellipsis_bytes:
+        return ""
+    clipped = raw[:max_bytes - ellipsis_bytes].decode("utf-8", errors="ignore")
+    # Prefer a line, sentence, or whitespace boundary when it preserves most of the snippet.
+    for sep in ("\n", "。", ". ", "; ", "；", " ", "、", ","):
+        idx = clipped.rfind(sep)
+        if idx >= len(clipped) // 2 and idx > 0:
+            clipped = clipped[:idx + (1 if sep in {"。", "；"} else 0)]
+            break
+    clipped = clipped.rstrip(" \t\r\n,.;:、")
+    return (clipped + ellipsis) if clipped else ""
+
+
+def model_context(memory: str, project: str | None, recommended: list[str], *,
+                  limit: int = ADDITIONAL_CONTEXT_LIMIT) -> tuple[str, list[str]]:
     """Fit whole skill names before allocating the remaining UTF-8 bytes to memory."""
     head = "Hermes 全局自动学习\n" if project else "Hermes 学习经验\n"
     tail = "按需查 hermes_learning.context(cwd=聊天工作区)"
@@ -25,17 +49,17 @@ def model_context(memory: str, project: str | None, recommended: list[str]) -> t
         if not name or not name.isprintable() or name in offered:
             continue
         candidate = "相关技能 " + "、".join([*offered, name]) + "\n"
-        if len((head + candidate + tail).encode("utf-8")) <= ADDITIONAL_CONTEXT_LIMIT:
+        if len((head + candidate + tail).encode("utf-8")) <= limit:
             skills = candidate
             offered.append(name)
         if len(offered) == 3:
             break
     if project and project.isprintable():
         scoped_head = head + f"项目 {project}\n"
-        if len((scoped_head + skills + tail).encode("utf-8")) <= ADDITIONAL_CONTEXT_LIMIT:
+        if len((scoped_head + skills + tail).encode("utf-8")) <= limit:
             head = scoped_head
-    room = ADDITIONAL_CONTEXT_LIMIT - len((head + skills + tail).encode("utf-8"))
-    preview = memory.encode("utf-8", errors="replace")[:max(0, room - 1)].decode("utf-8", errors="ignore").rstrip()
+    room = limit - len((head + skills + tail).encode("utf-8"))
+    preview = _trim_utf8_cleanly(memory, room - 1)
     if preview:
         preview += "\n"
     return head + skills + preview + tail, offered
@@ -191,20 +215,33 @@ def hook(payload: dict, settings: Settings) -> dict:
         if not scoped and cache.get("skills"):
             recommended = context_view(cache, project, query)["recommended_skills"]
         hook_recommended = [name for name in recommended if name not in baseline_set]
-        memory = ("\n".join(cache["memories"].values())[:340] if "memories" in cache
-                  else cache.get("summary", ""))
-        text, offered = model_context(memory, project if settings.capture_scope == "global" else None, hook_recommended)
+        context_limit = (settings.session_context_limit if event == "SessionStart"
+                         else min(settings.session_context_limit, 512))
+        memory = ("\n".join(v for v in cache["memories"].values() if v)[:max(340, context_limit)]
+                  if "memories" in cache else cache.get("summary", ""))
+        text, offered = model_context(
+            memory, project if settings.capture_scope == "global" else None,
+            hook_recommended, limit=context_limit,
+        )
         version = cache.get("version")
         has_context = bool(memory or offered or (settings.capture_scope == "global" and not baseline_set))
         delivery_version = digest([text]) if version and has_context else None
         key = f"context-delivered:{session}:{project}" if settings.capture_scope == "global" else f"context-delivered:{session}"
+        mem_key = f"memory-delivered:{session}:{project}" if settings.capture_scope == "global" else f"memory-delivered:{session}"
+        memory_digest = digest([memory]) if memory else ""
         turn = payload.get("turn_id")
+        # Avoid re-injecting the same memory snippet on UserPromptSubmit/PostToolUse when
+        # native ~/.agents/skills/ projection already covers all recommended skills.
+        if (event in {"UserPromptSubmit", "PostToolUse"} and baseline_set
+                and not offered and store.get(key) is not None
+                and store.get(mem_key) == memory_digest):
+            return {}
         if not delivery_version or (event != "UserPromptSubmit" and store.get(key) == delivery_version):
             return {}
         with store.db:
             store.db.execute("BEGIN IMMEDIATE")
             returning_context = bool(delivery_version and store.get(key) != delivery_version)
-            records = {key: delivery_version} if returning_context else {}
+            records = {key: delivery_version, mem_key: memory_digest} if returning_context else {}
             if turn and (event == "UserPromptSubmit" or returning_context):
                 offer_key = "recall-offer:" + digest([session, turn])
                 previous = store.get(offer_key, {})

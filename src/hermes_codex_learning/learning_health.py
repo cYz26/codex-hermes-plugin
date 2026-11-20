@@ -52,6 +52,62 @@ def native_policy() -> dict:
 def memory_capacity(settings, store, context, project, native):
     from .approvals import ID_PATTERN, PendingReviews
 
+    if settings.shared_profile is not None:
+        try:
+            from .shared_storage import directories, memory_view
+            shared_mem = memory_view(settings, store, project)
+            files = {}
+            project_files = {}
+            for filename in ("MEMORY.md", "USER.md"):
+                configuration = native.get("memory", {}).get(filename, {})
+                raw = shared_mem.get("memories", {}).get(filename, "")
+                entries_list = [e.strip() for e in raw.split(ENTRY_DELIMITER) if e.strip()]
+                entry_chars = sum(len(e) for e in entries_list)
+                used = entry_chars + max(0, len(entries_list) - 1) * len(ENTRY_DELIMITER)
+                limit = configuration.get("limit_chars")
+                files[filename] = {
+                    **configuration, "used_chars": used, "entries": len(entries_list),
+                    "remaining_chars": max(0, limit - used) if type(limit) is int else None,
+                    "over_limit_chars": max(0, used - limit) if type(limit) is int else None,
+                    "storage": "shared_scoped",
+                }
+                project_files[filename] = {"entries": len(entries_list), "entry_chars": entry_chars}
+            project_pending = 0
+            if project:
+                pdir = directories(settings, project)[0] / "pending" / "memory"
+                if pdir.is_dir():
+                    project_pending = sum(
+                        1 for p in pdir.glob("*.json")
+                        if ID_PATTERN.fullmatch(p.stem) and not p.is_symlink() and p.is_file()
+                    )
+            root_shared = settings.home / "shared-knowledge"
+            total_pending = 0
+            project_dirs = 0
+            if root_shared.is_dir():
+                for sub in root_shared.iterdir():
+                    if sub.is_dir() and not sub.is_symlink():
+                        if sub.name != "personal":
+                            project_dirs += 1
+                        pdir = sub / "pending" / "memory"
+                        if pdir.is_dir():
+                            total_pending += sum(
+                                1 for p in pdir.glob("*.json")
+                                if ID_PATTERN.fullmatch(p.stem) and not p.is_symlink() and p.is_file()
+                            )
+            result = {
+                "state": "available", "storage_mode": "per_project_shared", "files": files,
+                "project_count": project_dirs, "unassigned_entries": 0,
+                "pending_memory_proposals": total_pending,
+                "pending_project_proposals": project_pending if project else None,
+                "latest_capacity_refusal": store.get("memory-capacity-refusal:" + project) if project else store.get("memory-capacity-refusal"),
+            }
+            if project:
+                result["project"] = project
+                result["project_files"] = project_files
+            return result
+        except (OSError, ValueError, RuntimeError):
+            pass
+
     origins = context.get("bridge_provenance", {}).get("memory", {})
     seen = set()
     file_entries, file_chars = Counter(), Counter()

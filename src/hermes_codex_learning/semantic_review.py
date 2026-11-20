@@ -157,6 +157,38 @@ class SemanticGuard:
         if filtered != args:
             return _denied("参数包含受保护信息；请移除凭据或禁止学习的内容。")
         claims, native_args = [], args
+        if scope.get("mode") == "native":
+            if tool_name == "memory":
+                if not scope.get("review_memory", True):
+                    return _denied("本次复盘未选择记忆写入；请遵守所选学习范围。", reason="review_scope_disallowed")
+                target = args.get("target", "memory")
+                if target not in {"memory", "user"}:
+                    return _denied("只允许写入 memory 或 user。", reason="review_scope_disallowed")
+                operations = args.get("operations") if isinstance(args.get("operations"), list) else [args]
+                if target == "memory":
+                    existing_pending = self.pending_match(scope, [op for op in operations if isinstance(op, dict)])
+                    if existing_pending:
+                        return _denied("相同的项目记忆修订已在待审队列中；请勿重复提交，继续处理其他有效发现。",
+                                       reason="duplicate_pending_memory")
+                return None
+            if tool_name == "skill_manage":
+                if not scope.get("review_skills", True):
+                    return _denied("本次复盘未选择技能写入；请遵守所选学习范围。", reason="review_scope_disallowed")
+                operations = args.get("operations") if isinstance(args.get("operations"), list) else [args]
+                for position, op in enumerate(operations, 1):
+                    if not isinstance(op, dict):
+                        continue
+                    action = op.get("action")
+                    if action == "write_file" and not self.resource_path(op.get("file_path", "")):
+                        return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。",
+                                       position=position, reason="review_resource_path")
+                    if action == "patch" and op.get("file_path") is not None and not self.resource_path(op.get("file_path")):
+                        return _denied("资源必须使用技能目录内的相对路径和支持的扩展名，且不能包含 ..。",
+                                       position=position, reason="review_resource_path")
+                    if len(str(op.get("content") or op.get("file_content") or "")) > 65536:
+                        return _denied("单项写入内容超过 65,536 字符；请缩小每次写入范围。", position=position)
+                return None
+            return None
         if tool_name in {"memory","skill_manage"} and "evidence" in scope:
             if tool_name == "skill_manage" and "operations" in args and set(args) != {"operations"}:
                 return _denied("技能批量调用只支持 operations；证据放在每项操作内。")
@@ -336,10 +368,24 @@ class SemanticGuard:
             return (proof.get("classification") in {"public","synthetic"} or
                     (not public_review and proof.get("policy_version") and
                      proof.get("policy_version") == assessment.get("policy_version")))
-        entries = [text for key, target, text in memory_entries(context) if target == "MEMORY.md"
-                   and index.get("memory", {}).get(key, {}).get("project") == project
-                   and memory_proofs.get(key, {}).get("project") == project
-                   and admissible(memory_proofs.get(key,{}))]
+        entries = []
+        if self.settings.shared_profile is not None and project:
+            try:
+                from .shared_storage import memory_view
+                store_ro = Store(self.settings.state)
+                try:
+                    shared_mem = memory_view(self.settings, store_ro, project).get("memories", {}).get("MEMORY.md", "")
+                finally:
+                    store_ro.close()
+                entries = [item for item in shared_mem.split("\n§\n") if item.strip()]
+            except (OSError, ValueError, RuntimeError):
+                entries = []
+        if not entries:
+            entries = [text for key, target, text in memory_entries(context) if target == "MEMORY.md"
+                       and index.get("memory", {}).get(key, {}).get("project") == project
+                       and memory_proofs.get(key, {}).get("project") == project
+                       and admissible(memory_proofs.get(key,{}))]
+        native_mode = self.settings.review_protocol == "native"
         versions = {item["name"]:item.get("version") for item in context.get("skills", [])}
         def publication_allowed(name):
             check=publications.get(name,{}).get("check",{})
@@ -353,7 +399,24 @@ class SemanticGuard:
         if public_review or enterprise_review:
             owned |= {name for name in shared if name.startswith("learned-")}
         scope = {"owned":owned, "readable":owned | shared, "existing":set(versions), "memory":entries,
-                 "review_memory":review_memory, "review_skills":review_skills}
+                 "review_memory":review_memory, "review_skills":review_skills,
+                 "mode": "native" if native_mode else "strict_evidence"}
+        if native_mode:
+            from .approvals import change_fingerprint
+            scope["pending"] = {change_fingerprint(item["operations"]): item["duplicate_of"] or item["id"]
+                                for item in pending if item["state"] in {"pending", "duplicate"}}
+            scope["claims"] = []
+            self.active[handle] = scope
+            try:
+                note = (
+                    "Enterprise boundary active: keep project-specific facts in project MEMORY.md, "
+                    "cross-project stable user preferences in USER.md, and reusable procedures in skills. "
+                    "Never store credentials, secrets, raw chat logs, or absolute host paths in shared skills."
+                ) if enterprise_review else ""
+                yield note, entries
+            finally:
+                self.active.pop(handle, None)
+            return
         candidate_details = {}
         if messages is not None:
             from .review_relevance import task_evidence, related_skills
@@ -418,6 +481,8 @@ def install_semantic_policy(api, settings, ctx):
     def agent(handle, source):
         parent = original_agent(handle, source)
         if source.get("executor") != EXECUTOR:
+            if settings.review_protocol == "native":
+                return parent
             restrict(parent, PROMPT, [])
         return parent
     def review(handle, source, messages, intent):
@@ -441,6 +506,18 @@ def install_semantic_policy(api, settings, ctx):
         from agent import background_review
         fork_original = background_review.build_cache_parity_fork
         selected = {"review_memory":intent["memory"], "review_skills":intent["skills"]}
+        if settings.review_protocol == "native":
+            with guard.scope(handle, messages, **selected) as (note, _entries):
+                parent = agent(handle, source)
+                if note:
+                    base_ephemeral = getattr(parent, "ephemeral_system_prompt", "") or ""
+                    if note not in base_ephemeral:
+                        parent.ephemeral_system_prompt = (base_ephemeral + "\n\n" + note).strip()
+                if getattr(parent, "_memory_store", None) is not None:
+                    parent._memory_store.user_profile_enabled = True
+                    parent._user_profile_enabled = True
+                result = original_review(handle, source, messages, intent)
+                return {**result, "review_protocol": "native"}
         with guard.scope(handle, messages, **selected) as (prompt, entries):
             parent = agent(handle, source)
             if isinstance(parent._memory_store, ScopedMemory):

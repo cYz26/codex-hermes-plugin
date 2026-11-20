@@ -16,16 +16,34 @@ from .review_retries import is_model_unavailable_error
 ARK_ALIASES = {
     "gemini-4-carbon": "ark:gemini-4-carbon",
     "ark:gemini-4-carbon": "ark:gemini-4-carbon",
+    "gemini-4-neon": "ark:gemini-4-neon",
+    "ark:gemini-4-neon": "ark:gemini-4-neon",
     "gpt-6-astra": "ark:gpt-6-astra",
     "ark:gpt-6-astra": "ark:gpt-6-astra",
     "gpt-6-1-sol": "ark:gpt-6-1-sol",
     "GPT-6.1-Sol": "ark:gpt-6-1-sol",
     "ark:gpt-6-1-sol": "ark:gpt-6-1-sol",
+    "gpt-6-2-sol": "ark:gpt-6-2-sol",
+    "GPT-6.2-Sol": "ark:gpt-6-2-sol",
+    "ark:gpt-6-2-sol": "ark:gpt-6-2-sol",
     "kimi-k3-1-pro-highspeed": "ark:kimi-k3-1-pro-highspeed",
     "ark:kimi-k3-1-pro-highspeed": "ark:kimi-k3-1-pro-highspeed",
 }
 EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max", "ultra"]
 DEFAULT_COOLDOWN_SECONDS = 300.0
+INCOMPATIBLE_COOLDOWN_SECONDS = 3600.0
+
+
+def _cap_effort(effort: str | None, cap: str | None) -> str | None:
+    if not cap:
+        return effort
+    cap_norm = cap.strip().lower()
+    if not effort:
+        return cap_norm
+    eff_norm = effort.strip().lower()
+    if eff_norm in EFFORT_ORDER and cap_norm in EFFORT_ORDER:
+        return cap_norm if EFFORT_ORDER.index(eff_norm) > EFFORT_ORDER.index(cap_norm) else eff_norm
+    return cap_norm
 
 
 def codex_home_dir(explicit: Path | None = None) -> Path:
@@ -299,13 +317,15 @@ def switch_pilot_model(settings: Settings, store, target_model_raw: str, *,
             raise ValueError(
                 f"Model {target_model_raw!r} is not in active Codex catalog ({sorted(codex_info['models'])})"
             )
-        effort = clamp_effort(requested_effort or current_effort, resolved_model, codex_info)
+        capped_effort = _cap_effort(requested_effort or current_effort, settings.review_reasoning_effort)
+        effort = clamp_effort(capped_effort, resolved_model, codex_info)
         allowed_models = set(codex_info["models"])
     else:
         resolved_model = target_model_raw.strip()
         if not resolved_model:
             raise ValueError("A target model identifier is required")
-        effort = (requested_effort or current_effort or "max").strip().lower()
+        capped_effort = _cap_effort(requested_effort or current_effort or "max", settings.review_reasoning_effort)
+        effort = (capped_effort or "max").strip().lower()
         allowed_models = {resolved_model}
 
     changed = (resolved_model != current_model) or (effort != current_effort)
@@ -390,9 +410,24 @@ def record_observed_codex_model(store, turn_data: dict) -> None:
     })
 
 
-def record_review_model_failure(bridge, error: str | None, *, codex_home: Path | None = None) -> dict | None:
-    """Mark a 403-unavailable model in cooldown and fail over to the next healthy Codex catalog model."""
-    if not is_model_unavailable_error(error):
+def _is_model_protocol_incompatibility(error: str | None) -> bool:
+    if not error:
+        return False
+    text = str(error)
+    return ("content_policy_blocked" in text and "Completed tool invocation from an earlier model" in text)
+
+
+def _is_gemini_adapter_model(model: str | None) -> bool:
+    return bool(model and "gemini" in str(model).lower())
+
+
+def record_review_model_failure(bridge, error: str | None, *, failure_reason: str | None = None,
+                                codex_home: Path | None = None) -> dict | None:
+    """Mark an unavailable or repeatedly incompatible/timing-out model in cooldown and fail over."""
+    unavailable_err = is_model_unavailable_error(error)
+    incompat_err = _is_model_protocol_incompatibility(error)
+    deadline_err = failure_reason == "review_deadline" or (bool(error) and "wall-clock limit" in str(error))
+    if not (unavailable_err or incompat_err or deadline_err):
         return None
     if (codex_home is None and not os.environ.get("CODEX_HOME")
             and not bridge.settings.home.resolve().is_relative_to((Path.home() / ".hermes-codex-learning").resolve())):
@@ -411,26 +446,53 @@ def record_review_model_failure(bridge, error: str | None, *, codex_home: Path |
         return None
     failed_model = str((doc.get("model") or {}).get("default") or "")
     now = time.time()
+    if deadline_err and not (unavailable_err or incompat_err):
+        # Require two consecutive review_deadline timeouts within 2 hours before cooling down a model.
+        streaks = bridge.store.get("model-deadline-streaks") or {}
+        prev = streaks.get(failed_model) or {}
+        count = (int(prev.get("count", 0)) + 1) if now - float(prev.get("at", 0)) < 7200 else 1
+        streaks[failed_model] = {"count": count, "at": now}
+        bridge.store.set("model-deadline-streaks", streaks)
+        if count < 2:
+            return {"failed_model": failed_model, "switched": False, "reason": "deadline_streak_below_threshold"}
+    elif failed_model:
+        streaks = bridge.store.get("model-deadline-streaks") or {}
+        if failed_model in streaks:
+            streaks.pop(failed_model, None)
+            bridge.store.set("model-deadline-streaks", streaks)
     unavailable = {k: v for k, v in (bridge.store.get("unavailable-models") or {}).items() if v > now}
     if failed_model:
-        unavailable[failed_model] = now + codex_info["cooldown_seconds"]
+        cooldown = max(codex_info["cooldown_seconds"], INCOMPATIBLE_COOLDOWN_SECONDS) if (incompat_err or deadline_err) else codex_info["cooldown_seconds"]
+        unavailable[failed_model] = now + cooldown
     bridge.store.set("unavailable-models", unavailable)
     sync_state = bridge.store.get("model-sync-state") or {}
-    if sync_state.get("mode") == "pinned":
+    explicit_fallbacks = list(bridge.settings.review_fallback_models)
+    if sync_state.get("mode") == "pinned" and not explicit_fallbacks:
         return {"failed_model": failed_model, "switched": False, "reason": "model_pinned"}
 
-    observed = (bridge.store.get("codex-observed-model") or {}).get("model")
     candidates = []
-    for raw in [observed, codex_info.get("review_model"), codex_info.get("model"), *codex_info.get("fallback_order", [])]:
+    if explicit_fallbacks:
+        raw_list = explicit_fallbacks
+    else:
+        observed = (bridge.store.get("codex-observed-model") or {}).get("model")
+        raw_list = [observed, codex_info.get("review_model"), codex_info.get("model"), *codex_info.get("fallback_order", [])]
+    for raw in raw_list:
         norm = normalize_model_name(raw, codex_info)
-        if norm and norm not in unavailable and norm != failed_model and norm not in candidates:
+        if not norm or norm in unavailable or norm == failed_model or norm in candidates:
+            continue
+        # Keep background fallback within the same protocol family; never auto-failover
+        # an observed tool-history session onto the Gemini rewriting proxy unless explicitly listed.
+        if not explicit_fallbacks and not _is_gemini_adapter_model(failed_model) and _is_gemini_adapter_model(norm):
+            continue
+        if norm:
             candidates.append(norm)
     for candidate in candidates:
         try:
             return switch_pilot_model(
                 bridge.settings, bridge.store, candidate,
                 codex_home=codex_home, apply=True, verify_probe=True,
-                pin=False, reason=f"auto_fallback_from_{failed_model}",
+                pin=not bridge.settings.model_sync_enabled,
+                reason=f"auto_fallback_from_{failed_model}",
                 retry_queue=bridge.retry_queue, api=bridge.api,
             )
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
@@ -441,6 +503,8 @@ def record_review_model_failure(bridge, error: str | None, *, codex_home: Path |
 
 def sync_with_codex(bridge, *, codex_home: Path | None = None) -> dict | None:
     """Keep pilot's review model aligned with devbox Codex when sharing the same local router."""
+    if not bridge.settings.model_sync_enabled:
+        return None
     now = time.monotonic()
     if now - getattr(bridge, "_last_model_sync_check", 0.0) < 15.0:
         return None
@@ -492,13 +556,18 @@ def sync_with_codex(bridge, *, codex_home: Path | None = None) -> dict | None:
     else:
         return None
 
-    if desired == current_model:
+    current_effort = str((doc.get("agent") or {}).get("reasoning_effort") or "max")
+    target_effort = clamp_effort(
+        _cap_effort(desired_effort or current_effort, bridge.settings.review_reasoning_effort),
+        desired, codex_info,
+    )
+    if desired == current_model and target_effort == current_effort:
         evict_stale_runtime_agents(bridge.api, current_model)
         return None
     try:
         return switch_pilot_model(
             bridge.settings, bridge.store, desired,
-            requested_effort=desired_effort, codex_home=codex_home,
+            requested_effort=target_effort, codex_home=codex_home,
             apply=True, verify_probe=False, pin=False, reason=desired_reason,
             retry_queue=bridge.retry_queue, api=bridge.api,
         )

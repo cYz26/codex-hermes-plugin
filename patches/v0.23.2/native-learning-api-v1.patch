@@ -1,5 +1,5 @@
 diff --git a/agent/agent_init.py b/agent/agent_init.py
-index 52e11d4b..8335c04a 100644
+index 52e11d4b77..8335c04a0b 100644
 --- a/agent/agent_init.py
 +++ b/agent/agent_init.py
 @@ -1164,6 +1164,8 @@ def _init_memory(agent, _agent_cfg, skip_memory, platform, memory_manager=None):
@@ -27,7 +27,7 @@ index 52e11d4b..8335c04a 100644
          # A caller that rebuilds the agent per turn (gateway api_server) hands back the session's
          # already-initialized manager: providers keep their prefetch/retain state across turns instead
 diff --git a/agent/background_review.py b/agent/background_review.py
-index 351fcd80..0d0cf084 100644
+index 351fcd800b..0d0cf08450 100644
 --- a/agent/background_review.py
 +++ b/agent/background_review.py
 @@ -1239,6 +1239,7 @@ class _ReviewForkState:
@@ -57,7 +57,7 @@ index 351fcd80..0d0cf084 100644
          # Publish completion as soon as the provider-capable phase has returned or startup
          # cancellation has fenced it out (unregister + finish are identity-scoped and idempotent).
 diff --git a/agent/codex_runtime.py b/agent/codex_runtime.py
-index c91ff285..9d56d92f 100644
+index c91ff285d7..9d56d92f6e 100644
 --- a/agent/codex_runtime.py
 +++ b/agent/codex_runtime.py
 @@ -730,10 +730,8 @@ def _finish_codex_turn(agent, turn, messages: list[dict[str, Any]], *, original_
@@ -74,7 +74,7 @@ index c91ff285..9d56d92f 100644
      if not turn.interrupted and turn.error is None:
          _call_guarded(getattr(agent, "_sync_external_memory_for_turn", None), "external memory sync raised", kwargs=dict(
 diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
-index b4948b6c..d35f00a3 100644
+index b4948b6c58..d35f00a31a 100644
 --- a/agent/conversation_loop.py
 +++ b/agent/conversation_loop.py
 @@ -1835,12 +1835,13 @@ def run_conversation(
@@ -93,7 +93,7 @@ index b4948b6c..d35f00a3 100644
              result = _run_conversation_turn(
                  agent,
 diff --git a/agent/curator.py b/agent/curator.py
-index 544eb0d8..5afbcd9e 100644
+index 544eb0d8f1..5afbcd9e2c 100644
 --- a/agent/curator.py
 +++ b/agent/curator.py
 @@ -1194,6 +1194,9 @@ def _release_run_claim() -> None:
@@ -107,7 +107,7 @@ index 544eb0d8..5afbcd9e 100644
          if not should_run_now() or (idle_for_seconds is not None and idle_for_seconds < get_min_idle_hours() * 3600.0):
              return None
 diff --git a/agent/inline_tool_executors.py b/agent/inline_tool_executors.py
-index ac6a6753..48be02c5 100644
+index ac6a675318..48be02c500 100644
 --- a/agent/inline_tool_executors.py
 +++ b/agent/inline_tool_executors.py
 @@ -125,6 +125,14 @@ def _callback_tool(module: str, func: str, callback_attr: str, *arg_specs: _ArgS
@@ -141,7 +141,7 @@ index ac6a6753..48be02c5 100644
          (
 diff --git a/agent/learning_api.py b/agent/learning_api.py
 new file mode 100644
-index 00000000..c27b23f9
+index 0000000000..c27b23f943
 --- /dev/null
 +++ b/agent/learning_api.py
 @@ -0,0 +1,68 @@
@@ -215,7 +215,7 @@ index 00000000..c27b23f9
 +        return self._service.close(handle=handle, event_id=event_id)
 diff --git a/agent/learning_artifacts.py b/agent/learning_artifacts.py
 new file mode 100644
-index 00000000..afc6ede0
+index 0000000000..afc6ede0b7
 --- /dev/null
 +++ b/agent/learning_artifacts.py
 @@ -0,0 +1,115 @@
@@ -335,7 +335,7 @@ index 00000000..afc6ede0
 +    return {"name":name,"version":version,"file_path":relative,"resource_dir":str(root),"files":files,
 +            "content":content,"content_hash":files[relative],"readiness_status":"available"}
 diff --git a/agent/learning_graph.py b/agent/learning_graph.py
-index 213be468..e490d5d5 100644
+index 213be468e5..e490d5d538 100644
 --- a/agent/learning_graph.py
 +++ b/agent/learning_graph.py
 @@ -163,10 +163,9 @@ def _memory_cards() -> list[dict[str, Any]]:
@@ -374,7 +374,7 @@ index 213be468..e490d5d5 100644
      memory_edges = _memory_skill_edges(memory_cards, list(learned_skills.values()))
 diff --git a/agent/learning_maintenance.py b/agent/learning_maintenance.py
 new file mode 100644
-index 00000000..212bc320
+index 0000000000..212bc320ea
 --- /dev/null
 +++ b/agent/learning_maintenance.py
 @@ -0,0 +1,141 @@
@@ -520,7 +520,7 @@ index 00000000..212bc320
 +            break
 +    return result
 diff --git a/agent/learning_mutations.py b/agent/learning_mutations.py
-index 3539ca6f..8bbe6dee 100644
+index 3539ca6fbf..8bbe6dee97 100644
 --- a/agent/learning_mutations.py
 +++ b/agent/learning_mutations.py
 @@ -60,7 +60,7 @@ def _locate_memory(node_id: str) -> tuple[Path, list[str], int]:
@@ -564,7 +564,7 @@ index 3539ca6f..8bbe6dee 100644
  
 diff --git a/agent/learning_policy.py b/agent/learning_policy.py
 new file mode 100644
-index 00000000..18052db3
+index 0000000000..18052db397
 --- /dev/null
 +++ b/agent/learning_policy.py
 @@ -0,0 +1,10 @@
@@ -580,7 +580,7 @@ index 00000000..18052db3
 +    return due
 diff --git a/agent/learning_results.py b/agent/learning_results.py
 new file mode 100644
-index 00000000..789f385b
+index 0000000000..789f385b1a
 --- /dev/null
 +++ b/agent/learning_results.py
 @@ -0,0 +1,70 @@
@@ -656,7 +656,7 @@ index 00000000..789f385b
 +    return outcome
 diff --git a/agent/learning_runtime.py b/agent/learning_runtime.py
 new file mode 100644
-index 00000000..89054882
+index 0000000000..89054882b3
 --- /dev/null
 +++ b/agent/learning_runtime.py
 @@ -0,0 +1,173 @@
@@ -835,7 +835,7 @@ index 00000000..89054882
 +                db.close()
 diff --git a/agent/learning_service.py b/agent/learning_service.py
 new file mode 100644
-index 00000000..1c662e9c
+index 0000000000..1c662e9c3a
 --- /dev/null
 +++ b/agent/learning_service.py
 @@ -0,0 +1,649 @@
@@ -1490,7 +1490,7 @@ index 00000000..1c662e9c
 +        return {"status": "closed", **result}
 diff --git a/agent/shared_learning_client.py b/agent/shared_learning_client.py
 new file mode 100644
-index 00000000..5be01f64
+index 0000000000..5be01f646f
 --- /dev/null
 +++ b/agent/shared_learning_client.py
 @@ -0,0 +1,476 @@
@@ -1972,7 +1972,7 @@ index 00000000..5be01f64
 +    return access.write("clear", {"target": target, "confirmed": True}, version)
 diff --git a/agent/shared_learning_scope.py b/agent/shared_learning_scope.py
 new file mode 100644
-index 00000000..9abdc809
+index 0000000000..9abdc80914
 --- /dev/null
 +++ b/agent/shared_learning_scope.py
 @@ -0,0 +1,30 @@
@@ -2007,7 +2007,7 @@ index 00000000..9abdc809
 +    finally:
 +        current.reset(token)
 diff --git a/agent/system_prompt.py b/agent/system_prompt.py
-index 3b946fad..d5f8ba6a 100644
+index 3b946fad6e..d5f8ba6a6b 100644
 --- a/agent/system_prompt.py
 +++ b/agent/system_prompt.py
 @@ -309,6 +309,19 @@ def _skills_prompt(agent: Any) -> str:
@@ -2031,7 +2031,7 @@ index 3b946fad..d5f8ba6a 100644
      avail_toolsets = {model_tools.get_toolset_for_tool(tool_name) for tool_name in agent.valid_tool_names} - {None, ""}
      try:
 diff --git a/agent/turn_context.py b/agent/turn_context.py
-index 006f71ae..0e6caafd 100644
+index 006f71ae0d..0e6caafd14 100644
 --- a/agent/turn_context.py
 +++ b/agent/turn_context.py
 @@ -1342,6 +1342,12 @@ def build_turn_context(
@@ -2048,7 +2048,7 @@ index 006f71ae..0e6caafd 100644
          messages=messages, active_system_prompt=active_system_prompt,
          conversation_history=conversation_history, current_turn_user_idx=current_turn_user_idx,
 diff --git a/hermes_cli/cli_commands_mixin.py b/hermes_cli/cli_commands_mixin.py
-index 8bf86a28..bf66db8b 100644
+index 8bf86a287e..bf66db8b38 100644
 --- a/hermes_cli/cli_commands_mixin.py
 +++ b/hermes_cli/cli_commands_mixin.py
 @@ -1664,12 +1664,15 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
@@ -2069,7 +2069,7 @@ index 8bf86a28..bf66db8b 100644
          _cp(f"  {_t('refine.started', focus=tail)}")
  
 diff --git a/hermes_cli/curator.py b/hermes_cli/curator.py
-index 08384534..5179c2ad 100644
+index 0838453464..5179c2ad83 100644
 --- a/hermes_cli/curator.py
 +++ b/hermes_cli/curator.py
 @@ -146,6 +146,10 @@ def _cmd_status(args) -> int:
@@ -2112,7 +2112,7 @@ index 08384534..5179c2ad 100644
      if skill_usage.get_record(args.skill).get("pinned"):
          print(
 diff --git a/hermes_cli/lifecycle.py b/hermes_cli/lifecycle.py
-index 04c3d918..a2f9c94e 100644
+index 04c3d91874..a2f9c94e19 100644
 --- a/hermes_cli/lifecycle.py
 +++ b/hermes_cli/lifecycle.py
 @@ -34,6 +34,12 @@ def invoke_hook(hook_name: str, **kwargs: Any) -> list[Any]:
@@ -2149,7 +2149,7 @@ index 04c3d918..a2f9c94e 100644
  
      if hook_name in HANDLED_HOOKS:
 diff --git a/hermes_cli/main_agent_cmds.py b/hermes_cli/main_agent_cmds.py
-index 99217675..11733a55 100644
+index 9921767564..11733a5571 100644
 --- a/hermes_cli/main_agent_cmds.py
 +++ b/hermes_cli/main_agent_cmds.py
 @@ -20,6 +20,18 @@ def _cmd_memory_off():
@@ -2172,7 +2172,7 @@ index 99217675..11733a55 100644
      mem_dir = get_hermes_home() / "memories"
      target = getattr(args, "target", "all")
 diff --git a/hermes_cli/plugin_isolation.py b/hermes_cli/plugin_isolation.py
-index 4d7c500d..086f08b6 100644
+index 4d7c500d83..086f08b645 100644
 --- a/hermes_cli/plugin_isolation.py
 +++ b/hermes_cli/plugin_isolation.py
 @@ -37,6 +37,7 @@ _ISOLATION_MODES = frozenset({ISOLATION_IN_PROCESS, ISOLATION_HOST})
@@ -2184,7 +2184,7 @@ index 4d7c500d..086f08b6 100644
      "register_browser_page_backend": "browser-vault fill scripts carry credentials that stay in the Hermes process",
      "register_platform": "platform adapters run on the gateway's event loop with native SDK clients",
 diff --git a/hermes_cli/plugins_capability_ctx.py b/hermes_cli/plugins_capability_ctx.py
-index ecd1466d..82a3aab4 100644
+index ecd1466d8e..82a3aab496 100644
 --- a/hermes_cli/plugins_capability_ctx.py
 +++ b/hermes_cli/plugins_capability_ctx.py
 @@ -17,6 +17,22 @@ class PluginCapabilityCtxMixin:
@@ -2211,7 +2211,7 @@ index ecd1466d..82a3aab4 100644
          """True when *capability* is live for this plugin (probe, then degrade gracefully). Bundled
          plugins are trusted for ``tools.override``; otherwise granted_capabilities or the legacy
 diff --git a/hermes_cli/web_models.py b/hermes_cli/web_models.py
-index ae75baea..c7ce8296 100644
+index ae75baea94..c7ce8296b9 100644
 --- a/hermes_cli/web_models.py
 +++ b/hermes_cli/web_models.py
 @@ -425,6 +425,7 @@ class MemoryProviderSelect(BaseModel):
@@ -2223,7 +2223,7 @@ index ae75baea..c7ce8296 100644
  class BackupRequest(BaseModel):
      output: Optional[str] = None  # defaults to a timestamped zip in the home dir
 diff --git a/hermes_cli/web_routers/ops.py b/hermes_cli/web_routers/ops.py
-index 59c914a0..a52141d8 100644
+index 59c914a033..a52141d850 100644
 --- a/hermes_cli/web_routers/ops.py
 +++ b/hermes_cli/web_routers/ops.py
 @@ -558,6 +558,15 @@ async def reset_memory(body: MemoryReset, profile: Optional[str] = None):
@@ -2243,7 +2243,7 @@ index 59c914a0..a52141d8 100644
          deleted = []
          for fname, key in _MEMORY_FILES:
 diff --git a/hermes_cli/web_routers/skills.py b/hermes_cli/web_routers/skills.py
-index 9fdcc147..b5949919 100644
+index 9fdcc147bd..b594991952 100644
 --- a/hermes_cli/web_routers/skills.py
 +++ b/hermes_cli/web_routers/skills.py
 @@ -368,6 +368,10 @@ async def get_skills(profile: Optional[str] = None):
@@ -2326,7 +2326,7 @@ index 9fdcc147..b5949919 100644
          err = result.get("error", "Failed to update skill.")
          status = 404 if "not found" in str(err).lower() else 400
 diff --git a/hermes_cli/web_routers/status.py b/hermes_cli/web_routers/status.py
-index 98974259..f28783b9 100644
+index 98974259ac..f28783b93f 100644
 --- a/hermes_cli/web_routers/status.py
 +++ b/hermes_cli/web_routers/status.py
 @@ -778,11 +778,13 @@ async def run_curator(profile: Optional[str] = None):
@@ -2398,7 +2398,7 @@ index 98974259..f28783b9 100644
  
  # Portal — Nous Portal auth + Tool Gateway routing status (read-only).
 diff --git a/hermes_cli/write_approval_commands.py b/hermes_cli/write_approval_commands.py
-index b0719747..d7b8bdff 100644
+index b07197478d..d7b8bdffc2 100644
 --- a/hermes_cli/write_approval_commands.py
 +++ b/hermes_cli/write_approval_commands.py
 @@ -41,6 +41,13 @@ def handle_pending_subcommand(
@@ -2416,7 +2416,7 @@ index b0719747..d7b8bdff 100644
          return f"{_fmt_state(subsystem)}\n\n" + _fmt_pending_list(subsystem)
      sub, rest = args[0].lower(), args[1:]
 diff --git a/model_tools.py b/model_tools.py
-index 21df6529..dbfa67db 100644
+index 21df652988..dbfa67db82 100644
 --- a/model_tools.py
 +++ b/model_tools.py
 @@ -852,6 +852,8 @@ def _execute_tool(function_name: str, function_args: dict[str, Any], original_ar
@@ -2429,7 +2429,7 @@ index 21df6529..dbfa67db 100644
          dispatch_kwargs["turn_id"] = ids.turn_id
          # Prefer the caller's list so subagents can't overwrite the parent's
 diff --git a/run_agent.py b/run_agent.py
-index 7330669f..c1209c29 100644
+index 7330669f2c..c1209c2904 100644
 --- a/run_agent.py
 +++ b/run_agent.py
 @@ -772,6 +772,11 @@ class AIAgent(
@@ -2455,7 +2455,7 @@ index 7330669f..c1209c29 100644
              return
 diff --git a/tests/agent/test_learning_cloud_contracts.py b/tests/agent/test_learning_cloud_contracts.py
 new file mode 100644
-index 00000000..02a81804
+index 0000000000..02a81804d9
 --- /dev/null
 +++ b/tests/agent/test_learning_cloud_contracts.py
 @@ -0,0 +1,89 @@
@@ -2550,7 +2550,7 @@ index 00000000..02a81804
 +        service.read(kind="skill",name="fixture",artifact_version=version)
 diff --git a/tests/agent/test_learning_lifecycle.py b/tests/agent/test_learning_lifecycle.py
 new file mode 100644
-index 00000000..25fe230e
+index 0000000000..25fe230eee
 --- /dev/null
 +++ b/tests/agent/test_learning_lifecycle.py
 @@ -0,0 +1,104 @@
@@ -2660,7 +2660,7 @@ index 00000000..25fe230e
 +        api.close()
 diff --git a/tests/agent/test_learning_native_loop.py b/tests/agent/test_learning_native_loop.py
 new file mode 100644
-index 00000000..ea852080
+index 0000000000..ea852080b6
 --- /dev/null
 +++ b/tests/agent/test_learning_native_loop.py
 @@ -0,0 +1,134 @@
@@ -2800,7 +2800,7 @@ index 00000000..ea852080
 +        runtime.close()
 diff --git a/tests/agent/test_learning_service.py b/tests/agent/test_learning_service.py
 new file mode 100644
-index 00000000..54686682
+index 0000000000..5468668203
 --- /dev/null
 +++ b/tests/agent/test_learning_service.py
 @@ -0,0 +1,294 @@
@@ -3100,7 +3100,7 @@ index 00000000..54686682
 +    assert "新更新技能：build-verify" in service.read(kind="context")["summary"]
 diff --git a/tests/hermes_cli/test_learning_profile_auth.py b/tests/hermes_cli/test_learning_profile_auth.py
 new file mode 100644
-index 00000000..93ef7e07
+index 0000000000..93ef7e0705
 --- /dev/null
 +++ b/tests/hermes_cli/test_learning_profile_auth.py
 @@ -0,0 +1,78 @@
@@ -3184,7 +3184,7 @@ index 00000000..93ef7e07
 +        api.close()
 diff --git a/tests/hermes_cli/test_plugin_learning_api.py b/tests/hermes_cli/test_plugin_learning_api.py
 new file mode 100644
-index 00000000..bd2859dc
+index 0000000000..bd2859dc00
 --- /dev/null
 +++ b/tests/hermes_cli/test_plugin_learning_api.py
 @@ -0,0 +1,35 @@
@@ -3224,7 +3224,7 @@ index 00000000..bd2859dc
 +    finally:
 +        api.close()
 diff --git a/tools/memory_tool.py b/tools/memory_tool.py
-index d90a7bdd..988e2b62 100644
+index d90a7bdd5a..988e2b6201 100644
 --- a/tools/memory_tool.py
 +++ b/tools/memory_tool.py
 @@ -88,7 +88,12 @@ def _gate_or_stage(store: MemoryStore, summary: str, detail: str, payload: dict[
@@ -3242,7 +3242,7 @@ index d90a7bdd..988e2b62 100644
          return None
      if decision.blocked:
 diff --git a/tools/memory_tool_store.py b/tools/memory_tool_store.py
-index fc0c193f..8ffa26c2 100644
+index fc0c193f10..8ffa26c261 100644
 --- a/tools/memory_tool_store.py
 +++ b/tools/memory_tool_store.py
 @@ -257,6 +257,14 @@ class MemoryStore:
@@ -3330,7 +3330,7 @@ index fc0c193f..8ffa26c2 100644
      @staticmethod
      def _write_file(path: Path, entries: list[str]):
 diff --git a/tools/skill_manager_tool.py b/tools/skill_manager_tool.py
-index 2d193f9c..7d99c252 100644
+index 2d193f9ca2..7d99c2529a 100644
 --- a/tools/skill_manager_tool.py
 +++ b/tools/skill_manager_tool.py
 @@ -789,9 +789,27 @@ def skill_manage(
@@ -3372,7 +3372,7 @@ index 2d193f9c..7d99c252 100644
      compat_args=("action", "name", "content", "category", "file_path", "file_content", "old_string",
                   "new_string", "replace_all", "absorbed_into"))
 diff --git a/tools/skills_tool.py b/tools/skills_tool.py
-index 45eb8874..d7a22390 100644
+index 45eb887478..7caa51f42a 100644
 --- a/tools/skills_tool.py
 +++ b/tools/skills_tool.py
 @@ -278,8 +278,18 @@ def find_all_skills(*, skip_disabled: bool = False) -> list[dict[str, Any]]:
@@ -3430,10 +3430,14 @@ index 45eb8874..d7a22390 100644
          local_category_name: str | None = None
          if ":" in name:  # plugin registry; bare names use the flat-tree scan below
              served, local_category_name = _resolve_plugin_skill(name, file_path, task_id, preprocess)
-@@ -788,6 +812,10 @@ def _skill_view_with_bump(args, **kw):
+@@ -788,6 +812,14 @@ def _skill_view_with_bump(args, **kw):
      # out of the parent's bucket.
      dedup_task_id = None if is_background_review() else task_id
      result = skill_view(name, file_path=args.get("file_path"), task_id=task_id)
++    if is_background_review():
++        # Background reviews inspect skills to decide whether to patch them;
++        # do not inflate real usage counts or reset Curator's staleness clock.
++        return result
 +    from agent.shared_learning_client import active
 +    if active() is not None:
 +        # The owner records exact-version use from the delivery hook.
@@ -3441,7 +3445,7 @@ index 45eb8874..d7a22390 100644
      with suppress(Exception):
          parsed = json.loads(result)
          if isinstance(parsed, dict) and parsed.get("success"):
-@@ -805,3 +833,23 @@ def _skill_view_with_bump(args, **kw):
+@@ -805,3 +837,23 @@ def _skill_view_with_bump(args, **kw):
  registry.register(
      name="skill_view", toolset="skills", schema=SKILL_VIEW_SCHEMA, handler=_skill_view_with_bump,
      check_fn=check_skills_requirements, emoji="📚")
@@ -3466,7 +3470,7 @@ index 45eb8874..d7a22390 100644
 +        "tests": {"type": "array", "items": {"type": "string"}, "maxItems": 20}},
 +        "required": ["name", "stage"]}})
 diff --git a/tools/write_approval.py b/tools/write_approval.py
-index c9e9414b..be26db64 100644
+index c9e9414b31..be26db649e 100644
 --- a/tools/write_approval.py
 +++ b/tools/write_approval.py
 @@ -66,6 +66,10 @@ def _normalize_enabled(value: Any) -> bool:
@@ -3481,7 +3485,7 @@ index c9e9414b..be26db64 100644
  
  
 diff --git a/tui_gateway/methods_tools.py b/tui_gateway/methods_tools.py
-index b1df05c2..36a873a2 100644
+index b1df05c280..36a873a200 100644
 --- a/tui_gateway/methods_tools.py
 +++ b/tui_gateway/methods_tools.py
 @@ -1341,7 +1341,10 @@ def _(rid, params: dict) -> dict:

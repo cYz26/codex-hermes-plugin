@@ -14,7 +14,9 @@ from .notices import NoticeQueue
 
 def run(settings, store, api, *, dry_run=True):
     cutoff = time.time() - 30 * 86400
-    result = {"dry_run":dry_run, "eligible_turns":0, "retired_turns":0}
+    raw_cutoff = time.time() - settings.raw_event_retention_days * 86400
+    result = {"dry_run":dry_run, "eligible_turns":0, "retired_turns":0,
+              "eligible_raw_events": 0, "pruned_raw_events": 0, "pruned_transcript_cursors": 0}
     if not hasattr(api, "prune"):
         result.update(state="native_retention_unavailable")
         if not dry_run:
@@ -23,6 +25,41 @@ def run(settings, store, api, *, dry_run=True):
     result["native"] = api.prune(retention_seconds=30*86400, dry_run=dry_run)
     from .learning_requests import retire
     result["explicit_learning"] = retire(store, cutoff, dry_run=dry_run)
+    # Trim delivered raw events and settled transcript cursors once their turn is observed and older than raw_cutoff.
+    settled_rows = store.db.execute(
+        "SELECT id, payload FROM turns WHERE activity < ? AND observed_revision = revision "
+        "AND json_extract(payload, '$.status') IN ('completed', 'interrupted') ORDER BY activity LIMIT 1000",
+        (raw_cutoff,),
+    ).fetchall()
+    for row in settled_rows:
+        data = json.loads(row["payload"])
+        src = data.get("source") or {}
+        chat, turn = src.get("chat"), src.get("turn")
+        if not chat or not turn:
+            continue
+        raw_events = store.db.execute(
+            "SELECT id, source_key, created FROM events WHERE delivered IS NOT NULL "
+            "AND json_extract(payload, '$.session_id')=? AND json_extract(payload, '$.turn_id')=?",
+            (chat, turn),
+        ).fetchall()
+        result["eligible_raw_events"] += len(raw_events)
+        if dry_run:
+            continue
+        with store.db:
+            for event in raw_events:
+                if event["source_key"]:
+                    store.db.execute("INSERT OR IGNORE INTO retired_events VALUES (?,?,?)",
+                                     (event["source_key"], event["id"], event["created"]))
+                store.db.execute("DELETE FROM events WHERE id=?", (event["id"],))
+            result["pruned_raw_events"] += len(raw_events)
+            cursor_keys = [
+                "transcript-cursor:" + digest([chat, turn]),
+                "transcript-cursor:" + digest([chat, turn, True]),
+                "transcript-cursor:" + digest([chat, turn, False]),
+            ]
+            for ck in cursor_keys:
+                deleted = store.db.execute("DELETE FROM meta WHERE key=?", (ck,)).rowcount
+                result["pruned_transcript_cursors"] += deleted
     rows = store.db.execute("SELECT id,payload FROM turns WHERE activity<? AND observed_revision=revision "
                             "AND json_extract(payload,'$.status') IN ('completed','interrupted') ORDER BY activity LIMIT 1000",
                             (cutoff,)).fetchall()
@@ -90,6 +127,11 @@ def run(settings, store, api, *, dry_run=True):
     if not dry_run:
         with store.db:
             store.db.execute("DELETE FROM delivery_events WHERE delivered IS NOT NULL AND delivered<?", (cutoff,))
+        if result["pruned_raw_events"] > 0 or result["retired_turns"] > 0:
+            try:
+                store.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            except Exception:
+                pass
     result["runtime"] = runtime_cleanup(settings,dry_run=dry_run)
     result['artifacts'] = retain_artifacts(store, api, dry_run=dry_run)
     if not dry_run:

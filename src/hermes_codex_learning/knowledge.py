@@ -104,11 +104,14 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
     index = context.get("bridge_provenance", {})
     selected = {}
     active_boundary=context.get("active_enterprise_boundary")
+    memory_scopes = context.get("memory_scopes") or {}
     for key, target, entry in memory_entries(context):
         required=context.get("enterprise_memory_boundaries",{}).get(key)
         if required and required!=active_boundary:
             continue
-        if project and index.get("memory", {}).get(key, {}).get("project") == project:
+        if target == "USER.md" and memory_scopes.get("USER.md") == "user":
+            selected.setdefault(target, []).append(entry)
+        elif project and index.get("memory", {}).get(key, {}).get("project") == project:
             selected.setdefault(target, []).append(entry)
     memories = {key: ENTRY_DELIMITER.join(entries) for key, entries in selected.items()}
     terms = _tokens(query[:4000])

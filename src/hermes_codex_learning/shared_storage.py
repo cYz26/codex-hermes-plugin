@@ -172,9 +172,26 @@ def _skill_filters(bridge, project, *, store=None):
     retired = {r[0] for r in store.db.execute("SELECT name FROM shared_skill_removals")}
     known = {item["name"] for item in bridge.api.read(kind="context").get("skills", [])}
     created = set()
+    from .enterprise import MODE, boundary
+    active_boundary = boundary(settings.data_policy)
+    enterprise_mode = settings.data_policy.get("mode") == MODE
 
     def own(name):
         return project is not None and index.get(name, {}).get("projects") == [project]
+
+    def shared_editable(name):
+        if not settings.allow_cross_project_shared_skill_edits:
+            return False
+        pub = published.get(name)
+        if not pub:
+            return False
+        check = pub.get("check") or {}
+        if check.get("audience") == "enterprise":
+            if not active_boundary or check.get("boundary_id") != active_boundary["id"]:
+                return False
+        elif enterprise_mode and not active_boundary:
+            return False
+        return True
 
     def can_edit(action, raw, absorbed):
         if not project or not isinstance(raw, str):
@@ -187,7 +204,11 @@ def _skill_filters(bridge, project, *, store=None):
                 return False
             created.add(name)
             return True
-        return own(name) or name in created
+        if own(name) or name in created:
+            return True
+        if action not in {"delete", "archive"} and shared_editable(name):
+            return True
+        return False
 
     def visible(name):
         return name not in retired and (own(name) or name in created or name in published)
