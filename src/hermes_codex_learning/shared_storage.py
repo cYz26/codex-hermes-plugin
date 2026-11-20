@@ -215,17 +215,25 @@ def _skill_filters(bridge, project, *, store=None):
         return False
 
     def visible(name):
-        return name not in retired and (own(name) or name in created or name in published)
+        if not isinstance(name, str) or not name.strip():
+            return False
+        key = Path(name).name
+        return key not in retired and (own(key) or key in created or key in published)
 
     def load_skill(name, file_path=None):
-        if own(name) or name in created:
-            return None  # Native review may see its own current working copy.
-        if name not in published or name in retired:
+        if not isinstance(name, str) or not name.strip():
+            return {"success": False, "error": "Skill is unavailable in this workspace"}
+        key = Path(name).name
+        if key in retired:
+            return {"success": False, "error": "Skill is unavailable in this workspace"}
+        if own(key) or key in created or shared_editable(key):
+            return None  # Native review may see its current working copy and record read-before-write marks.
+        if key not in published:
             return {"success": False, "error": "Skill is unavailable in this workspace"}
         from .skill_reads import load
         try:
-            value = load(settings, name, project, file_path, issue_delivery=False)
-            return {"success": True, "name": name, "content": value["content"],
+            value = load(settings, key, project, file_path, issue_delivery=False)
+            return {"success": True, "name": key, "content": value["content"],
                     "version": value["version"], "linked_files": sorted(value["files"])}
         except (ValueError, OSError, PermissionError, RuntimeError):
             return {"success": False, "error": "Published skill is unavailable"}

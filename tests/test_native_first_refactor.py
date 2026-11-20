@@ -309,21 +309,42 @@ class NativeFirstRefactorTests(unittest.TestCase):
                 {"name": "learned-shared"}, {"name": "learned-private"},
             ]}),
         )
-        can_edit, _, _ = _skill_filters(bridge, str(project_b))
+        can_edit, visible, load_skill = _skill_filters(bridge, str(project_b))
         # Another project can refine an enterprise-published shared skill...
         self.assertTrue(can_edit("patch", "learned-shared", None))
         self.assertTrue(can_edit("write_file", "learned-shared", None))
+        # Editable shared skills fall through to native skill_view so Hermes v0.23.2+
+        # records read-before-write marks against the live working copy.
+        self.assertTrue(visible("learned-shared"))
+        self.assertIsNone(load_skill("learned-shared"))
+        self.assertIsNone(load_skill("ops/learned-shared"))
         # ...but cannot delete/archive a cross-project shared skill or edit an unpublished private skill.
         self.assertFalse(can_edit("delete", "learned-shared", None))
         self.assertFalse(can_edit("archive", "learned-shared", None))
         self.assertFalse(can_edit("patch", "learned-private", None))
-        # When disabled, cross-project edits remain blocked.
+        self.assertFalse(load_skill("learned-private")["success"])
+        # Retired skills stay hidden even if previously published or owned.
+        with store.db:
+            store.db.execute("INSERT INTO shared_skill_removals(name, version, created) VALUES (?,?,?)",
+                             ("learned-shared", "v1", 1.0))
+        retired_edit, retired_visible, retired_load = _skill_filters(bridge, str(project_b))
+        self.assertFalse(retired_edit("patch", "learned-shared", None))
+        self.assertFalse(retired_visible("learned-shared"))
+        self.assertFalse(retired_load("learned-shared")["success"])
+        with store.db:
+            store.db.execute("DELETE FROM shared_skill_removals WHERE name=?", ("learned-shared",))
+        # When disabled, cross-project edits remain blocked and reads stay on the published path.
         strict_bridge = SimpleNamespace(
             settings=replace(settings, allow_cross_project_shared_skill_edits=False),
             store=store, api=bridge.api,
         )
-        strict_edit, _, _ = _skill_filters(strict_bridge, str(project_b))
+        strict_edit, _, strict_load = _skill_filters(strict_bridge, str(project_b))
         self.assertFalse(strict_edit("patch", "learned-shared", None))
+        with patch("hermes_codex_learning.skill_reads.load", return_value={
+            "content": "published copy", "version": "v1", "files": {"SKILL.md": "abc"},
+        }):
+            loaded = strict_load("learned-shared")
+            self.assertEqual((loaded["success"], loaded["content"]), (True, "published copy"))
 
     def test_history_reads_prefers_native_persistence_reader_when_available(self):
         settings = Settings(self.home, self.project, self.root, Path("/usr/bin/python3"), capture_scope="global")

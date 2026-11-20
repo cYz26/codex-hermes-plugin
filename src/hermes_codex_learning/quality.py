@@ -160,7 +160,7 @@ def verify(value):
     content = value.get("content") or ""
     patterns = {
         "applicability": r"applicab|适用|何时使用|使用场景|\bwhen\s+to\s+(?:use|apply)\b|\buse\s+(?:this\s+skill\s+)?when\b",
-        "limits": r"limit|constraint|限制|边界|\b(?:outside (?:its|the) scope|out of scope|not supported)\b|不适用",
+        "limits": r"limit|constraint|boundar|caveat|pitfall|restrict|non-goal|guardrail|限制|边界|注意事项|\b(?:outside (?:its|the) scope|out of scope|not supported|when not to|do not|does not|instead of)\b|不适用",
         "verification": r"verif|test|验证|测试",
     }
     checks = {name: bool(re.search(pattern, content, re.I)) for name, pattern in patterns.items()}

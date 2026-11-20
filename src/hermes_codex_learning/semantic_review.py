@@ -414,14 +414,18 @@ class SemanticGuard:
             scope["claims"] = []
             self.active[handle] = scope
             try:
+                contract = (
+                    " Reusable skills intended for cross-project sharing should state applicability (When to Use), "
+                    "limits or scope boundaries, and verification in SKILL.md."
+                ) if review_skills and self.settings.quality_checks else ""
                 note = (
                     "Enterprise boundary active: keep project-specific facts in project MEMORY.md, "
                     "cross-project stable user preferences in USER.md, and reusable procedures in skills. "
-                    "Never store credentials, secrets, raw chat logs, or absolute host paths in shared skills."
+                    "Never store credentials, secrets, raw chat logs, or absolute host paths in shared skills." + contract
                 ) if enterprise_review else (
                     "Keep project-specific facts in project MEMORY.md, cross-project stable user preferences in USER.md, "
-                    "and reusable procedures in skills. Never store credentials, secrets, or L4 restricted data."
-                ) if trusted_local else ""
+                    "and reusable procedures in skills. Never store credentials, secrets, or L4 restricted data." + contract
+                ) if trusted_local else contract.strip()
                 yield note, entries
             finally:
                 self.active.pop(handle, None)

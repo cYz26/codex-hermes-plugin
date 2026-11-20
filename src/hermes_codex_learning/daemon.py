@@ -931,9 +931,14 @@ class Bridge:
                                "receipt": (f"通用技能待审\n\n候选：{name}\n版本：{decision['version']}\n"
                                            "此版本需要确认可跨项目共享。请打开「查看当前待审」核对完整文件。")})
                 else:
+                    missing = [str(item) for item in decision.get("missing_sections") or [] if item]
+                    receipt = f"通用候选：{name}\n状态：尚未发布\n原因：{decision.get('reason', 'unknown')}"
+                    if missing:
+                        receipt += "\n缺失项：" + "、".join(missing)
                     self.emit({"id": "pending-publication:" + digest([name, decision]), "kind": "publication.pending",
                                "project": sources[0], "name": name, "publication_reason": decision.get("reason"),
-                               "receipt": f"通用候选：{name}\n状态：尚未发布\n原因：{decision.get('reason', 'unknown')}"})
+                               **({"missing_sections": missing} if missing else {}),
+                               "receipt": receipt})
             self.store.set("publication-context-version", publication_key)
         for name, item in publications.items():
             version = item["artifact"]["version"]

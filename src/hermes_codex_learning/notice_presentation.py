@@ -147,7 +147,15 @@ def notice_presentation(event: dict) -> dict | None:
         reason = event.get("publication_reason")
         waiting = reason in WAITING_FOR_CHECK
         title, body, tone = ("候选待检查" if waiting else "共享检查受阻"), name, "waiting" if waiting else "warning"
-        detail = "等待发布检查，当前尚未共享。" if waiting else "本版本未通过发布检查，详见完整记录。"
+        if waiting:
+            detail = "等待发布检查，当前尚未共享。"
+        elif reason == "missing_applicability_limits_or_verification":
+            labels = {"applicability": "适用场景", "limits": "限制/边界", "verification": "验证方法"}
+            missing = [labels.get(item, str(item)) for item in event.get("missing_sections") or []]
+            suffix = f"（缺少：{'、'.join(missing)}）" if missing else "（缺少适用场景、限制/边界或验证方法）"
+            detail = f"SKILL.md 未满足发布内容检查{suffix}，当前尚未共享。"
+        else:
+            detail = "本版本未通过发布检查，详见完整记录。"
         sections = [section("共享检查" if waiting else "异常与重试", f"{name}\n{detail}")]
     else:
         return None

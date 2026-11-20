@@ -150,6 +150,15 @@ class NoticeTests(unittest.TestCase):
                 result = notice_presentation({"kind": kind, "name": "portable", "publication_reason": reason})
                 self.assertEqual((result["title"], result["body"], result["tone"]), (title, "portable", tone))
 
+        missing = notice_presentation({
+            "kind": "publication.pending",
+            "name": "remote-service-cutovers",
+            "publication_reason": "missing_applicability_limits_or_verification",
+            "missing_sections": ["limits"],
+        })
+        self.assertEqual(missing["title"], "共享检查受阻")
+        self.assertIn("限制/边界", missing["sections"][0]["text"])
+
     def test_persisted_legacy_receipt_remains_readable_and_unchanged(self):
         event = self.event()
         path = persist_receipt(self.queue.state, event)

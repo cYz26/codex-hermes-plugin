@@ -57,6 +57,32 @@ class QualityTests(unittest.TestCase):
             self.assertEqual(proof["state"], "passed", proof)
             self.assertEqual(proof["kind"], "content_contract")
 
+    def test_operational_guardrail_prose_satisfies_limits_while_unbounded_skill_still_fails(self):
+        from hermes_codex_learning.quality import verify
+        bounded = (
+            "---\nname: remote-service-cutovers\n---\n"
+            "## When to Use\nUse when upgrading a remote daemon.\n"
+            "## Procedure\nDo not stop the incumbent before verifying ownership.\n"
+            "Verify live handoffs through the client-facing address.\n"
+        )
+        unbounded = (
+            "---\nname: remote-service-cutovers\n---\n"
+            "## When to Use\nUse when upgrading a remote daemon.\n"
+            "## Procedure\nRestart the daemon and verify the socket responds.\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "SKILL.md").write_text(bounded)
+            passed = verify({"version": "v1", "resource_dir": directory, "content": bounded,
+                             "files": {"SKILL.md": hashlib.sha256(bounded.encode()).hexdigest()}})
+            self.assertEqual(passed["state"], "passed", passed)
+            (root / "SKILL.md").write_text(unbounded)
+            failed = verify({"version": "v2", "resource_dir": directory, "content": unbounded,
+                             "files": {"SKILL.md": hashlib.sha256(unbounded.encode()).hexdigest()}})
+            self.assertEqual(failed["state"], "failed")
+            self.assertEqual(failed["reason"], "missing_applicability_limits_or_verification")
+            self.assertEqual(failed["missing_sections"], ["limits"])
+
     @unittest.skipUnless(sandbox_backend(), "Executable sandbox is unavailable")
     def test_script_contract_runs_in_isolation_and_proof_binds_version(self):
         from hermes_codex_learning.quality import verify, proof_valid
