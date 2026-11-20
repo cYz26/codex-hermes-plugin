@@ -15,6 +15,42 @@ from .updates import (UPSTREAM, UpdateError, catalog, exclusive, file_hash, git,
                       official_commit, plugin_hash, read_json, run_command, version)
 
 _IGNORED = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist", "backups"}
+_CORE_LEARNING_PATHS = (
+    "agent/background_review.py",
+    "agent/curator.py",
+    "agent/curator_backup.py",
+    "agent/idle_schedule.py",
+    "hermes_state.py",
+    "persistence_assembly.py",
+    "tools/memory_tool.py",
+    "tools/memory_tool_store.py",
+    "tools/skill_manager_tool.py",
+    "tools/skill_usage.py",
+    "tools/skills_tool.py",
+    "tools/write_approval.py",
+    "hermes_cli/source_releases.py",
+    "hermes_cli/update_cmd.py",
+    "hermes_cli/update_lock.py",
+    "hermes_cli/plugins_capability_ctx.py",
+    "hermes_cli/plugin_isolation.py",
+)
+
+
+def focused_diff_paths(root: Path) -> list[str]:
+    """Derive focused upstream diff paths dynamically from the latest reviewed recipe plus core learning files."""
+    paths = set(_CORE_LEARNING_PATHS)
+    try:
+        recipes = catalog(root)
+        if recipes:
+            latest = max(recipes.values(), key=lambda item: version(item["tag"]))
+            for rel in latest.get("files", ()):
+                if not rel.startswith("tests/"):
+                    paths.add(rel)
+            for rel in latest.get("native_updater", {}).get("files", ()):
+                paths.add(rel)
+    except (OSError, ValueError, KeyError, UpdateError):
+        pass
+    return sorted(paths)
 
 
 def inventory(root: Path) -> dict[str, str]:
@@ -158,21 +194,7 @@ class Adapter:
         with (folder / "upstream-stat.txt").open("wb") as stream:
             subprocess.run(["git", "-C", str(source), "diff", "--stat", current, commit],
                            stdout=stream, check=True, timeout=60)
-        focused_paths = [
-            "agent/background_review.py", "agent/curator.py", "agent/idle_schedule.py",
-            "agent/agent_init.py", "agent/codex_runtime.py", "agent/conversation_loop.py",
-            "agent/inline_tool_executors.py", "agent/learning_graph.py", "agent/learning_mutations.py",
-            "agent/system_prompt.py", "agent/turn_context.py", "model_tools.py", "run_agent.py",
-            "tools/memory_tool.py", "tools/memory_tool_store.py", "tools/skill_manager_tool.py",
-            "tools/skills_tool.py", "tools/skill_usage.py", "tools/write_approval.py",
-            "hermes_cli/source_releases.py", "hermes_cli/update_cmd.py", "hermes_cli/update_lock.py",
-            "hermes_cli/plugins_capability_ctx.py", "hermes_cli/plugin_isolation.py",
-            "hermes_cli/curator.py", "hermes_cli/lifecycle.py", "hermes_cli/main_agent_cmds.py",
-            "hermes_cli/cli_commands_mixin.py", "hermes_cli/write_approval_commands.py",
-            "hermes_cli/web_models.py", "hermes_cli/web_routers/ops.py",
-            "hermes_cli/web_routers/skills.py", "hermes_cli/web_routers/status.py",
-            "tui_gateway/methods_tools.py",
-        ]
+        focused_paths = focused_diff_paths(self.updater.root)
         with (folder / "learning-diff.patch").open("wb") as stream:
             subprocess.run(
                 ["git", "-C", str(source), "diff", "--no-ext-diff", current, commit, "--", *focused_paths],

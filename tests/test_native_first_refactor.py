@@ -8,10 +8,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from hermes_codex_learning.adaptation import focused_diff_paths
 from hermes_codex_learning.capture import hook, model_context
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.daemon import Bridge
 from hermes_codex_learning.enterprise import boundary, make_boundary
+from hermes_codex_learning.history_reads import search_history
 from hermes_codex_learning.knowledge import context_view
 from hermes_codex_learning.learning_health import memory_capacity
 from hermes_codex_learning.model_sync import (
@@ -19,6 +21,8 @@ from hermes_codex_learning.model_sync import (
     switch_pilot_model,
     sync_with_codex,
 )
+from hermes_codex_learning.native_projection import eligible_publications
+from hermes_codex_learning.policy import admit, sharing_check
 from hermes_codex_learning.retention import run as run_retention
 from hermes_codex_learning.semantic_review import SemanticGuard, install_semantic_policy
 from hermes_codex_learning.shared_storage import _skill_filters
@@ -320,6 +324,108 @@ class NativeFirstRefactorTests(unittest.TestCase):
         )
         strict_edit, _, _ = _skill_filters(strict_bridge, str(project_b))
         self.assertFalse(strict_edit("patch", "learned-shared", None))
+
+    def test_history_reads_prefers_native_persistence_reader_when_available(self):
+        settings = Settings(self.home, self.project, self.root, Path("/usr/bin/python3"), capture_scope="global")
+        (self.home / "state.db").write_bytes(b"sqlite")
+        store = Store(settings.state)
+        self.addCleanup(store.close)
+        store.set("scope:h-native", {"project": str(self.project), "executor": "Codex App"})
+
+        closed = []
+        fake_hit = SimpleNamespace(
+            session_id="h-native", role="assistant",
+            content="Verified persistence_assembly search path", snippet=None, timestamp=123.0,
+        )
+        fake_reader = SimpleNamespace(
+            search=SimpleNamespace(search_messages=lambda q, **kw: [fake_hit]),
+            messages=SimpleNamespace(read_transcript=lambda h, req: []),
+            close=lambda: closed.append(True),
+        )
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _fake_open_reader(_path):
+            try:
+                yield fake_reader
+            finally:
+                fake_reader.close()
+
+        fake_pa = SimpleNamespace(open_persistence_reader=_fake_open_reader)
+        fake_msgs = SimpleNamespace(TranscriptRead=lambda **kw: kw)
+        with patch.dict(sys.modules, {
+            "persistence_assembly": fake_pa,
+            "persistence": SimpleNamespace(),
+            "persistence.conversation": SimpleNamespace(),
+            "persistence.conversation.messages": fake_msgs,
+        }):
+            out = search_history(settings, store, str(self.project), query="persistence_assembly")
+        self.assertTrue(out["success"])
+        self.assertEqual(len(out["results"]), 1)
+        self.assertEqual(out["results"][0]["engine"], "native_fts5")
+        self.assertIn("persistence_assembly", out["results"][0]["messages"][0]["content"])
+        self.assertEqual(closed, [True])
+
+    def test_focused_diff_paths_derives_from_latest_recipe(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        paths = focused_diff_paths(repo_root)
+        self.assertIn("agent/background_review.py", paths)
+        self.assertIn("persistence_assembly.py", paths)
+        self.assertIn("hermes_cli/source_releases.py", paths)
+        self.assertFalse(any(p.startswith("tests/") for p in paths))
+
+    def test_trusted_local_drops_config_lock_boundary_tracking_and_absolute_path_veto_while_keeping_secret_and_l4_guards(self):
+        import hashlib
+        policy = {"enabled": True, "mode": "trusted_local"}
+        ok = admit({"text": "Check /data00/home/user/repo/config.yaml"}, policy, str(self.project))
+        self.assertTrue(ok["allowed"])
+        self.assertEqual(ok["basis"], "trusted_local_host")
+        l4 = admit({"text": "密级: L4 核心数据"}, policy, str(self.project))
+        self.assertFalse(l4["allowed"])
+        self.assertEqual(l4["reason"], "explicitly_restricted_material")
+        secret_val = "Authorization: Bearer " + ("x" * 32)
+        scrubbed = admit({"text": secret_val}, policy, str(self.project))
+        self.assertTrue(scrubbed["allowed"])
+        self.assertTrue(scrubbed["credentials_removed"])
+        self.assertNotIn("x" * 32, scrubbed["payload"]["text"])
+
+        sdir = self.root / "skill-abs"
+        sdir.mkdir()
+        body = "---\nname: runtime-umbrella\ndescription: umbrella\n---\nInspect /data00/home/dev/config.yaml.\n"
+        (sdir / "SKILL.md").write_text(body, encoding="utf-8")
+        sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        val = {"content": body, "version": "v1", "resource_dir": str(sdir), "files": {"SKILL.md": sha}}
+        self.assertFalse(sharing_check(val, [str(self.project)], [], enterprise=True, native_candidate=True)["allowed"])
+        self.assertTrue(sharing_check(val, [str(self.project)], [], enterprise=True, native_candidate=True, allow_absolute_paths=True)["allowed"])
+
+        settings = Settings(
+            self.home, self.project, self.root, Path("/usr/bin/python3"),
+            capture_scope="global", checked_publication=True, data_policy=policy,
+        )
+        store = Store(settings.state)
+        self.addCleanup(store.close)
+        store.set("publications-v1", {
+            "runtime-umbrella": {
+                "artifact": {"version": "v1", "resource_dir": str(sdir), "files": {"SKILL.md": sha}},
+                "catalog_entry": {"name": "runtime-umbrella", "description": "umbrella", "version": "v1"},
+                "check": {"allowed": True, "audience": "enterprise", "boundary_id": "old-legacy-boundary"},
+            }
+        })
+        self.assertIn("runtime-umbrella", eligible_publications(settings, store))
+        view = context_view({
+            "trusted_local": True,
+            "active_enterprise_boundary": None,
+            "checked_publication": True,
+            "memories": {},
+            "skills": [{"name": "runtime-umbrella", "description": "umbrella", "version": "v1"}],
+            "publications": {"runtime-umbrella": {
+                "catalog_entry": {"name": "runtime-umbrella", "description": "umbrella", "version": "v1"},
+                "audience": "enterprise", "boundary_id": "old-legacy-boundary",
+            }},
+            "enterprise_skill_boundaries": {"runtime-umbrella": "old-legacy-boundary"},
+            "bridge_provenance": {"memory": {}, "skills": {"runtime-umbrella": {"projects": ["/other/project"]}}},
+        }, str(self.project), "umbrella")
+        self.assertEqual([s["name"] for s in view["skills"]], ["runtime-umbrella"])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@
     "v0.22.7": "manifest.json",
     "v0.23.0": "v0.23.0/manifest.json",
     "v0.23.1": "v0.23.1/manifest.json",
-    "v0.23.2": "v0.23.2/manifest.json"
+    "v0.23.2": "v0.23.2/manifest.json",
+    "v0.23.3": "v0.23.3/manifest.json"
   },
   "native_tests": [
     "tests/agent/test_learning_service.py",

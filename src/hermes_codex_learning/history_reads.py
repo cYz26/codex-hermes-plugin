@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import re
+import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 from .config import Settings
@@ -18,8 +20,64 @@ def _sanitize_fts_query(query: str) -> str | None:
     return " OR ".join(f'"{token}"' for token in dict.fromkeys(tokens[:12]))
 
 
+def _open_history_reader(path: Path):
+    """Prefer Hermes v0.23.3+ native persistence reader; fall back to legacy SessionDB."""
+    existing_legacy = sys.modules.get("hermes_state")
+    legacy_injected = existing_legacy is not None and getattr(existing_legacy, "__file__", None) is None
+    open_persistence_reader = None
+    if not legacy_injected:
+        try:
+            from persistence_assembly import open_persistence_reader
+            from persistence.conversation.messages import TranscriptRead
+        except ImportError:
+            open_persistence_reader = None
+    if open_persistence_reader is not None:
+        stack = ExitStack()
+        raw_reader = open_persistence_reader(path)
+        reader = stack.enter_context(raw_reader) if hasattr(raw_reader, "__enter__") else raw_reader
+        if not hasattr(raw_reader, "__enter__") and hasattr(raw_reader, "close"):
+            stack.callback(raw_reader.close)
+
+        def search_fn(query: str, role_filter: list[str], limit: int) -> list[dict]:
+            hits = reader.search.search_messages(
+                query, role_filter=role_filter, exclude_sources=[], limit=limit, offset=0,
+            ) or []
+            return [
+                {
+                    "session_id": getattr(hit, "session_id", None) if not isinstance(hit, dict) else hit.get("session_id"),
+                    "role": getattr(hit, "role", "assistant") if not isinstance(hit, dict) else hit.get("role", "assistant"),
+                    "content": getattr(hit, "content", None) if not isinstance(hit, dict) else hit.get("content"),
+                    "snippet": getattr(hit, "snippet", None) if not isinstance(hit, dict) else hit.get("snippet"),
+                    "timestamp": getattr(hit, "timestamp", None) if not isinstance(hit, dict) else hit.get("timestamp"),
+                }
+                for hit in hits
+            ]
+
+        def messages_fn(handle: str) -> list[dict]:
+            rows = reader.messages.read_transcript(handle, TranscriptRead(include_lineage=False))
+            return [row.as_wire_row() if hasattr(row, "as_wire_row") else dict(row) for row in rows]
+
+        return search_fn, messages_fn, stack.close
+
+    from hermes_state import SessionDB
+    db = SessionDB(db_path=path, read_only=True)
+
+    def legacy_search(query: str, role_filter: list[str], limit: int) -> list[dict]:
+        if not hasattr(db, "search_messages"):
+            return []
+        return db.search_messages(
+            query=query, role_filter=role_filter, exclude_sources=[], limit=limit, offset=0,
+        ) or []
+
+    def legacy_messages(handle: str) -> list[dict]:
+        return db.get_messages(handle, include_ancestors=False)
+
+    return legacy_search, legacy_messages, db.close
+
+
 def _allowed_handles(settings: Settings, store, project: str, requested_session: str | None) -> dict[str, dict]:
-    from .enterprise import MODE, boundary, scope_boundary
+    from .enterprise import MODE, boundary, is_trusted_local, scope_boundary
+    trusted_local = is_trusted_local(settings.data_policy)
     active = boundary(settings.data_policy)
     if settings.data_policy.get("mode") == MODE and not active:
         return {}
@@ -34,7 +92,7 @@ def _allowed_handles(settings: Settings, store, project: str, requested_session:
         if requested_session and handle != requested_session:
             continue
         required = scope_boundary(store, handle)
-        if required and (not active or required != active["id"]):
+        if not trusted_local and required and (not active or required != active["id"]):
             continue
         handles[handle] = json.loads(raw)
     return handles
@@ -63,23 +121,20 @@ def search_history(settings: Settings, store, project: str | None, *, query: str
 
     from .enterprise import MODE, scrub
     sanitize = scrub if settings.data_policy.get("mode") == MODE else redact
-    from hermes_state import SessionDB
 
     term = query.strip()
-    db = SessionDB(db_path=path, read_only=True)
+    search_fn, messages_fn, close_fn = _open_history_reader(path)
     try:
         results = []
         seen_handles = set()
-        if term and hasattr(db, "search_messages"):
+        if term:
             fts_hits = []
             for candidate_query in dict.fromkeys(filter(None, [term, _sanitize_fts_query(term)])):
                 try:
-                    fts_hits = db.search_messages(
+                    fts_hits = search_fn(
                         query=candidate_query,
                         role_filter=sorted(role_set),
-                        exclude_sources=[],
                         limit=max(limit * 10, 60),
-                        offset=0,
                     ) or []
                 except Exception:
                     fts_hits = []
@@ -120,7 +175,7 @@ def search_history(settings: Settings, store, project: str | None, *, query: str
             if handle in seen_handles:
                 continue
             matches = []
-            for message in reversed(db.get_messages(handle, include_ancestors=False)):
+            for message in reversed(messages_fn(handle)):
                 body = message.get("content")
                 if message.get("role") not in role_set or not isinstance(body, str):
                     continue
@@ -148,4 +203,4 @@ def search_history(settings: Settings, store, project: str | None, *, query: str
                 break
         return {"success": True, "results": results}
     finally:
-        db.close()
+        close_fn()

@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from hermes_codex_learning.store import atomic_json
-from hermes_codex_learning.updates import catalog, git, verify_source
+from hermes_codex_learning.updates import catalog, git, verify_source, version
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--source",type=Path,required=True)
@@ -23,7 +23,8 @@ if args.version:
     recipe = recipes[args.version]
 else:
     commit = git(source, "rev-parse", "HEAD") if (source / ".git").exists() else None
-    recipe = next((item for item in recipes.values() if item["base_commit"] == commit), recipes["v0.23.2"])
+    latest = max(recipes.values(), key=lambda item: version(item["tag"]))
+    recipe = next((item for item in recipes.values() if item["base_commit"] == commit), latest)
 verify_source(source,recipe)
 subprocess.run([str(interpreter),"-I","-B","-c","import pytest"],check=True,capture_output=True,timeout=10)
 args.output.parent.mkdir(parents=True,exist_ok=True)
