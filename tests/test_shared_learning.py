@@ -298,6 +298,10 @@ class SharedNativeStoreTests(unittest.TestCase):
         self.assertEqual(self.write(self.a, "memory", {"action":"add", "content":entry}, digest([]))[0], "failed")
 
     def test_journey_deletion_requires_exact_native_node_and_version(self):
+        try:
+            import agent.shared_learning_client  # noqa: F401
+        except ImportError:
+            self.skipTest("Cross-agent Hermes client/journey forwarding removed in slimmed backend")
         from hermes_codex_learning.shared_storage import read
 
         entry = "Use the proof palette when reviewing the fixture report."
@@ -311,7 +315,10 @@ class SharedNativeStoreTests(unittest.TestCase):
         self.assertFalse(read(self.bridge, self.bridge.store, "journey", self.a, {"id":node["id"]})["ok"])
 
     def test_client_outbox_has_private_permissions_and_replays_in_order(self):
-        from agent.shared_learning_client import Client, Refused
+        try:
+            from agent.shared_learning_client import Client, Refused
+        except ImportError:
+            self.skipTest("Cross-agent Hermes client forwarding removed in slimmed backend")
         path = self.bridge.settings.shared_profile
         path.mkdir()
         client = Client(path, str(self.root / "offline.sock"), "a" * 48)
