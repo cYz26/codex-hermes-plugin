@@ -33,7 +33,7 @@ def admitted(settings, project, payload):
     if not assessment.get("allowed"):
         raise ValueError("Learning material refused: " + assessment.get("reason", "not_admitted"))
     value = assessment.get("payload", payload)
-    if settings.data_policy.get("mode") == "trusted_enterprise":
+    if settings.data_policy.get("mode") in {"trusted_enterprise", "trusted_local"}:
         from .enterprise import scrub
         value = scrub(value)
     else:

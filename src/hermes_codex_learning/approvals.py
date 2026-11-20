@@ -137,7 +137,7 @@ class PendingReviews:
             record = item["record"]
             if record["id"] not in identifiers:
                 raise ValueError("Native adapter returned a proposal outside the requested project")
-            safe = scrub(record) if self.settings.data_policy.get("mode") == "trusted_enterprise" else redact(record)
+            safe = scrub(record) if self.settings.data_policy.get("mode") in {"trusted_enterprise", "trusted_local"} else redact(record)
             if safe != record:
                 item = {**item, "state": "unsupported", "reason": "提案含受限内容，需要原生人工审核", "changes": []}
                 record = {**safe, "summary": "受限提案"}

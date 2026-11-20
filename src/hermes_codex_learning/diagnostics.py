@@ -11,7 +11,7 @@ from .ipc import request
 
 
 def data_admission(settings: Settings) -> dict:
-    from .enterprise import MODE, boundary
+    from .enterprise import LOCAL_MODE, MODE, boundary
 
     policy = settings.data_policy
     result = {
@@ -20,6 +20,11 @@ def data_admission(settings: Settings) -> dict:
         "unassessed_body": "withheld" if policy else "allowed_by_legacy_configuration",
         "semantic_evidence_checks": bool(policy),
     }
+    if policy.get("mode") == LOCAL_MODE:
+        result.update(mode=LOCAL_MODE, boundary_valid=True, assessment_configured=True,
+                      unassessed_body="trusted_local_authorized",
+                      model_config_lock=False, per_skill_boundary_tracking=False,
+                      absolute_path_veto=False)
     if policy.get("mode") == MODE:
         approved = boundary(policy)
         result.update(mode=MODE, boundary_valid=bool(approved), assessment_configured=True,

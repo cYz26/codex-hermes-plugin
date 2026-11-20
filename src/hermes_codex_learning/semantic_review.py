@@ -152,8 +152,9 @@ class SemanticGuard:
             return None
         if not isinstance(args, dict):
             return _denied("调用参数必须是对象。")
-        from .enterprise import MODE, scrub
-        filtered=scrub(args) if getattr(self.settings,"data_policy",{}).get("mode")==MODE else redact(args)
+        from .enterprise import MODE, is_trusted_local, scrub
+        pol = getattr(self.settings, "data_policy", {})
+        filtered=scrub(args) if (pol.get("mode")==MODE or is_trusted_local(pol)) else redact(args)
         if filtered != args:
             return _denied("参数包含受保护信息；请移除凭据或禁止学习的内容。")
         claims, native_args = [], args
@@ -359,10 +360,13 @@ class SemanticGuard:
         classification = assessment.get("classification") or (
             "synthetic" if assessment.get("basis") == "synthetic_acceptance" else "approved")
         public_review = classification in {"public","synthetic"}
-        from .enterprise import boundary
+        from .enterprise import boundary, is_trusted_local
+        trusted_local = is_trusted_local(self.settings.data_policy)
         approved=boundary(self.settings.data_policy)
         enterprise_review=bool(approved and assessment.get("boundary_id")==approved["id"])
         def admissible(proof):
+            if trusted_local:
+                return True
             if proof.get("boundary_id"):
                 return bool(enterprise_review and proof["boundary_id"]==approved["id"])
             return (proof.get("classification") in {"public","synthetic"} or
@@ -388,6 +392,8 @@ class SemanticGuard:
         native_mode = self.settings.review_protocol == "native"
         versions = {item["name"]:item.get("version") for item in context.get("skills", [])}
         def publication_allowed(name):
+            if trusted_local:
+                return True
             check=publications.get(name,{}).get("check",{})
             return check.get("audience")!="enterprise" or (enterprise_review and check.get("boundary_id")==approved["id"])
         owned = {name for name in versions if index.get("skills", {}).get(name, {}).get("projects") == [project]
@@ -412,7 +418,10 @@ class SemanticGuard:
                     "Enterprise boundary active: keep project-specific facts in project MEMORY.md, "
                     "cross-project stable user preferences in USER.md, and reusable procedures in skills. "
                     "Never store credentials, secrets, raw chat logs, or absolute host paths in shared skills."
-                ) if enterprise_review else ""
+                ) if enterprise_review else (
+                    "Keep project-specific facts in project MEMORY.md, cross-project stable user preferences in USER.md, "
+                    "and reusable procedures in skills. Never store credentials, secrets, or L4 restricted data."
+                ) if trusted_local else ""
                 yield note, entries
             finally:
                 self.active.pop(handle, None)
@@ -488,17 +497,18 @@ def install_semantic_policy(api, settings, ctx):
     def review(handle, source, messages, intent):
         if source.get("executor") == EXECUTOR:
             return original_review(handle, source, messages, intent)
-        from .enterprise import MODE, scrub, explicitly_restricted, boundary, scope_boundary
+        from .enterprise import MODE, is_trusted_local, scrub, explicitly_restricted, boundary, scope_boundary
+        trusted_local = is_trusted_local(settings.data_policy)
         store=Store(settings.state)
         try:
             required=scope_boundary(store,handle)
         finally:
             store.close()
         approved=boundary(settings.data_policy)
-        if required and (not approved or required!=approved["id"]):
+        if not trusted_local and required and (not approved or required!=approved["id"]):
             return {"run_status":"deferred","reason":"enterprise_scope_not_active","applied":[],"staged":[],"uncertain":[]}
-        if settings.data_policy.get("mode")==MODE:
-            if not approved:
+        if settings.data_policy.get("mode")==MODE or trusted_local:
+            if not trusted_local and not approved:
                 return {"run_status":"deferred","reason":"enterprise_boundary_changed","applied":[],"staged":[],"uncertain":[]}
             if explicitly_restricted(messages):
                 return {"run_status":"failed","reason":"explicitly_restricted_material","applied":[],"staged":[],"uncertain":[]}

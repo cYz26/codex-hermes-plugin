@@ -177,7 +177,7 @@ class Bridge:
             if not assessment["allowed"]:
                 self.store.set("turn-admission:"+key,{"state":"withheld","reason":assessment.get("reason"),"at":time.time()})
                 return
-            if self.settings.data_policy.get("mode")=="trusted_enterprise":
+            if self.settings.data_policy.get("mode") in {"trusted_enterprise", "trusted_local"}:
                 from .enterprise import scrub
                 enriched=scrub(enriched)
         else:
@@ -196,11 +196,12 @@ class Bridge:
             from .model_sync import record_observed_codex_model
             record_observed_codex_model(self.store, enriched)
         handle = self.handle_for(enriched["source"])
-        from .enterprise import scope_boundary
-        required=scope_boundary(self.store,handle)
-        if required and required!=assessment.get("boundary_id"):
-            self.store.set("policy-withheld:"+event_id,"enterprise_scope_not_active")
-            return
+        from .enterprise import is_trusted_local, scope_boundary
+        if not is_trusted_local(self.settings.data_policy):
+            required=scope_boundary(self.store,handle)
+            if required and required!=assessment.get("boundary_id"):
+                self.store.set("policy-withheld:"+event_id,"enterprise_scope_not_active")
+                return
         if assessment.get("boundary_id"):
             self.store.set("enterprise-scope:"+handle,assessment["boundary_id"])
         self.bind_chat_handle(enriched["source"], handle)
@@ -398,13 +399,14 @@ class Bridge:
     def reviews(self) -> None:
         from .model_sync import record_review_model_failure, sync_with_codex
         sync_with_codex(self)
-        from .enterprise import MODE, boundary, scope_boundary
+        from .enterprise import MODE, boundary, is_trusted_local, scope_boundary
+        trusted_local = is_trusted_local(self.settings.data_policy)
         enterprise=boundary(self.settings.data_policy)
         if self.settings.data_policy.get("mode")==MODE and not enterprise:
             self.store.set("enterprise-policy-state","boundary_changed")
             self.last_publish = 0.0
             return
-        self.store.set("enterprise-policy-state","ready" if enterprise else "not_enabled")
+        self.store.set("enterprise-policy-state","trusted_local" if trusted_local else ("ready" if enterprise else "not_enabled"))
         retry_available = callable(getattr(self.api, "retry_review", None))
         if retry_available and not self.drain.is_set():
             def local_source(handle, source):
@@ -427,10 +429,11 @@ class Bridge:
                 break
             if intent["status"] != "queued":
                 continue
-            required=scope_boundary(self.store,intent["handle"])
-            if required and (not enterprise or required!=enterprise["id"]):
-                self.store.set("policy-withheld:"+intent["id"],"enterprise_boundary_not_active")
-                continue
+            if not trusted_local:
+                required=scope_boundary(self.store,intent["handle"])
+                if required and (not enterprise or required!=enterprise["id"]):
+                    self.store.set("policy-withheld:"+intent["id"],"enterprise_boundary_not_active")
+                    continue
             if not learning_dispatch.begin(self, intent):
                 continue
             if intent.get("reason") in {"native_threshold", "idle_flush"} and type(intent.get("revision")) is int:
@@ -450,6 +453,10 @@ class Bridge:
                 assessment=self.store.get("assessment:"+intent["handle"],{})
                 self.store.set("assessment:"+intent["handle"],{**assessment,"allowed":True,"classification":"approved",
                                "audience":"enterprise","boundary_id":enterprise["id"],"policy_version":enterprise["policy_version"]})
+            elif trusted_local and source.get("evidence_mode")!="workflow-v1":
+                assessment=self.store.get("assessment:"+intent["handle"],{})
+                self.store.set("assessment:"+intent["handle"],{**assessment,"allowed":True,"classification":"approved",
+                               "audience":"local","policy_version":"local-v1"})
             local = self.store.get("workflow-local-source:" + intent["handle"], source)
             provenance = {"project": local.get("project"), "source_chat": local.get("chat")}
             before_context = self.api.read(kind="context")
@@ -678,7 +685,7 @@ class Bridge:
         from .lifecycle import recover_archived, reconcile_interrupted_curation
         reconcile_interrupted_curation(self, context)
         recover_archived(self, context)
-        if self.settings.capture_scope == "global" or self.settings.data_policy.get("mode")=="trusted_enterprise":
+        if self.settings.capture_scope == "global" or self.settings.data_policy.get("mode") in {"trusted_enterprise", "trusted_local"}:
             context = self.update_knowledge(context)
         if self.settings.checked_publication:
             with self.publication_lock:
@@ -740,9 +747,10 @@ class Bridge:
 
     def publish_checked(self, context: dict) -> dict:
         from .policy import admit, sharing_check
-        from .enterprise import boundary
+        from .enterprise import boundary, is_trusted_local
         from . import publication_review
         from .quality import duplicate_key, proof_valid, verifier_hash, verify
+        trusted_local = is_trusted_local(self.settings.data_policy)
         enterprise=boundary(self.settings.data_policy)
         if not isinstance(context.get("skills"), list):
             raise ValueError("Native skill catalog is unavailable; keep the previous publication")
@@ -786,27 +794,30 @@ class Bridge:
                     disposition = publication_review.disposition(reviewed, candidate)
                     intent = self.store.get('native-candidate-intents', {}).get(name, {})
                     native_review_candidate = (
-                        self.settings.review_protocol == "native" and bool(enterprise)
+                        trusted_local or (self.settings.review_protocol == "native" and bool(enterprise))
                     )
                     decision = sharing_check(value, origins, markers, executable_candidate=self.settings.quality_checks,
-                                             enterprise=bool(enterprise),
-                                             native_candidate=native_review_candidate or (intent.get('version') == value['version'] and bool(intent.get('sources'))))
-                    lifecycle_block = self.store.get('lifecycle-withheld', {}).get(name)
-                    if lifecycle_block:
-                        decision = {'allowed': False, **lifecycle_block}
-                    elif self.store.get('native-lifecycle-status', {}).get('state') == 'history_gap':
-                        proof = self.store.get('semantic-skill-attestations', {}).get(name, {})
-                        if proof.get('version') != value['version']:
-                            decision = {'allowed': False, 'reason': 'native_history_gap'}
-                    required={proof.get("boundary_id") for proof in (
-                        self.store.get("semantic-skill-attestations",{}).get(name,{}),
-                        publications.get(name,{}).get("check",{})) if proof.get("boundary_id")}
-                    if required and (not enterprise or required!={enterprise["id"]}):
-                        decision={"allowed":False,"reason":"enterprise_boundary_not_active"}
+                                             enterprise=bool(enterprise or trusted_local),
+                                             native_candidate=native_review_candidate or (intent.get('version') == value['version'] and bool(intent.get('sources'))),
+                                             allow_absolute_paths=trusted_local)
+                    if not trusted_local:
+                        lifecycle_block = self.store.get('lifecycle-withheld', {}).get(name)
+                        if lifecycle_block:
+                            decision = {'allowed': False, **lifecycle_block}
+                        elif self.store.get('native-lifecycle-status', {}).get('state') == 'history_gap':
+                            proof = self.store.get('semantic-skill-attestations', {}).get(name, {})
+                            if proof.get('version') != value['version']:
+                                decision = {'allowed': False, 'reason': 'native_history_gap'}
+                        required={proof.get("boundary_id") for proof in (
+                            self.store.get("semantic-skill-attestations",{}).get(name,{}),
+                            publications.get(name,{}).get("check",{})) if proof.get("boundary_id")}
+                        if required and (not enterprise or required!={enterprise["id"]}):
+                            decision={"allowed":False,"reason":"enterprise_boundary_not_active"}
                     if decision["allowed"]:
                         resources = {name: (artifact_root / name).read_text() for name in value["files"]}
+                        origin_project = origins[0] if origins else str(self.settings.project)
                         assessment = admit({"kind": "shared_candidate", "resources": resources, "source_projects": origins},
-                                           self.settings.data_policy or {"enabled": True}, origins[0], purpose="share")
+                                           self.settings.data_policy or {"enabled": True}, origin_project, purpose="share")
                         if (not self.settings.data_policy and assessment.get('reason') == publication_review.UNASSESSED
                                 and disposition == publication_review.APPROVE):
                             assessment = {"allowed": True, "basis": "version_bound_operator_review"}
@@ -831,6 +842,8 @@ class Bridge:
                             decision = assessment
                         elif enterprise:
                             decision={**decision,"audience":"enterprise","boundary_id":enterprise["id"]}
+                        elif trusted_local:
+                            decision={**decision,"audience":"local"}
                         if decision["allowed"] and semantic.get("evidence_contract") == 1:
                             decision={**decision,"task_relevance":{"state":"passed","proof_hash":digest(semantic.get("learning_evidence"))}}
                     if (disposition == publication_review.KEEP

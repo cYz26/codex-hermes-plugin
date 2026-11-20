@@ -57,7 +57,8 @@ def check_requirements(requirements, *, scope):
 
 def load(settings, name, project, file_path=None, *, artifact_version=None, requirements_only=False,
          issue_delivery=True, expose_path=True):
-    from .enterprise import boundary
+    from .enterprise import boundary, is_trusted_local
+    trusted_local = is_trusted_local(settings.data_policy)
     approved=boundary(settings.data_policy)
     active_boundary=approved["id"] if approved else None
     store=ReadStore(settings.state)
@@ -82,7 +83,7 @@ def load(settings, name, project, file_path=None, *, artifact_version=None, requ
                 raise RuntimeError("Skill snapshot is not ready; retry after the next background publication")
         value=published_resource(record,file_path)
         required=record.get("check",{}).get("boundary_id") or required
-        if required and required!=active_boundary:
+        if not trusted_local and required and required!=active_boundary:
             raise PermissionError("Enterprise knowledge is unavailable outside its approved deployment")
         if store.db.execute("SELECT 1 FROM withheld_versions WHERE name=? AND version=?",(name,value["version"])).fetchone():
             if publication and publication["artifact"]["version"]!=value["version"]:

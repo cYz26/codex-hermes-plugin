@@ -15,7 +15,7 @@ from .store import digest, dumps, redact
 
 
 def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe") -> dict:
-    if policy.get("mode") == "trusted_enterprise":
+    if policy.get("mode") in {"trusted_enterprise", "trusted_local"}:
         from .enterprise import assess
         return assess(payload,policy,purpose)
     if not policy:
@@ -67,14 +67,14 @@ def admit(payload: dict, policy: dict, project: str, *, purpose: str = "observe"
 
 
 def sharing_check(value: dict, origins: list[str], private_markers: list[str], *, executable_candidate=False,
-                  enterprise=False, native_candidate=False) -> dict:
+                  enterprise=False, native_candidate=False, allow_absolute_paths=False) -> dict:
     content = value.get("content") or ""
     front = content.split("---", 2)
     declared = len(front) >= 3 and re.search(r"(?m)^learning_scope:\s*global_candidate\s*$", front[1])
     inherited = native_candidate and len(front) >= 3 and not re.search(r'(?m)^\s*learning_scope\s*:', front[1])
     if not declared and not inherited:
         return {"allowed": False, "reason": "project_experience"}
-    if not origins:
+    if not origins and not allow_absolute_paths:
         return {"allowed": False, "reason": "unknown_source"}
     files = value.get("files", {})
     root = Path(value["resource_dir"]).resolve()
@@ -106,14 +106,15 @@ def sharing_check(value: dict, origins: list[str], private_markers: list[str], *
             return {"allowed":False,"reason":"credential_material"}
     if redact(combined) != combined:
         return {"allowed": False, "reason": "credential_material"}
-    # Internal method/API names are useful inside the authorized enterprise scope;
-    # absolute project roots still do not become portable shared instructions.
-    markers = [*origins, *([] if enterprise else private_markers)]
-    if any(marker and len(marker) >= 5 and marker in combined for marker in markers):
-        return {"allowed": False, "reason": "project_private_material"}
-    forbidden = r"/(?:Users|home|data00|etc)/" if enterprise else r"https?://[^\s/]*(?:bytedance|larkoffice|feishu|\.internal|\.corp)|/(?:Users|home|data00|etc)/"
-    if re.search(forbidden, combined, re.I):
-        return {"allowed": False, "reason": "internal_address_or_absolute_path"}
+    if not allow_absolute_paths:
+        # Internal method/API names are useful inside the authorized enterprise scope;
+        # absolute project roots still do not become portable shared instructions.
+        markers = [*origins, *([] if enterprise else private_markers)]
+        if any(marker and len(marker) >= 5 and marker in combined for marker in markers):
+            return {"allowed": False, "reason": "project_private_material"}
+        forbidden = r"/(?:Users|home|data00|etc)/" if enterprise else r"https?://[^\s/]*(?:bytedance|larkoffice|feishu|\.internal|\.corp)|/(?:Users|home|data00|etc)/"
+        if re.search(forbidden, combined, re.I):
+            return {"allowed": False, "reason": "internal_address_or_absolute_path"}
     return {"allowed": True, "basis": "native_curator_candidate_and_resource_checks" if inherited else "explicit_generic_candidate_and_resource_checks",
             "version": value["version"], "manifest_hash": digest(files)}
 

@@ -104,10 +104,11 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
     index = context.get("bridge_provenance", {})
     selected = {}
     active_boundary=context.get("active_enterprise_boundary")
+    trusted_local = bool(context.get("trusted_local"))
     memory_scopes = context.get("memory_scopes") or {}
     for key, target, entry in memory_entries(context):
         required=context.get("enterprise_memory_boundaries",{}).get(key)
-        if required and required!=active_boundary:
+        if not trusted_local and required and required!=active_boundary:
             continue
         if target == "USER.md" and memory_scopes.get("USER.md") == "user":
             selected.setdefault(target, []).append(entry)
@@ -121,7 +122,7 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
         known_publication=context.get("publications",{}).get(skill["name"],{})
         if known_publication.get("audience")=="enterprise":
             required=known_publication.get("boundary_id")
-        if required and required!=active_boundary:
+        if not trusted_local and required and required!=active_boundary:
             continue
         origins = index.get("skills", {}).get(skill["name"], {}).get("projects", [])
         owns_private = origins == [project]
@@ -129,7 +130,7 @@ def context_view(context: dict, project: str | None, query: str = "") -> dict:
             publication = context.get("publications", {}).get(skill["name"])
             if not publication:
                 continue
-            if publication.get("audience")=="enterprise" and publication.get("boundary_id")!=active_boundary:
+            if not trusted_local and publication.get("audience")=="enterprise" and publication.get("boundary_id")!=active_boundary:
                 continue
             skill = publication["catalog_entry"]
         name_tokens = _tokens(skill["name"] + " " + " ".join(skill.get("aliases", []))) - _BOILERPLATE_TOKENS

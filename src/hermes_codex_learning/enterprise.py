@@ -15,7 +15,12 @@ from pathlib import Path
 from .store import digest, redact
 
 MODE = "trusted_enterprise"
+LOCAL_MODE = "trusted_local"
 AUTHORITY = "operator_confirmed_enterprise_deployment"
+
+
+def is_trusted_local(policy) -> bool:
+    return isinstance(policy, dict) and policy.get("mode") == LOCAL_MODE
 
 
 def boundary(policy):
@@ -165,6 +170,21 @@ def scrub(value):
 
 
 def assess(payload, policy, purpose):
+    if is_trusted_local(policy):
+        if explicitly_restricted(payload):
+            return {"allowed": False, "reason": "explicitly_restricted_material"}
+        safe = scrub(payload)
+        from .assessment import IDENTITY_FIELDS
+        if any(safe.get(key) != payload.get(key) for key in IDENTITY_FIELDS):
+            return {"allowed": False, "reason": "credential_in_source_identity"}
+        return {"allowed": True, "schema_version": 2, "classification": "approved", "audience": "local",
+                "policy_version": "local-v1",
+                "assessment_id": digest(["trusted_local", purpose, digest(payload)]),
+                "input_hash": digest(payload), "output_hash": digest(safe), "payload": safe,
+                "body_retained": True, "credentials_removed": safe != payload,
+                "source_refs": ["trusted-local"],
+                "sharing_allowed": True,
+                "basis": "trusted_local_host"}
     approved=boundary(policy)
     if not approved:
         return {"allowed":False,"reason":"enterprise_boundary_unavailable_or_changed"}
@@ -187,11 +207,15 @@ def assess(payload, policy, purpose):
 
 
 def scope_view(context, policy):
+    if is_trusted_local(policy):
+        return {**context, "active_enterprise_boundary": None, "trusted_local": True}
     approved=boundary(policy)
     return {**context,"active_enterprise_boundary":approved["id"] if approved else None}
 
 
 def requires_scoping(context, policy):
+    if is_trusted_local(policy):
+        return False
     return bool(policy.get("mode")==MODE or context.get("enterprise_memory_boundaries")
                 or context.get("enterprise_skill_boundaries")
                 or any(item.get("audience")=="enterprise" for item in context.get("publications",{}).values()))

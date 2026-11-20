@@ -110,7 +110,8 @@ def materialize_snapshot(snapshots_dir: Path, version: str, source_root: Path, f
 
 
 def eligible_publications(settings: Settings, store) -> dict[str, dict]:
-    from .enterprise import MODE, boundary
+    from .enterprise import MODE, boundary, is_trusted_local
+    trusted_local = is_trusted_local(settings.data_policy)
     active = boundary(settings.data_policy)
     if settings.data_policy.get("mode") == MODE and not active:
         return {}
@@ -139,7 +140,7 @@ def eligible_publications(settings: Settings, store) -> dict[str, dict]:
         check = record.get("check", {})
         audience = check.get("audience", "public")
         required = check.get("boundary_id") or attestations.get(name, {}).get("boundary_id")
-        if audience == "enterprise" or required:
+        if not trusted_local and (audience == "enterprise" or required):
             if not active_id or required != active_id:
                 continue
         artifact = record.get("artifact", {})

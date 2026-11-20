@@ -60,7 +60,8 @@ def _memory_boundary_key(project, target, item_digest):
 
 
 def _visible_entries(settings, store, project, target, entries):
-    from .enterprise import MODE, boundary
+    from .enterprise import MODE, boundary, is_trusted_local
+    trusted_local = is_trusted_local(settings.data_policy)
     active = boundary(settings.data_policy)
     if settings.data_policy.get("mode") == MODE and not active:
         return []
@@ -72,7 +73,7 @@ def _visible_entries(settings, store, project, target, entries):
         if item_digest in removed:
             continue
         required = enterprise_map.get(_memory_boundary_key(project, target, item_digest))
-        if required and (not active or active["id"] != required):
+        if not trusted_local and required and (not active or active["id"] != required):
             continue
         visible.append(entry)
     return visible
@@ -172,7 +173,8 @@ def _skill_filters(bridge, project, *, store=None):
     retired = {r[0] for r in store.db.execute("SELECT name FROM shared_skill_removals")}
     known = {item["name"] for item in bridge.api.read(kind="context").get("skills", [])}
     created = set()
-    from .enterprise import MODE, boundary
+    from .enterprise import MODE, boundary, is_trusted_local
+    trusted_local = is_trusted_local(settings.data_policy)
     active_boundary = boundary(settings.data_policy)
     enterprise_mode = settings.data_policy.get("mode") == MODE
 
@@ -185,6 +187,8 @@ def _skill_filters(bridge, project, *, store=None):
         pub = published.get(name)
         if not pub:
             return False
+        if trusted_local:
+            return True
         check = pub.get("check") or {}
         if check.get("audience") == "enterprise":
             if not active_boundary or check.get("boundary_id") != active_boundary["id"]:

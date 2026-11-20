@@ -43,9 +43,11 @@ def curation_tool_guard(*, tool_name, args, **kwargs):
 
 
 def synchronize(bridge):
+    from .enterprise import is_trusted_local
     store = bridge.store
     if not bridge.native_capabilities.get('skill_lifecycle'):
         return
+    trusted_local = is_trusted_local(bridge.settings.data_policy)
     cursor = store.get('native-lifecycle-cursor')
     page = bridge.api.read(kind='skill_lifecycle', name=cursor)
     if not page.get('cursor_found', True):
@@ -70,22 +72,23 @@ def synchronize(bridge):
                                   'version': cache.get(name, publications.get(name, {})).get('artifact', {}).get('version')}
             if target:
                 origin = skills.get(name) or archived.get(name, {}).get('origin', {})
-                if not origin.get('projects'):
+                if not origin.get('projects') and not trusted_local:
                     blocked[target] = {'reason': 'unknown_merge_source', 'event': event['id']}
                     continue
                 current = skills.setdefault(target, {'projects': []})
-                current['projects'] = sorted(set(current['projects']) | set(origin['projects']))
+                current['projects'] = sorted(set(current['projects']) | set(origin.get('projects', [])))
                 current['native_lineage'] = sorted(set(current.get('native_lineage', [])) | {name})
-                boundaries = {value for value in (
-                    attestations.get(name, archived.get(name, {}).get('attestation', {})).get('boundary_id'),
-                    attestations.get(target, {}).get('boundary_id'),
-                    publications.get(name, {}).get('check', {}).get('boundary_id'),
-                    publications.get(target, {}).get('check', {}).get('boundary_id')) if value}
-                if len(boundaries) > 1:
-                    blocked[target] = {'reason': 'incompatible_enterprise_boundaries', 'event': event['id']}
-                elif boundaries:
-                    # Scope ancestry is not a validation certificate for the new content.
-                    attestations[target] = {'boundary_id': boundaries.pop(), 'native_event': event['id']}
+                if not trusted_local:
+                    boundaries = {value for value in (
+                        attestations.get(name, archived.get(name, {}).get('attestation', {})).get('boundary_id'),
+                        attestations.get(target, {}).get('boundary_id'),
+                        publications.get(name, {}).get('check', {}).get('boundary_id'),
+                        publications.get(target, {}).get('check', {}).get('boundary_id')) if value}
+                    if len(boundaries) > 1:
+                        blocked[target] = {'reason': 'incompatible_enterprise_boundaries', 'event': event['id']}
+                    elif boundaries:
+                        # Scope ancestry is not a validation certificate for the new content.
+                        attestations[target] = {'boundary_id': boundaries.pop(), 'native_event': event['id']}
                 aliases[name] = target
         elif action == 'restore':
             if name in archived:
@@ -216,7 +219,9 @@ def maintenance(bridge, **kwargs):
 
 def inherit_curator_inputs(bridge, scope):
     """Conservative provenance: every admitted input may inform any revised output."""
+    from .enterprise import is_trusted_local
     store = bridge.store
+    trusted_local = is_trusted_local(bridge.settings.data_policy)
     index = store.get('knowledge-index-v1', {'skills': {}})
     # Only the original library is input evidence; newly created names are outputs.
     inputs = set(scope['before']) & scope['inputs']
@@ -231,6 +236,10 @@ def inherit_curator_inputs(bridge, scope):
     for item in bridge.api.read(kind='context').get('skills', []):
         name = item['name']
         if item['version'] == scope['before'].get(name):
+            continue
+        if trusted_local:
+            index.setdefault('skills', {})[name] = {'projects': origins,
+                'native_curator_inputs': sorted(inputs), 'basis': 'admitted_native_curator_inputs'}
             continue
         if not origins or len(boundaries) > 1:
             blocked[name] = {'reason': 'curator_input_scope_unresolved'}
@@ -265,29 +274,31 @@ def curation_admission(bridge, names):
     """Apply the existing content policy to the native library before an LLM sees it."""
     from .native_reads import skill
     from .policy import admit
-    from .enterprise import boundary
+    from .enterprise import boundary, is_trusted_local
     policy, store = bridge.settings.data_policy, bridge.store
     if not policy:
         return None
+    trusted_local = is_trusted_local(policy)
     approved = boundary(policy)
     index = store.get('knowledge-index-v1', {}).get('skills', {})
     proofs = store.get('semantic-skill-attestations', {})
     publications = store.get('publications-v1', {})
     for name in names:
         origins = index.get(name, {}).get('projects', [])
-        if not origins:
+        if not origins and not trusted_local:
             return 'curator_unknown_source'
-        required = {value for value in (proofs.get(name, {}).get('boundary_id'),
-                    publications.get(name, {}).get('check', {}).get('boundary_id')) if value}
-        if required and (not approved or required != {approved['id']}):
-            return 'curator_enterprise_boundary_not_active'
+        if not trusted_local:
+            required = {value for value in (proofs.get(name, {}).get('boundary_id'),
+                        publications.get(name, {}).get('check', {}).get('boundary_id')) if value}
+            if required and (not approved or required != {approved['id']}):
+                return 'curator_enterprise_boundary_not_active'
         value = skill(bridge.api, name=name)
         root = Path(value['resource_dir'])
         try:
             resources = {path: (root/path).read_text() for path in value['files']}
         except (OSError, UnicodeError):
             return 'curator_resource_not_assessed'
-        for project in origins:
+        for project in (origins or [str(bridge.settings.project)]):
             payload = {'resources': resources}
             assessment = admit(payload, policy, project, purpose='curation')
             if not assessment.get('allowed'):
