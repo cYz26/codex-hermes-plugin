@@ -121,9 +121,15 @@ def preview_file(settings, store, project, name, revision, path):
 def verify_candidate(settings, store, name, value, origins):
     if not Path(value['resource_dir']).resolve().is_relative_to((settings.home / 'learning/artifacts').resolve()):
         raise ValueError('Candidate is outside the native artifact directory')
+    from .enterprise import boundary as enterprise_boundary, is_trusted_local
+    trusted_local = is_trusted_local(settings.data_policy)
+    enterprise = enterprise_boundary(settings.data_policy)
     intent = store.get('native-candidate-intents', {}).get(name, {})
+    native_review_candidate = trusted_local or (settings.review_protocol == 'native' and bool(enterprise))
     check = sharing_check(value, origins, [], executable_candidate=settings.quality_checks,
-                          native_candidate=intent.get('version') == value['version'] and bool(intent.get('sources')))
+                          enterprise=bool(enterprise or trusted_local),
+                          native_candidate=native_review_candidate or (intent.get('version') == value['version'] and bool(intent.get('sources'))),
+                          allow_absolute_paths=trusted_local)
     if not check['allowed']:
         raise ValueError('Candidate failed sharing checks: ' + check['reason'])
 

@@ -222,3 +222,18 @@ class PublicationReviewTests(unittest.TestCase):
             self.bridge.publish_checked(self.context)
         self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'], 'host_validation_failed')
         self.assertEqual(self.bridge.store.get('publications-v1'), {})
+
+    def test_trusted_local_allows_internal_urls_and_local_paths_while_blocking_credentials(self):
+        from hermes_codex_learning import publication_review
+        self.bridge.settings = replace(self.settings, data_policy={'enabled': True, 'mode': 'trusted_local'})
+        body = (
+            '---\nname: portable\n---\n'
+            'Check https://cloud.bytedance.net/docs and /data00/home/example/project before applying.\n'
+        )
+        self.add_resources('v3', **{'SKILL.md': body})
+        publication_review.verify_candidate(self.bridge.settings, self.bridge.store, 'portable', self.value, [str(self.root)])
+
+        leaked = '---\nname: portable\n---\nAuthorization: Bearer eyJhbGciOiJIUzI1NiJ9.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbb\n'
+        self.add_resources('v4', **{'SKILL.md': leaked})
+        with self.assertRaisesRegex(ValueError, 'credential_material'):
+            publication_review.verify_candidate(self.bridge.settings, self.bridge.store, 'portable', self.value, [str(self.root)])
