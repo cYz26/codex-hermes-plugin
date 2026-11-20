@@ -373,7 +373,7 @@ class SemanticGuard:
                     (not public_review and proof.get("policy_version") and
                      proof.get("policy_version") == assessment.get("policy_version")))
         entries = []
-        if self.settings.shared_profile is not None and project:
+        if self.settings.uses_scoped_storage and project:
             try:
                 from .shared_storage import memory_view
                 store_ro = Store(self.settings.state)

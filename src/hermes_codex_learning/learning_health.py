@@ -52,7 +52,7 @@ def native_policy() -> dict:
 def memory_capacity(settings, store, context, project, native):
     from .approvals import ID_PATTERN, PendingReviews
 
-    if settings.shared_profile is not None:
+    if settings.uses_scoped_storage:
         try:
             from .shared_storage import directories, memory_view
             shared_mem = memory_view(settings, store, project)

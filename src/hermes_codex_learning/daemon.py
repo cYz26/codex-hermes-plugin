@@ -475,7 +475,7 @@ class Bridge:
                     self.review_writes.capture(intent["handle"]) as calls, \
                     capture_review_summary(self.api, intent["handle"]) as summary:
                 result = run_review(self.settings, self.api, intent["handle"], intent["id"], attempt_id)
-            if self.settings.shared_profile is not None:
+            if self.settings.uses_scoped_storage:
                 from .shared_storage import bind_skill_proposal
                 for pending in result.get("staged", []):
                     if pending.get("tool") == "skill_manage":
@@ -979,7 +979,7 @@ class Bridge:
 
     def loop(self) -> None:
         from .shared_learning import drain as drain_shared_writes, drain_client, recover as recover_shared_writes
-        migrate_shared = self.settings.shared_profile is not None
+        migrate_shared = self.settings.uses_scoped_storage
         if self.resume.is_set():
             if migrate_shared:
                 from .shared_storage import migrate
@@ -1066,7 +1066,7 @@ class Bridge:
 
     def rpc(self, method: str, params: dict) -> dict:
         if method == "shared_approval_decision":
-            if self.settings.shared_profile is None:
+            if not self.settings.uses_scoped_storage:
                 raise ValueError("Shared learning is disabled")
             from .shared_storage import approval_decision
             return approval_decision(self, self.request_project(params), params)
@@ -1107,7 +1107,7 @@ class Bridge:
                                         "draining":self.drain.is_set(), "state":store.get("state")}
                 return result
         if method == "pending_reviews":
-            if self.settings.shared_profile is not None:
+            if self.settings.uses_scoped_storage:
                 from .shared_storage import approval_list
                 with StoreConnection(self.settings, read_only=True) as store:
                     return approval_list(self.settings, store, self.request_project(params), params.get("id"))
@@ -1247,7 +1247,7 @@ class Bridge:
                         "capture_exclusions": [{"chat": row["key"][len("excluded-chat:"):], **json.loads(row["value"])}
                                                for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'excluded-chat:%'")]}
         if method == "context":
-            if not self.resume.is_set() or (self.settings.shared_profile is not None and not self.ready.is_set()):
+            if not self.resume.is_set() or (self.settings.uses_scoped_storage and not self.ready.is_set()):
                 empty=context_view({"memories":{},"skills":[]},self.request_project(params))
                 return {**empty,"available":False,"reason":"update_paused"}
             path = self.settings.state / "context.json"
@@ -1256,7 +1256,7 @@ class Bridge:
             context = context or {"available": False}
             from .enterprise import scope_view, requires_scoping
             context=scope_view(context,self.settings.data_policy)
-            if self.settings.shared_profile is not None:
+            if self.settings.uses_scoped_storage:
                 from .shared_storage import scoped_context
                 with StoreConnection(self.settings, read_only=True) as store:
                     return scoped_context(self.settings, store, context, self.request_project(params), params.get("query", ""))

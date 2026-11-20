@@ -64,7 +64,7 @@ def load(settings, name, project, file_path=None, *, artifact_version=None, requ
     store=ReadStore(settings.state)
     try:
         name=store.get("publication-aliases",{}).get(name,name)
-        if settings.shared_profile is not None and store.db.execute(
+        if settings.uses_scoped_storage and store.db.execute(
                 "SELECT 1 FROM shared_skill_removals WHERE name=?", (name,)).fetchone():
             raise PermissionError("The skill was withdrawn")
         origins=store.get("knowledge-index-v1",{}).get("skills",{}).get(name,{}).get("projects",[])

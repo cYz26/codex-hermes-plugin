@@ -282,7 +282,7 @@ def execute(args):
     settings = Settings.load(args.settings)
     if args.approval_action == "self-test":
         return self_test(settings)
-    if settings.shared_profile is not None:
+    if settings.uses_scoped_storage:
         from .ipc import request
         action = args.approval_action
         params = {"cwd": args.cwd, "id": getattr(args, "id", None)}

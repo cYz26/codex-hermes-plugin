@@ -48,6 +48,7 @@ class Settings:
     review_timeout_seconds: float = 900
     shared_profile: Path | None = None
     shared_client_id: str | None = field(default=None, repr=False)
+    scoped_storage: bool = False
     native_skill_projection: bool = True
     codex_skills_dir: Path | None = None
     review_protocol: str = "strict_evidence"
@@ -108,6 +109,8 @@ class Settings:
             raise ValueError("learning.review_reasoning_effort must be a valid reasoning effort level")
         if not isinstance(self.model_sync_enabled, bool):
             raise ValueError("learning.model_sync.enabled must be a boolean")
+        if not isinstance(self.scoped_storage, bool):
+            raise ValueError("learning.scoped_storage must be a boolean")
         if not isinstance(self.allow_cross_project_shared_skill_edits, bool):
             raise ValueError("learning.allow_cross_project_shared_skill_edits must be a boolean")
         if any(not isinstance(m, str) or not m.strip() for m in self.review_fallback_models):
@@ -121,6 +124,10 @@ class Settings:
         if (isinstance(self.session_context_limit, bool) or not isinstance(self.session_context_limit, int)
                 or not 256 <= self.session_context_limit <= 4096):
             raise ValueError("hook.session_context_limit must be an integer between 256 and 4096 bytes")
+
+    @property
+    def uses_scoped_storage(self) -> bool:
+        return self.scoped_storage or self.shared_profile is not None
 
     @property
     def interpreter(self) -> Path:
@@ -262,6 +269,7 @@ class Settings:
             review_timeout_seconds=data.get("learning", {}).get("review_timeout_seconds", 900),
             shared_profile=Path(shared["profile"]).expanduser().resolve() if "profile" in shared else None,
             shared_client_id=shared.get("client_id"),
+            scoped_storage=data.get("learning", {}).get("scoped_storage", False),
             native_skill_projection=projection_enabled,
             codex_skills_dir=codex_skills_dir,
             review_protocol=data.get("learning", {}).get("review_protocol", "strict_evidence"),

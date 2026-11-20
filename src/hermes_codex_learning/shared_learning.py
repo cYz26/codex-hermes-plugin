@@ -281,7 +281,7 @@ def drain_client(bridge):
 
 
 def review_scope(bridge, project):
-    if bridge.settings.shared_profile is None:
+    if not bridge.settings.uses_scoped_storage:
         return nullcontext()
     from .shared_storage import review_scope as scope
     return scope(bridge, project)

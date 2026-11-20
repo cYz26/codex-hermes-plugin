@@ -427,6 +427,34 @@ class NativeFirstRefactorTests(unittest.TestCase):
         }, str(self.project), "umbrella")
         self.assertEqual([s["name"] for s in view["skills"]], ["runtime-umbrella"])
 
+    def test_scoped_storage_works_without_shared_profile_binding(self):
+        settings = Settings(
+            self.home, self.project, self.root, Path("/usr/bin/python3"),
+            capture_scope="global", checked_publication=True, scoped_storage=True,
+        )
+        self.assertIsNone(settings.shared_profile)
+        self.assertTrue(settings.uses_scoped_storage)
+        store = Store(settings.state)
+        self.addCleanup(store.close)
+        from hermes_codex_learning.shared_storage import directories
+        pdir, personal = directories(settings, str(self.project))
+        (pdir / "memories").mkdir(parents=True, exist_ok=True)
+        (personal / "memories").mkdir(parents=True, exist_ok=True)
+        (pdir / "memories/MEMORY.md").write_text("Standalone scoped project fact.\n", encoding="utf-8")
+        (personal / "memories/USER.md").write_text("Prefer concise diffs.\n", encoding="utf-8")
+        fake_mem = SimpleNamespace(
+            _read_raw_checked=lambda p: (p.read_text(encoding="utf-8") if p.exists() else "", True),
+            _parse_entries=lambda raw: [line.strip() for line in raw.split("\n§\n") if line.strip()],
+        )
+        with patch.dict(sys.modules, {"tools": SimpleNamespace(), "tools.memory_tool": SimpleNamespace(MemoryStore=fake_mem)}):
+            cap = memory_capacity(
+                settings, store, {}, str(self.project),
+                {"memory": {"MEMORY.md": {"enabled": True, "limit_chars": 2200}, "USER.md": {"enabled": True, "limit_chars": 1375}}},
+            )
+        self.assertEqual(cap["storage_mode"], "per_project_shared")
+        self.assertEqual(cap["files"]["MEMORY.md"]["entries"], 1)
+        self.assertEqual(cap["files"]["USER.md"]["entries"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

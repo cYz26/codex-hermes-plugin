@@ -47,6 +47,7 @@ def learning_policy(settings: Settings) -> dict:
         "model_sync_enabled": settings.model_sync_enabled,
         "review_fallback_models": list(settings.review_fallback_models),
         "allow_cross_project_shared_skill_edits": settings.allow_cross_project_shared_skill_edits,
+        "scoped_storage": settings.uses_scoped_storage,
         "active_turn_timeout_seconds": settings.active_turn_timeout_seconds,
         "raw_event_retention_days": settings.raw_event_retention_days,
         "executable_validation": {

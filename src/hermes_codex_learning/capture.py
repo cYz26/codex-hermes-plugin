@@ -201,7 +201,7 @@ def hook(payload: dict, settings: Settings) -> dict:
             store.set("recall-query:" + session, query)
         scoped = settings.capture_scope == "global" or requires_scoping(cache, settings.data_policy)
         query = store.get("recall-query:" + session, "")
-        if settings.shared_profile is not None:
+        if settings.uses_scoped_storage:
             from .ipc import request
             try:
                 cache = request(settings, "context", {"cwd": project, "query": query}, timeout=0.3)
