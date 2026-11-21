@@ -1,6 +1,7 @@
 import hashlib
 import json
 import tempfile
+import threading
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -45,6 +46,28 @@ class PublicationReviewTests(unittest.TestCase):
     def publish(self):
         with patch('hermes_codex_learning.native_reads.skill', return_value=self.value):
             return self.bridge.publish_checked(self.context)
+
+    def enable_automatic_review(self, mode):
+        self.bridge.settings = replace(self.settings, capture_scope='global',
+                                       codex_skills_dir=self.root / 'codex-skills')
+        self.bridge.rpc('publication_policy', {'mode': mode})
+        quiet_period = patch('hermes_codex_learning.publication_guardian.QUIET_SECONDS', 0)
+        quiet_period.start()
+        self.addCleanup(quiet_period.stop)
+        self.addCleanup(self.bridge.publication_guardian.close)
+
+    def finish_review(self):
+        _, _, future = self.bridge.publication_guardian.inflight
+        future.result(timeout=5)
+        return self.publish()
+
+    def approval_notice_count(self):
+        return self.bridge.store.db.execute(
+            "SELECT count(*) FROM notices WHERE json_extract(payload,'$.approval_subject')='publication'"
+        ).fetchone()[0]
+
+    def load_version(self, cwd, version):
+        return self.bridge.rpc('skill_load', {'cwd': str(cwd), 'name': 'portable', 'artifact_version': version})
 
     def add_resources(self, version, **resources):
         directory = self.settings.home / 'learning/artifacts' / version
@@ -222,6 +245,160 @@ class PublicationReviewTests(unittest.TestCase):
             self.bridge.publish_checked(self.context)
         self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'], 'host_validation_failed')
         self.assertEqual(self.bridge.store.get('publications-v1'), {})
+
+    def test_autonomous_first_publication_can_be_withdrawn_from_other_projects(self):
+        self.enable_automatic_review('autonomous')
+        other = self.root.parent / (self.root.name + '-reader')
+        verdict = {'verdict': 'APPROVE', 'reason': 'generic_guidance', 'model': 'fixture'}
+        with patch('hermes_codex_learning.publication_guardian.run_guardian', return_value=verdict) as reviewer:
+            self.assertNotIn('portable', self.publish()['publications'])
+            with self.assertRaises(PermissionError):
+                self.load_version(other, 'v1')
+            view = self.finish_review()
+            self.bridge.cache_context(view, self.bridge.store)
+        reviewer.assert_called_once()
+        request = reviewer.call_args.args[1]
+        self.assertEqual((request['mode'], request['previous'], request['baseline']), ('autonomous', {}, {}))
+        self.assertEqual(request['candidate'], self.value['files'])
+        self.assertEqual(self.approval_notice_count(), 0)
+        self.assertEqual(self.load_version(other, 'v1')['content'], self.value['content'])
+        projected = self.bridge.settings.codex_skills_dir / 'portable' / 'SKILL.md'
+        self.assertEqual(projected.read_text(), self.value['content'])
+        target, = self.review_action('list')['rollbacks']
+        self.assertIsNone(target['previous_version'])
+        proof = self.bridge.store.get('publication-guardian:' + target['automatic_review'])
+        self.assertEqual(proof['candidate']['files'], self.value['files'])
+        self.assertNotIn('documents', proof)
+        action = {'name': 'portable', 'revision': target['revision']}
+        with self.assertRaises(ValueError):
+            self.review_action('rollback', cwd=other, **action)
+        self.assertEqual(self.review_action('rollback', **action)['state'], 'rolled_back')
+        self.assertEqual(self.bridge.rpc('context', {'cwd': str(other), 'query': 'portable'})['skills'], [])
+        self.assertFalse(projected.parent.is_symlink())
+        with self.assertRaises(PermissionError):
+            self.load_version(other, 'v1')
+        self.assertEqual(self.load_version(self.root, 'v1')['content'], self.value['content'])
+        self.assertNotIn('portable', self.publish()['publications'])
+        self.assertEqual(self.review_action('list')['candidates'], [])
+
+    def test_smart_update_restores_the_human_approved_version_across_projects(self):
+        self.submit(dry_run=False)
+        self.publish()
+        self.enable_automatic_review('smart')
+        original = self.value['content']
+        self.add_resources('v2', **{'SKILL.md': original + 'Check the current sources.\n'})
+        other = self.root.parent / (self.root.name + '-reader')
+        verdict = {'verdict': 'APPROVE', 'reason': 'same_scope', 'model': 'fixture'}
+        with patch('hermes_codex_learning.publication_guardian.run_guardian', return_value=verdict) as reviewer:
+            self.assertEqual(self.publish()['publications']['portable']['version'], 'v1')
+            self.assertEqual(self.load_version(other, 'v1')['content'], original)
+            view = self.finish_review()
+            self.bridge.cache_context(view, self.bridge.store)
+        reviewer.assert_called_once()
+        target, = self.review_action('list')['rollbacks']
+        proof = self.bridge.store.get('publication-guardian:' + target['automatic_review'])
+        self.assertEqual((proof['previous_version'], proof['baseline_version']), ('v1', 'v1'))
+        self.assertEqual(self.approval_notice_count(), 0)
+        self.assertEqual(self.load_version(other, 'v2')['content'], self.value['content'])
+        projected = self.bridge.settings.codex_skills_dir / 'portable' / 'SKILL.md'
+        self.assertEqual(projected.read_text(), self.value['content'])
+        self.review_action('rollback', name='portable', revision=target['revision'])
+        recalled = self.bridge.rpc('context', {'cwd': str(other), 'query': 'portable'})
+        self.assertEqual(recalled['skills'][0]['artifact_version'], 'v1')
+        self.assertEqual(self.load_version(other, 'v1')['content'], original)
+        self.assertEqual(projected.read_text(), original)
+        with self.assertRaises(ValueError):
+            self.load_version(other, 'v2')
+        self.assertEqual(self.load_version(self.root, 'v2')['content'], self.value['content'])
+        self.assertEqual(self.publish()['publications']['portable']['version'], 'v1')
+
+    def test_autonomous_denial_is_quiet_and_escalation_shows_the_latest_diff(self):
+        self.submit(dry_run=False)
+        self.publish()
+        self.enable_automatic_review('autonomous')
+        original = self.value['content']
+        versions = (
+            ('v2', 'DENY', 'project_specific'),
+            ('v3', 'ESCALATE', 'permissions_changed'),
+            ('v4', 'ESCALATE', 'review_unavailable'),
+        )
+        previous_revision = None
+        for version, verdict, reason in versions:
+            with self.subTest(version=version):
+                self.add_resources(version, **{'SKILL.md': original + 'Changed check ' + version})
+                with patch('hermes_codex_learning.publication_guardian.run_guardian',
+                           return_value={'verdict': verdict, 'reason': reason}):
+                    self.publish()
+                    self.assertEqual(self.finish_review()['publications']['portable']['version'], 'v1')
+                listing = self.review_action('list')
+                if verdict == 'DENY':
+                    self.assertEqual(self.approval_notice_count(), 0)
+                    self.assertEqual(listing['candidates'], [])
+                    self.assertEqual(listing['decisions'][0]['state'], 'automatic_kept')
+                    continue
+                self.assertEqual(self.approval_notice_count(), 1)
+                candidate, = listing['candidates']
+                self.assertEqual(candidate['version'], version)
+                self.assertTrue(candidate['reason'])
+                diff = self.review_action('file', name='portable', revision=candidate['revision'], file='SKILL.md')
+                self.assertEqual(diff, {'before': original, 'after': self.value['content']})
+                if previous_revision:
+                    with self.assertRaises(ValueError):
+                        self.review_action('approve_generic', name='portable', revision=previous_revision)
+                previous_revision = candidate['revision']
+
+    def test_superseded_version_and_prior_policy_generation_cannot_publish(self):
+        self.submit(dry_run=False)
+        self.publish()
+        self.enable_automatic_review('smart')
+        original = self.value['content']
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def review(settings, request):
+            if not release.wait(5):
+                raise TimeoutError('Test did not release the pending review')
+            return {'verdict': 'APPROVE', 'reason': 'same_scope'}
+
+        with patch('hermes_codex_learning.publication_guardian.run_guardian', side_effect=review) as reviewer:
+            self.add_resources('v2', **{'SKILL.md': original + 'Clarification A.'})
+            self.publish()
+            self.add_resources('v3', **{'SKILL.md': original + 'Clarification B.'})
+            self.publish()
+            release.set()
+            self.assertEqual(self.finish_review()['publications']['portable']['version'], 'v1')
+            self.bridge.rpc('publication_policy', {'mode': 'manual'})
+            self.assertEqual(self.finish_review()['publications']['portable']['version'], 'v1')
+            self.assertEqual(self.review_action('list')['candidates'][0]['version'], 'v3')
+            self.bridge.rpc('publication_policy', {'mode': 'smart'})
+            self.publish()
+            self.assertEqual(self.finish_review()['publications']['portable']['version'], 'v3')
+        self.assertEqual(reviewer.call_count, 3)
+
+    def test_autonomous_review_cannot_bypass_hard_blocks_or_operator_keep(self):
+        self.publish()
+        candidate, = self.review_action('list')['candidates']
+        with patch('hermes_codex_learning.native_reads.skill', return_value=self.value):
+            self.review_action('keep_project', name='portable', revision=candidate['revision'])
+        self.enable_automatic_review('autonomous')
+        with patch('hermes_codex_learning.publication_guardian.run_guardian') as reviewer:
+            self.assertNotIn('portable', self.publish()['publications'])
+            self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'], 'operator_kept_in_project')
+            original = self.value['content']
+            self.add_resources('v2', **{'SKILL.md': original + str(self.root)})
+            self.assertNotIn('portable', self.publish()['publications'])
+            self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'], 'project_private_material')
+            self.add_resources('v3', **{'SKILL.md': original, 'scripts/run.py': 'print(1)\n'})
+            self.assertNotIn('portable', self.publish()['publications'])
+            self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'], 'executable_resource_needs_validation')
+            self.add_resources('v4', **{'SKILL.md': original + 'Clarification.'})
+            with self.bridge.store.db:
+                self.bridge.store.db.execute('INSERT INTO withheld_versions VALUES (?,?,?)', ('portable', 'v4', '{}'))
+            self.assertNotIn('portable', self.publish()['publications'])
+            self.assertEqual(self.bridge.store.get('publication-decisions')['portable']['reason'], 'host_validation_failed')
+            self.assertEqual(self.review_action('list')['candidates'], [])
+            self.assertIsNone(self.bridge.publication_guardian.inflight)
+            reviewer.assert_not_called()
 
     def test_trusted_local_allows_internal_urls_and_local_paths_while_blocking_credentials(self):
         from hermes_codex_learning import publication_review

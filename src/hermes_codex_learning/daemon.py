@@ -18,6 +18,7 @@ from .knowledge import context_view, memory_entries, reconcile
 from .learning_health import native_policy, record_capacity_refusal, snapshot as learning_health
 from .normalize import TERMINAL_EVENTS, merge_event, observation
 from .notify import approval_notice, macos_notification, message, notification_events, should_notify
+from .publication_guardian import PublicationGuardian
 from .review_deadline import run_review
 from .review_receipt import ReviewWrites, receipt_text
 from .review_summary import capture_review_summary
@@ -39,6 +40,7 @@ class Bridge:
         self.ready = threading.Event()
         self.resume = threading.Event()
         self.publication_lock = threading.Lock()
+        self.publication_guardian = PublicationGuardian()
         self.startup_context = None
         self.startup_status = None
         from .identity import build_identity
@@ -690,21 +692,11 @@ class Bridge:
         recover_archived(self, context)
         if self.settings.capture_scope == "global" or self.settings.data_policy.get("mode") in {"trusted_enterprise", "trusted_local"}:
             context = self.update_knowledge(context)
-        if self.settings.checked_publication:
-            with self.publication_lock:
-                context = self.publish_checked(self.cache_artifacts(context))
-        else:
+        with self.publication_lock:
             context = self.cache_artifacts(context)
-        from .enterprise import scope_view
-        from .native_projection import sync_published_skills
-        projection = sync_published_skills(self.settings, self.store)
-        context=scope_view({**context,
-            "native_projected_skills": projection["projected_skills"],
-            "native_projection": {k: projection[k] for k in ("enabled", "catalog_dir", "codex_skills_dir", "projected_skills", "shadowed")},
-            "enterprise_memory_boundaries":{key:proof["boundary_id"] for key,proof in self.store.get("semantic-memory-attestations",{}).items() if proof.get("boundary_id")},
-            "enterprise_skill_boundaries":{key:proof["boundary_id"] for key,proof in self.store.get("semantic-skill-attestations",{}).items() if proof.get("boundary_id")}},
-            self.settings.data_policy)
-        atomic_json(self.settings.state / "context.json", context)
+            if self.settings.checked_publication:
+                context = self.publish_checked(context)
+            self.cache_context(context, self.store)
         atomic_json(self.settings.state / "status.json", {
             **native_reads.status(self.api), "daemon": self.store.get("state"), "updated_at": time.time(),
             "review_retries": self.retry_queue.summary(),
@@ -712,6 +704,18 @@ class Bridge:
         self.last_publish = time.monotonic()
         from .learning_dispatch import after_publish
         after_publish(self)
+
+    def cache_context(self, context, store):
+        from .enterprise import scope_view
+        from .native_projection import sync_published_skills
+        projection = sync_published_skills(self.settings, store)
+        context=scope_view({**context,
+            "native_projected_skills": projection["projected_skills"],
+            "native_projection": {k: projection[k] for k in ("enabled", "catalog_dir", "codex_skills_dir", "projected_skills", "shadowed")},
+            "enterprise_memory_boundaries":{key:proof["boundary_id"] for key,proof in store.get("semantic-memory-attestations",{}).items() if proof.get("boundary_id")},
+            "enterprise_skill_boundaries":{key:proof["boundary_id"] for key,proof in store.get("semantic-skill-attestations",{}).items() if proof.get("boundary_id")}},
+            self.settings.data_policy)
+        atomic_json(self.settings.state / "context.json", context)
 
     def cache_artifacts(self, context):
         previous=self.store.get("artifact-read-cache",{})
@@ -751,13 +755,18 @@ class Bridge:
     def publish_checked(self, context: dict) -> dict:
         from .policy import admit, sharing_check
         from .enterprise import boundary, is_trusted_local
-        from . import publication_review
+        from . import publication_guardian, publication_review
         from .quality import duplicate_key, proof_valid, verifier_hash, verify
         trusted_local = is_trusted_local(self.settings.data_policy)
         enterprise=boundary(self.settings.data_policy)
         if not isinstance(context.get("skills"), list):
             raise ValueError("Native skill catalog is unavailable; keep the previous publication")
         publications = self.store.get("publications-v1", {})
+        self.publication_guardian.poll(self.store)
+        active_policy = publication_guardian.policy(self.store)
+        automatic = publication_review.enabled(self.settings) and active_policy["mode"] in ("smart", "autonomous")
+        old_decisions = self.store.get("publication-decisions", {})
+        rollbacks = self.store.get(publication_review.ROLLBACKS, {})
         publication_reviews = self.store.get("publication-reviews-v1", {})
         aliases = self.store.get("publication-aliases", {})
         present = {item["name"] for item in context.get("skills", [])}
@@ -773,10 +782,10 @@ class Bridge:
                                   self.store.get('native-lifecycle-status', {}).get('state'), publication_reviews,
                                   [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]]
         if not self.settings.data_policy:
-            # Revisit the legacy personal-library cache so existing candidates get their first actionable notice.
-            publication_inputs.append('publication-review-v2')
+            publication_inputs.extend((active_policy, publication_guardian.POLICY_VERSION, rollbacks))
         publication_key = digest(publication_inputs)
-        if self.store.get("publication-context-version") != publication_key:
+        waiting = any(d.get("reason") == publication_guardian.WAITING for d in old_decisions.values())
+        if self.store.get("publication-context-version") != publication_key or waiting:
             index = context.get("bridge_provenance", {})
             markers = []
             for _, _, entry in memory_entries(context):
@@ -784,6 +793,7 @@ class Bridge:
                 markers.extend(re.findall(r"\b[A-Z][A-Z0-9_-]{7,}\b", entry))
             decisions = {}
             review_candidates = {}
+            history_updates = {}
             for item in context["skills"]:
                 name = item["name"]
                 origins = index.get("skills", {}).get(name, {}).get("projects", [])
@@ -793,6 +803,7 @@ class Bridge:
                     if not artifact_root.is_relative_to((self.settings.home / "learning/artifacts").resolve()):
                         raise ValueError("Artifact is outside the learning publication directory")
                     candidate = publication_review.identity(name, value, origins)
+                    previous = publications.get(name, {})
                     reviewed = publication_reviews.get(name)
                     disposition = publication_review.disposition(reviewed, candidate)
                     intent = self.store.get('native-candidate-intents', {}).get(name, {})
@@ -825,6 +836,11 @@ class Bridge:
                                 and disposition == publication_review.APPROVE):
                             assessment = {"allowed": True, "basis": "version_bound_operator_review"}
                             decision = {**decision, "review_hash": reviewed["review_hash"]}
+                        elif (not self.settings.data_policy and assessment.get('reason') == publication_review.UNASSESSED
+                              and previous.get("check", {}).get("automatic_review")
+                              and candidate == publication_review.identity(name, previous["artifact"], previous["sources"])):
+                            assessment = {"allowed": True, "basis": "existing_automatic_publication"}
+                            decision = {**decision, "automatic_review": previous["check"]["automatic_review"]}
                         from .workflow import PROJECT as WORKFLOW_PROJECT
                         attestation = self.store.get('workflow-skill-attestations', {}).get(name, {})
                         if (origins == [WORKFLOW_PROJECT] and name.startswith('workflow-')
@@ -834,7 +850,6 @@ class Bridge:
                         evidence_ok = semantic.get("evidence_contract") != 1 or semantic.get("learning_evidence",{}).get("state") == "passed"
                         if semantic.get("version") == value["version"] and not evidence_ok:
                             assessment = {"allowed":False,"reason":"task_learning_evidence_missing"}
-                        previous = publications.get(name,{})
                         public_revision = (previous.get("artifact",{}).get("version") == semantic.get("prior_published_version")
                                            and bool(semantic.get("prior_published_version"))
                                            and set(origins) <= set(previous.get("sources",[])) | {semantic.get("project")})
@@ -874,9 +889,33 @@ class Bridge:
                     if self.store.db.execute("SELECT 1 FROM withheld_versions WHERE name=? AND version=?",
                                              (name, value["version"])).fetchone():
                         decision = {"allowed":False,"reason":"host_validation_failed"}
+                    if value["version"] in rollbacks.get(name, {}):
+                        decision = {"allowed": False, "reason": publication_review.ROLLED_BACK}
                     decision["version"] = value["version"]
-                    if needs_review and decision.get('reason') == publication_review.UNASSESSED:
-                        review_candidates[name] = (digest(candidate), duplicate_key(value))
+                    if needs_review and decision.get("reason") == publication_review.UNASSESSED:
+                        key = duplicate_key(value)
+                        duplicate = next((other for other, record in publications.items()
+                                          if other != name and duplicate_key(record["artifact"]) == key), None)
+                        if duplicate:
+                            decision["reason"] = "duplicate_of:" + duplicate
+                        elif automatic:
+                            outcome = self.publication_guardian.assess(
+                                self.settings, self.store, active_policy, name, value, origins, previous)
+                            if outcome is None:
+                                decision["reason"] = publication_guardian.WAITING
+                            elif outcome["verdict"] == "APPROVE":
+                                decision.pop("reason")
+                                decision.update(allowed=True, basis="independent_shared_skill_review",
+                                                automatic_review={k: outcome[k] for k in (
+                                                    "id", "baseline_version", "previous_version", "policy_version",
+                                                    "reason", "at", "model") if k in outcome})
+                            elif outcome["verdict"] == "DENY":
+                                decision.update(reason=publication_review.AUTOMATIC_KEEP, review_reason=outcome["reason"],
+                                                review_id=outcome["id"], review_at=outcome["at"])
+                            else:
+                                decision["review_reason"] = outcome["reason"]
+                        if decision.get("reason") == publication_review.UNASSESSED:
+                            review_candidates[name] = (digest(candidate), key)
                     if decision["allowed"]:
                         duplicate = next((other for other,record in publications.items() if other != name
                                           and duplicate_key(record["artifact"]) == duplicate_key(value)), None)
@@ -886,19 +925,21 @@ class Bridge:
                             decisions[name] = {"allowed":False,"reason":"duplicate_of:"+duplicate,"version":value["version"]}
                             continue
                         aliases.pop(name, None)
-                        history = self.store.get("publication-history:" + name, {})
-                        if name in publications:
-                            history[publications[name]["artifact"]["version"]] = {**publications[name], 'retired_at': time.time()}
-                        self.store.set("publication-history:" + name, history)
+                        if previous and previous["artifact"]["version"] != value["version"]:
+                            history_key = "publication-history:" + name
+                            history = self.store.get(history_key, {})
+                            history[previous["artifact"]["version"]] = {**previous, 'retired_at': time.time()}
+                            history_updates[history_key] = history
                         publications[name] = {"artifact": {key: val for key, val in value.items() if key != "delivery_token"},
                                               "catalog_entry": item, "sources": origins, "check": decision}
                     elif (name in publications and self.store.db.execute(
                             "SELECT 1 FROM withheld_versions WHERE name=? AND version=?",
                             (name, publications[name]["artifact"]["version"])).fetchone()):
                         history = self.store.get("publication-history:" + name, {})
-                        previous = next((record for version,record in reversed(list(history.items()))
-                                         if not self.store.db.execute("SELECT 1 FROM withheld_versions WHERE name=? AND version=?",
-                                                                      (name,version)).fetchone()), None)
+                        previous = next((record for version, record in sorted(history.items(),
+                                            key=lambda item: item[1].get("retired_at", 0), reverse=True)
+                                         if version not in rollbacks.get(name, {}) and not self.store.db.execute(
+                                             "SELECT 1 FROM withheld_versions WHERE name=? AND version=?", (name, version)).fetchone()), None)
                         if previous:
                             publications[name] = previous
                         else:
@@ -918,22 +959,44 @@ class Bridge:
                     decisions[name]['reason'] = 'duplicate_of:' + duplicate
                 elif name not in aliases:
                     decisions[name]['review_candidate'] = identifier
-            self.store.set("publications-v1", publications)
-            self.store.set("publication-aliases", {name:target for name,target in aliases.items() if target in publications})
-            self.store.set("publication-decisions", decisions)
+            aliases = {name: target for name, target in aliases.items() if target in publications}
+            for name, decision in decisions.items():
+                identifier = decision.get("review_candidate")
+                if not identifier and decision.get("reason") != publication_guardian.WAITING:
+                    continue
+                scope, = index["skills"][name]["projects"]
+                prior = old_decisions.get(name, {})
+                operator_review = publication_reviews.get(name, {}).get("review_hash")
+                if (prior.get("review_scope") == scope and prior.get("review_notice")
+                        and prior.get("last_operator_review") == operator_review):
+                    decision["review_notice"] = prior["review_notice"]
+                elif identifier:
+                    decision["review_notice"] = "publication-review:" + identifier
+                decision.update(review_scope=scope, last_operator_review=operator_review)
+            with self.store.db:
+                self.store.db.executemany("INSERT OR REPLACE INTO meta VALUES (?,?)",
+                    ((key, dumps(val)) for key, val in {**history_updates, "publications-v1": publications,
+                        "publication-aliases": aliases, "publication-decisions": decisions}.items()))
             for name, decision in decisions.items():
                 sources = index.get("skills", {}).get(name, {}).get("projects", [])
-                if (decision.get("allowed") or decision.get("reason") in {"project_experience", publication_review.KEPT_REASON}
+                if (decision.get("allowed") or decision.get("reason") in {"project_experience",
+                        publication_review.KEPT_REASON, publication_review.AUTOMATIC_KEEP, publication_review.ROLLED_BACK,
+                        publication_guardian.WAITING}
+                        or (automatic and decision.get("reason") == "project_private_material")
                         or decision.get("reason", "").startswith("duplicate_of:") or len(sources) != 1):
                     continue
-                if identifier := decision.get('review_candidate'):
-                    self.emit({"id": "publication-review:" + identifier, "kind": "approval.required",
+                if identifier := decision.get("review_candidate"):
+                    mark = "publication-reminder-issued:" + name
+                    if self.store.get(mark) == decision["review_notice"]:
+                        continue
+                    self.emit({"id": decision["review_notice"], "kind": "approval.required",
                                "project": sources[0], "name": name, "approval_subject": "publication",
                                "review_candidate": identifier,
                                "pending_entities": ["publication:" + name], "project_approval": True,
-                               "receipt": (f"通用技能待审\n\n候选：{name}\n版本：{decision['version']}\n"
-                                           "此版本需要确认可跨项目共享。请打开「查看当前待审」核对完整文件。")})
-                else:
+                               "receipt": f"通用技能待审\n\n候选：{name}\n请打开「查看当前待审」核对最新版本及原因。"})
+                    self.store.set(mark, decision["review_notice"])
+                elif (not (automatic and decision.get("reason") == publication_review.UNASSESSED)
+                      and old_decisions.get(name) != decision):
                     missing = [str(item) for item in decision.get("missing_sections") or [] if item]
                     receipt = f"通用候选：{name}\n状态：尚未发布\n原因：{decision.get('reason', 'unknown')}"
                     if missing:
@@ -947,8 +1010,9 @@ class Bridge:
             version = item["artifact"]["version"]
             key = "publication-notified:" + name
             if self.store.get(key) != version:
+                check = "自主判断通过" if item.get("check", {}).get("automatic_review") else "通过"
                 self.emit({"id": "published:" + digest([name, version]), "kind": "publication.applied", "name": name,
-                           "receipt": f"通用技能：{name}\n版本：{version}\n共享检查：通过"})
+                           "receipt": f"通用技能：{name}\n版本：{version}\n共享检查：{check}"})
                 self.store.set(key, version)
         # Only the small catalog belongs in hook caches, never whole skill bodies.
         from .policy import publication_catalog
@@ -979,8 +1043,11 @@ class Bridge:
             for notice in notification_events(event):
                 if notice.get('approval_subject') == 'publication':
                     from .publication_review import pending
-                    if not any(digest(candidate) == notice.get('review_candidate') for candidate, *_ in pending(
-                            self.settings, self.store, notice['project'], name=notice['name'])):
+                    name = notice["name"]
+                    current = self.store.get("publication-decisions", {}).get(name, {})
+                    matches = current.get("review_notice") == notice["id"]
+                    if not any(matches or digest(candidate) == notice.get('review_candidate') for candidate, *_ in pending(
+                            self.settings, self.store, notice['project'], name=name)):
                         continue
                 result = macos_notification(self.settings.state, notice)
                 self.store.set("notification:" + notice["id"], result)
@@ -1104,7 +1171,40 @@ class Bridge:
                         raise RuntimeError("学习服务正在更新，请稍后刷新审批页。")
                     return publication_review.decide(self.settings, store, project, *target, action,
                                                      lambda name: native_reads.skill(self.api, name=name))
+            if action == "rollback":
+                from .policy import publication_catalog
+                with self.publication_lock, StoreConnection(self.settings) as store:
+                    if not self.resume.is_set() or self.drain.is_set():
+                        raise RuntimeError("学习服务正在更新，请稍后操作。")
+                    result = publication_review.rollback(self.settings, store, project, *target)
+                    cache = self.settings.state / "context.json"
+                    try:
+                        if cache.exists():
+                            context = json.loads(cache.read_text())
+                            context["publications"] = publication_catalog(store.get("publications-v1", {}),
+                                                                           store.get("publication-aliases", {}))
+                            self.cache_context(context, store)
+                        else:
+                            from .native_projection import sync_published_skills
+                            sync_published_skills(self.settings, store)
+                    except (OSError, ValueError):
+                        # The decision is durable. The owner's next publish rebuilds both views.
+                        result["context_refresh_pending"] = True
+                    return result
             raise ValueError("Unknown publication review action")
+        if method == "publication_policy":
+            from .publication_guardian import MODES, change_mode, policy
+            from .publication_review import enabled
+            mode = params.get("mode")
+            if mode is None:
+                with StoreConnection(self.settings, read_only=True) as store:
+                    return {**policy(store), "supported": enabled(self.settings)}
+            if mode not in MODES or (mode != "manual" and not enabled(self.settings)):
+                raise ValueError("Automatic review requires checked personal-library publication")
+            with self.publication_lock, StoreConnection(self.settings) as store:
+                if not self.resume.is_set() or self.drain.is_set():
+                    raise RuntimeError("学习服务正在更新，请稍后操作。")
+                return change_mode(store, mode)
         if method == "review_publication":
             from .publication_review import submit
             project = self.request_project({"cwd": params["cwd"]})
@@ -1222,6 +1322,8 @@ class Bridge:
                     from .shared_learning import status as shared_status
                     shared = shared_status(store, project)
                 from .native_projection import projection_status
+                from .publication_guardian import policy
+                from .publication_review import enabled
                 return {"snapshot": snapshot, "shared_learning": shared,
                         "native_projection": projection_status(self.settings, store),
                         **learning_health(self.settings, store, context, project, self.native_policy),
@@ -1231,6 +1333,7 @@ class Bridge:
                         "plugin_root": str(Path(__file__).resolve().parents[2]),
                         "approval_capabilities": {"preview": True, "revision_checked_decisions": True,
                                                   "native_memory_only": True, "publication_reviews": True,
+                                                  "publication_mode": policy(store)["mode"] if enabled(self.settings) else None,
                                                   "automatic_approval": False},
                         "coverage": {
                             "pending_events":store.db.execute("SELECT COUNT(*) FROM events WHERE delivered IS NULL").fetchone()[0],
@@ -1395,6 +1498,7 @@ def run(settings: Settings, api, review_writes: ReviewWrites | None = None) -> i
         server.shutdown()
         server.server_close()
         settings.socket.unlink(missing_ok=True)
+        bridge.publication_guardian.close()
         api.close()
         bridge.store.close()
         owner.close()

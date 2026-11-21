@@ -54,10 +54,14 @@ def add_parsers(commands):
     publication = commands.add_parser("publication-review", help="Review project-scoped skill sharing candidates")
     publication.add_argument("--settings")
     publication.add_argument("--cwd", required=True)
-    publication.add_argument("action", choices=("list", "file", "approve_generic", "keep_project"))
+    publication.add_argument("action", choices=("list", "file", "approve_generic", "keep_project", "rollback"))
     publication.add_argument("--name")
     publication.add_argument("--revision")
     publication.add_argument("--file")
+    from .publication_guardian import MODES
+    sharing = commands.add_parser("publication-policy", help="Read or change personal-library skill sharing review policy")
+    sharing.add_argument("--settings")
+    sharing.add_argument("mode", nargs="?", choices=MODES)
     for name, description in (("memory-preview", "Inspect project memory and preview compaction"),
                               ("publication-preview", "Inspect which skill versions pass strict visibility"),
                               ("review-metrics", "Summarize one day of recorded review costs and changes"),
@@ -112,6 +116,9 @@ def execute(args):
                 atomic_json(path, current)
         return {"settings": str(path), "network_environment": proposed,
                 "applied": args.apply, "service_reload_required": args.apply}
+    if args.command == "publication-policy":
+        from .ipc import request
+        return request(Settings.load(args.settings), "publication_policy", {"mode": args.mode})
     if args.command == "publication-review":
         from .ipc import request
         params = {"cwd": args.cwd, "action": args.action, "name": args.name, "revision": args.revision, "file": args.file}

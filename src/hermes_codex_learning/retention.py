@@ -152,18 +152,26 @@ def retain_artifacts(store, api, *, dry_run=True):
         version = record.get('artifact', record).get('version')
         if isinstance(version, str) and re.fullmatch(r'[a-f0-9]{64}', version):
             protected.add(version)
+    lineage = {}
+    def remember_lineage(record):
+        review = record.get('check', {}).get('automatic_review')
+        if review:
+            lineage[record['artifact']['version']] = (review['baseline_version'], review['previous_version'])
     for key in ('publications-v1', 'artifact-read-cache'):
         for record in store.get(key, {}).values():
             protect(record)
+            remember_lineage(record)
     now = time.time()
     retired = store.get('artifact-retired-at', {})
     protected.update(version for version, at in retired.items() if at >= now-30*86400)
     histories = {}
     for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'publication-history:%'"):
         history = json.loads(row['value'])
-        for position, (version, record) in enumerate(reversed(list(history.items()))):
+        for position, (version, record) in enumerate(sorted(history.items(),
+                key=lambda item: item[1].get('retired_at', now), reverse=True)):
             # Legacy undated versions get a grace period before collection.
             record.setdefault('retired_at', now)
+            remember_lineage(record)
             if position < 2 or record['retired_at'] >= now-30*86400:
                 protect(record)
         histories[row['key']] = history
@@ -176,7 +184,9 @@ def retain_artifacts(store, api, *, dry_run=True):
                   for intent in store.get('native-candidate-intents', {}).values()}
     frontier = list(protected)
     while frontier:
-        for version in candidates.get(frontier.pop(), ()):
+        current = frontier.pop()
+        dependencies = (*candidates.get(current, ()), *lineage.get(current, ()))
+        for version in dependencies:
             if isinstance(version, str) and version not in protected and re.fullmatch(r'[a-f0-9]{64}', version):
                 protected.add(version)
                 frontier.append(version)

@@ -403,15 +403,19 @@ function renderPublicationCards(candidates) {
   if (key === publicationListKey) return;
   const cards = new Map();
   for (const candidate of candidates) {
-    if (publicationCards.has(candidate.revision)) {
-      cards.set(candidate.revision, publicationCards.get(candidate.revision));
+    const explanation = candidate.reason || "请核对全部文件，确认内容可供其他项目使用。";
+    const existing = publicationCards.get(candidate.revision);
+    if (existing) {
+      existing.reason.textContent = explanation;
+      cards.set(candidate.revision, existing);
       continue;
     }
     const card = node("article", undefined, "card");
+    const reason = node("p", explanation);
     card.append(node("h3", candidate.name), node("p", "待审版本 " + candidate.version, "version muted"),
       node("p", "来源项目 " + candidate.sources.join("、"), "version muted"),
       node("p", candidate.previous_version ? "对照已共享版本 " + candidate.previous_version : "首次申请共享", "version muted"),
-      node("p", "请核对全部文件，确认内容可供其他项目使用。"));
+      reason);
     const files = node("div", undefined, "files");
     files.append(...candidate.resources.map(file => resource(candidate, file)));
     const controls = node("div", undefined, "row");
@@ -421,10 +425,10 @@ function renderPublicationCards(candidates) {
     keep.onclick = () => decidePublication(keep, candidate, "keep_project");
     controls.append(approve, keep);
     card.append(files, controls);
-    cards.set(candidate.revision, card);
+    cards.set(candidate.revision, {card, reason});
   }
   const container = byId("publications");
-  container.replaceChildren(...(cards.size ? cards.values() : [node("p", "当前项目没有待审的通用技能。", "muted")]));
+  container.replaceChildren(...(cards.size ? [...cards.values()].map(entry => entry.card) : [node("p", "当前项目没有待审的通用技能。", "muted")]));
   publicationCards = cards;
   publicationListKey = key;
 }
@@ -435,7 +439,7 @@ function renderPublications(value) {
   if (!value.decisions.length) return;
   history.append(node("h3", "最近的共享审批"));
   const outcomes = {published: "已共享", kept_in_project: "已保留在本项目", queued: "已提交，等待发布检查",
-    withheld: "未通过发布检查", superseded: "候选已更新，需要审查新版本"};
+    withheld: "未通过发布检查", superseded: "候选已更新，需要审查新版本", automatic_kept: "已自动保留在本项目"};
   for (const result of value.decisions) {
     history.append(node("p", result.name + " · " + result.version + " · " + (outcomes[result.state] || result.state)
       + (result.reason ? "（" + result.reason + "）" : ""), "version muted"));

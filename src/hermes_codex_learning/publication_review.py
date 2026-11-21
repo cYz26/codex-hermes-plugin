@@ -11,6 +11,9 @@ UNASSESSED = 'data_classification_unassessed'
 APPROVE = 'approve_generic'
 KEEP = 'keep_project'
 KEPT_REASON = 'operator_kept_in_project'
+AUTOMATIC_KEEP = 'automatic_kept_in_project'
+ROLLBACKS = 'publication-rollbacks-v1'
+ROLLED_BACK = 'publication_rolled_back'
 STALE = '候选版本、文件或来源已变化，请刷新后重新审查。'
 
 
@@ -55,6 +58,8 @@ def pending(settings, store, project, *, name=None):
 def list_pending(settings, store, project):
     if not enabled(settings):
         return {'candidates': [], 'decisions': []}
+    from .publication_guardian import REASONS
+    decisions = store.get('publication-decisions', {})
     candidates = []
     for candidate, revision, _, previous in pending(settings, store, project):
         files, old_files = candidate['files'], previous.get('files', {})
@@ -64,12 +69,14 @@ def list_pending(settings, store, project):
             change = ('added' if before is None else 'removed' if after is None else
                       'unchanged' if before == after else 'changed')
             resources.append({'path': path, 'change': change, 'sha256': after})
-        candidates.append({'name': candidate['name'], 'version': candidate['version'], 'revision': revision,
-                           'sources': candidate['sources'], 'previous_version': previous.get('version'),
-                           'resources': resources})
+        item = {'name': candidate['name'], 'version': candidate['version'], 'revision': revision,
+                'sources': candidate['sources'], 'previous_version': previous.get('version'), 'resources': resources}
+        reason = decisions[candidate['name']].get('review_reason')
+        if reason:
+            item['reason'] = REASONS.get(reason, reason)
+        candidates.append(item)
     publications = store.get('publications-v1', {})
     reviews = store.get('publication-reviews-v1', {})
-    decisions = store.get('publication-decisions', {})
     recent = []
     for name, review in sorted(reviews.items(), key=lambda item: item[1]['at'], reverse=True):
         if review['project'] != project or review['sources'] != [project]:
@@ -89,7 +96,93 @@ def list_pending(settings, store, project):
                        **({'reason': reason} if state == 'withheld' else {})})
         if len(recent) == 10:
             break
-    return {'candidates': candidates, 'decisions': recent}
+    sources = store.get('knowledge-index-v1', {}).get('skills', {})
+    for name, decision in decisions.items():
+        if decision.get('reason') == AUTOMATIC_KEEP and sources.get(name, {}).get('projects') == [project]:
+            reason = decision.get('review_reason', '')
+            recent.append({'name': name, 'version': decision['version'], 'state': 'automatic_kept',
+                           'reason': REASONS.get(reason, reason), 'at': decision.get('review_at', 0),
+                           'review_id': decision.get('review_id')})
+    result = {'candidates': candidates, 'decisions': sorted(recent, key=lambda item: item['at'], reverse=True)[:10]}
+    rollbacks = [target for name, published in publications.items()
+                 if (target := rollback_target(store, name, published, project))]
+    if rollbacks:
+        result['rollbacks'] = rollbacks
+    restored = [item for versions in store.get(ROLLBACKS, {}).values() for item in versions.values()
+                if item.get('project') == project]
+    if restored:
+        result['restored'] = sorted(restored, key=lambda item: item['at'], reverse=True)[:10]
+    return result
+
+
+def rollback_target(store, name, publication, project):
+    auto = publication.get('check', {}).get('automatic_review')
+    if (not isinstance(auto, dict) or not auto.get('id') or 'previous_version' not in auto
+            or publication.get('sources') != [project]):
+        return None
+    version = publication['artifact']['version']
+    previous = auto['previous_version'] or None
+    versions = store.get(ROLLBACKS, {}).get(name, {})
+    if version in versions or previous == version:
+        return None
+    previous_identity = None
+    if previous:
+        old = store.get('publication-history:' + name, {}).get(previous, {})
+        if (old.get('sources') != [project] or old.get('artifact', {}).get('version') != previous
+                or old.get('check', {}).get('allowed') is not True or previous in versions
+                or store.get('lifecycle-withheld', {}).get(name)
+                or store.db.execute('SELECT 1 FROM shared_skill_removals WHERE name=?', (name,)).fetchone()
+                or store.db.execute('SELECT 1 FROM withheld_versions WHERE name=? AND version=?',
+                                    (name, previous)).fetchone()):
+            return None
+        previous_identity = identity(name, old['artifact'], [project])
+    return {'name': name, 'version': version, 'previous_version': previous, 'automatic_review': auto['id'],
+            'revision': digest([identity(name, publication['artifact'], [project]), previous_identity, auto['id']])}
+
+
+def rollback(settings, store, project, name, revision):
+    """Withdraw this exact automatic publication and restore its predecessor when one exists."""
+    if not enabled(settings) or not isinstance(name, str) or not isinstance(revision, str):
+        raise ValueError(STALE)
+    with store.db:
+        store.db.execute('BEGIN IMMEDIATE')
+        publications = store.get('publications-v1', {})
+        publication = publications.get(name, {})
+        target = rollback_target(store, name, publication, project)
+        if not target or target['revision'] != revision:
+            raise ValueError('共享版本已变化，请刷新后重新确认回滚。')
+        history_key = 'publication-history:' + name
+        history = store.get(history_key, {})
+        previous = target['previous_version']
+        if previous:
+            restored = history[previous]
+            artifact = restored['artifact']
+            root = Path(artifact['resource_dir'])
+            if root.is_symlink() or root.resolve().parent != (settings.home / 'learning/artifacts').resolve():
+                raise ValueError('上一个共享版本的快照无法验证。')
+            try:
+                for path in artifact['files']:
+                    published_resource(restored, path)
+            except (OSError, ValueError):
+                raise ValueError('上一个共享版本的快照无法验证。') from None
+            publications[name] = restored
+        else:
+            del publications[name]
+        result = {**target, 'state': 'rolled_back', 'project': project, 'at': time.time()}
+        rollbacks = store.get(ROLLBACKS, {})
+        rollbacks.setdefault(name, {})[target['version']] = result
+        history[target['version']] = {**publication, 'retired_at': result['at']}
+        decisions = store.get('publication-decisions', {})
+        if decisions.get(name, {}).get('version') == target['version']:
+            decisions[name] = {'allowed': False, 'reason': ROLLED_BACK, 'version': target['version']}
+        aliases = {alias: source for alias, source in store.get('publication-aliases', {}).items()
+                   if source != name}
+        updates = {'publications-v1': publications, history_key: history, ROLLBACKS: rollbacks,
+                   'publication-decisions': decisions, 'publication-aliases': aliases,
+                   'publication-context-version': None, 'publication-notified:' + name: previous}
+        store.db.executemany('INSERT OR REPLACE INTO meta VALUES (?,?)',
+                             [(key, dumps(value)) for key, value in updates.items()])
+        return result
 
 
 def current_candidate(settings, store, project, name, revision):

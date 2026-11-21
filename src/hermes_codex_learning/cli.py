@@ -349,7 +349,7 @@ def main() -> int:
         parser.error("Starting a systemd service requires Linux")
     if args.command in {"install","sources","learning-config","enterprise-config","retention","quality","migration",
                         "network-config","review-retry","curator-config","memory-preview","publication-preview",
-                        "publication-review","review-metrics","skill-readiness"}:
+                        "publication-review","publication-policy","review-metrics","skill-readiness"}:
         from .operations import execute
         try:
             result = execute(args)
