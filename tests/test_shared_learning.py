@@ -224,6 +224,32 @@ class SharedNativeStoreTests(unittest.TestCase):
         self.assertIn("short progress", self.view(self.b)["memories"]["USER.md"])
         self.assertNotIn("MEMORY.md", self.view(None)["memories"])
 
+    def test_standalone_scoped_owner_applies_only_the_queued_decision(self):
+        from dataclasses import replace
+        from hermes_codex_learning.shared_learning import drain
+        from hermes_codex_learning.shared_storage import read
+
+        self.bridge.settings = replace(self.bridge.settings, shared_profile=None, shared_client_id=None,
+                                       scoped_storage=True)
+        for project, content in ((self.a, "Prefer dated handoff notes."), (self.b, "Prefer short status updates.")):
+            state, _ = self.write(project, "memory", {"target": "user", "action": "add", "content": content},
+                                  digest([]))
+            self.assertEqual(state, "pending_review")
+        pending, = read(self.bridge, self.bridge.store, "pending", self.a, {"subsystem": "memory"})["records"]
+        params = {"subsystem": "memory", "decision": "approve", "id": pending["id"],
+                  "revision": pending["revision"]}
+        enqueue(self.bridge.store, self.a, {"request_id": "decision-one", "surface": "codex_approval",
+                                           "operation": "decide", "args": params},
+                executor="Codex App", settings=self.bridge.settings)
+
+        drain(self.bridge)
+
+        self.assertEqual(receipt(self.bridge.store, self.a, "decision-one")["state"], "applied")
+        self.assertIn("dated handoff", self.view(self.a)["memories"]["USER.md"])
+        remaining = read(self.bridge, self.bridge.store, "pending", self.b, {"subsystem": "memory"})["records"]
+        self.assertEqual(len(remaining), 1)
+        self.assertNotIn("short status", self.view(self.b)["memories"]["USER.md"])
+
     def test_clear_is_versioned_and_replay_cannot_revive_removed_memory(self):
         entry = "Temporary decision to be removed."
         self.assertEqual(self.write(self.a, "memory", {"action": "add", "content": entry}, digest([]))[0], "applied")

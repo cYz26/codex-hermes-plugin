@@ -91,6 +91,61 @@ def _snapshot(api, handle, intent, supplied):
     return observations, None if observations else "explicit_or_legacy_snapshot_without_journal_ids"
 
 
+def _sort_recorded_exchanges(exchanges, positions):
+    """Keep unidentified exchanges in place and order only comparable positions."""
+    known = iter(sorted((pair for pair in exchanges if pair[1]["tool_call_id"] in positions),
+                        key=lambda pair: positions[pair[1]["tool_call_id"]]))
+    return [next(known) if pair[1]["tool_call_id"] in positions else pair for pair in exchanges]
+
+
+def _tool_replay(store, rows):
+    messages = [message for row in rows for message in row["messages"]
+                if message.get("tool_calls") or message["role"] == "tool"]
+    if len(messages) < 4 or len(messages) % 2:
+        return messages
+    exchanges = list(zip(messages[::2], messages[1::2]))
+    for call, result in exchanges:
+        calls = call.get("tool_calls", [])
+        if (len(calls) != 1 or result["role"] != "tool" or not result.get("tool_call_id")
+                or calls[0].get("id") != result["tool_call_id"]):
+            return messages  # Preserve incomplete/ambiguous input for the existing pair validator.
+    source = rows[-1]["body"]["source"]
+    if source.get("executor") == "Hermes" or not any(row["body"].get("tools") for row in rows):
+        return messages
+
+    from agent.learning_artifacts import fingerprint
+    from .host_evidence import _at
+
+    recorded = {pair[1]["tool_call_id"] for pair in exchanges}
+    host_positions, identifiers = {}, {}
+    for row in rows:
+        body = row["body"]
+        for tool in body.get("tools", []):
+            identifier = "external-" + fingerprint([body["source"], tool["call_id"]])[:32]
+            if identifier in recorded:
+                identifiers[tool["call_id"]] = identifier
+                if position := tool.get("host_position"):
+                    host_positions[identifier] = position
+    ordinals = {identifier: position["ordinal"] for identifier, position in host_positions.items()
+                if type(position.get("ordinal")) is int}
+    if len(ordinals) < len(exchanges):
+        # Older transcripts may lack ordinals. Fall back to one matching
+        # captured completion per call, and prefer host timestamps where known.
+        hooks = store.db.execute(
+            "SELECT json_extract(payload,'$.tool_use_id'), MIN(created), MIN(rowid) FROM events "
+            "WHERE json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.turn_id')=? "
+            "AND json_extract(payload,'$.bridge_host')=? AND json_extract(payload,'$.bridge_project')=? "
+            "AND json_extract(payload,'$.hook_event_name')='PostToolUse' GROUP BY 1 HAVING COUNT(*)=1",
+            (source["chat"], source["turn"], source["host"], source["project"]),
+        )
+        capture_order = {identifiers[call]: (at, rowid) for call, at, rowid in hooks if call in identifiers}
+        timestamps = {identifier: stamp for identifier, position in host_positions.items()
+                      if (stamp := _at(position)) is not None}
+        exchanges = _sort_recorded_exchanges(exchanges, capture_order)
+        exchanges = _sort_recorded_exchanges(exchanges, timestamps)
+    return [message for pair in _sort_recorded_exchanges(exchanges, ordinals) for message in pair]
+
+
 def _parent_turns(store, settings, source, relation, selected=()):
     """Only recorded, admitted parent turns on this host/project and before the fork."""
     gaps, result = [], []
@@ -232,9 +287,10 @@ def organize_review_history(api, handle, source, messages, intent, settings=None
                     previous = parent_ref+".result"
         elif relation.get("status") in {"unavailable","partial"}:
             report["coverage_gaps"].append({"reason":relation.get("reason","host_parent_relation_unavailable")})
+        tool_replays = [_tool_replay(store, rows) for rows in ordered]
     finally:
         store.close()
-    for number, rows in enumerate(ordered,1):
+    for number, (rows, tool_replay) in enumerate(zip(ordered, tool_replays), 1):
         body, ref = rows[-1]["body"], f"T{number}"
         timestamp, order_basis = _position(body)
         report["turns"].append({"ref":ref,"source":body["source"],"first_revision":rows[0]["revision"],
@@ -258,13 +314,12 @@ def organize_review_history(api, handle, source, messages, intent, settings=None
             else:
                 report["coverage_gaps"].append({"turn":rows[0]["turn"],"reason":"request_body_not_retained"})
         answers, tool_index = _answers(rows), 0
-        for row in rows:
-            for message in row["messages"]:
-                if message.get("tool_calls"):
-                    tool_index += 1
-                    output.append(_mark(message,f"{ref}.tool{tool_index}","tool_call",body["source"]))
-                elif message["role"] == "tool":
-                    output.append(_mark(message,f"{ref}.tool{tool_index}.result","tool_result",body["source"]))
+        for message in tool_replay:
+            if message.get("tool_calls"):
+                tool_index += 1
+                output.append(_mark(message,f"{ref}.tool{tool_index}","tool_call",body["source"]))
+            else:
+                output.append(_mark(message,f"{ref}.tool{tool_index}.result","tool_result",body["source"]))
         for i, (answer,answer_row) in enumerate(answers):
             result_ref = ref+".result" if i == len(answers)-1 else f"{ref}.result.{i+1}"
             output.append(_mark(answer,result_ref,"result",body["source"],revision=answer_row["revision"]))

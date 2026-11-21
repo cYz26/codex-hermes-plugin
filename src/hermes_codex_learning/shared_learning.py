@@ -234,7 +234,7 @@ def status(store, project, *, settings=None):
 
 
 def recover(bridge):
-    if bridge.settings.shared_profile is not None:
+    if bridge.settings.uses_scoped_storage:
         from .shared_storage import recover_memory_intents
         recover_memory_intents(bridge.settings, bridge.store)
         with bridge.store.db:
@@ -244,7 +244,7 @@ def recover(bridge):
 
 
 def drain(bridge):
-    if bridge.settings.shared_profile is None:
+    if not bridge.settings.uses_scoped_storage:
         return
     from .shared_storage import apply_write
     rows = bridge.store.db.execute("SELECT * FROM shared_writes WHERE state='queued' ORDER BY rowid LIMIT 20").fetchall()

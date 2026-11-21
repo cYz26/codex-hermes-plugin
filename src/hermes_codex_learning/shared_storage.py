@@ -233,7 +233,7 @@ def _skill_filters(bridge, project, *, store=None):
         from .skill_reads import load
         try:
             value = load(settings, key, project, file_path, issue_delivery=False)
-            return {"success": True, "name": key, "content": value["content"],
+            return {"success": True, "name": key, "content": value["content"], "read_only": True,
                     "version": value["version"], "linked_files": sorted(value["files"])}
         except (ValueError, OSError, PermissionError, RuntimeError):
             return {"success": False, "error": "Published skill is unavailable"}

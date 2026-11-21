@@ -44,6 +44,35 @@ class EvidenceTests(unittest.TestCase):
         return organize_review_history(self.api,'h',self.source,self.messages,
                                        {'id':'intent','revision':revision},self.settings)
 
+    def test_tool_replay_orders_whole_exchanges_by_host_position(self):
+        body = self.add("turn", "Fix a failing test.", "The test now passes.", 1)
+        request, answer = self.messages
+        exchanges = []
+        for name, ordinal in (("edit", 20), ("passed", 30), ("failed", 10)):
+            call = {"call_id": name, "host_position": {"ordinal": ordinal}}
+            body["tools"].append(call)
+            identifier = "external-" + digest([body["source"], name])[:32]
+            exchanges.extend([
+                {"role": "assistant", "tool_calls": [{"id": identifier}], "message_uid": name + "-call"},
+                {"role": "tool", "tool_call_id": identifier, "content": name, "message_uid": name + "-result"},
+            ])
+        self.messages = [request, *exchanges, answer]
+        original = dumps(self.messages)
+        self.db.execute("UPDATE observations SET body=?,messages=?", (dumps(body), original))
+        expected = ["failed-call", "failed-result", "edit-call", "edit-result", "passed-call", "passed-result"]
+        with patch.dict("sys.modules", {"agent.learning_artifacts": SimpleNamespace(fingerprint=digest)}):
+            replay, _ = self.replay(1)
+            self.assertEqual([m["message_uid"] for m in replay if "tool" in m.get("evidence_kind", "")], expected)
+            for tool in body["tools"]:
+                del tool["host_position"]
+            self.db.execute("UPDATE observations SET body=?", (dumps(body),))
+            for name in ("failed", "edit", "passed"):
+                self.store.capture({"hook_event_name": "PostToolUse", "session_id": "chat", "turn_id": "turn",
+                                    "bridge_project": str(self.root), "bridge_host": "host", "tool_use_id": name})
+            replay, _ = self.replay(1)
+            self.assertEqual([m["message_uid"] for m in replay if "tool" in m.get("evidence_kind", "")], expected)
+        self.assertEqual(self.db.execute("SELECT messages FROM observations").fetchone()[0], original)
+
     def test_late_result_cannot_be_the_prior_conclusion_of_an_earlier_followup(self):
         self.add('first','Compare technical alternatives','Original public ranking.',1)
         self.add('second','Also compare internal capabilities.','Internal reuse changes the preference.',2)

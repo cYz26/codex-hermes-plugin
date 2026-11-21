@@ -333,4 +333,4 @@ def install_review_policy(api, settings=None) -> None:
 
     runtime.review = review
     from .review_summary import install_summary_capture
-    install_summary_capture(runtime)
+    install_summary_capture(runtime, settings)

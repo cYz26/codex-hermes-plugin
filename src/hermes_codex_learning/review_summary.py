@@ -19,6 +19,20 @@ SUMMARY_PROMPT = (
     "receipts; do not claim that they have occurred."
 )
 
+_PROJECT_MEMORY_PROMPT = (
+    "\n\nFor a user-declared standing convention or a durable fact specific to the source workspace, "
+    "use the memory tool with target='memory'. That target writes the current project's MEMORY.md. "
+    "Evaluate project memory independently of skill changes. Add a concise, grounded entry for a new "
+    "fact when warranted. USER.md is reserved for user preferences that apply across projects. "
+    "Leave one-off instructions and transient task details out of both stores."
+)
+_PROJECT_SKILL_PROMPT = (
+    "\n\nA skill_view result marked read_only is reference material. Respect workspace ownership "
+    "and stop retrying an ownership refusal. For a distinct, reusable procedure that belongs only "
+    "to the current project, check for an existing owned skill or create a distinct project skill "
+    "without a global_candidate designation."
+)
+
 
 def summary_text(value) -> str | None:
     if not isinstance(value, str) or not value.strip():
@@ -68,7 +82,7 @@ def capture_review_summary(api, handle):
         yield captured
 
 
-def install_summary_capture(runtime) -> None:
+def install_summary_capture(runtime, settings=None) -> None:
     """Read the pinned native fork's final response during this serial worker's own review."""
     from contextlib import nullcontext
 
@@ -82,12 +96,13 @@ def install_summary_capture(runtime) -> None:
         return
     collector = runtime._notice_review_summary = _ReviewSummary()
     native_review = runtime.review
+    scoped_storage = settings is not None and settings.uses_scoped_storage
 
     def review(handle, source, messages, intent):
         collect = collector.handle == handle
         automatic_skills = (intent.get("reason") in REVIEW_REASONS
                             and (intent.get("skills") or source.get("executor") == EXECUTOR))
-        if not collect and not automatic_skills:
+        if not collect and not automatic_skills and not scoped_storage:
             return native_review(handle, source, messages, intent)
         native_fork = background_review._run_review_fork
 
@@ -95,6 +110,13 @@ def install_summary_capture(runtime) -> None:
             own_review = parent.session_id == handle
             if own_review and automatic_skills:
                 prompt += GUIDANCE
+            if own_review and scoped_storage:
+                from agent.shared_learning_scope import current
+                if (scope := current.get()) is not None and scope.project:
+                    if review_memory and parent._memory_enabled:
+                        prompt += _PROJECT_MEMORY_PROMPT
+                    if intent.get("skills"):
+                        prompt += _PROJECT_SKILL_PROMPT
             if own_review and collect:
                 prompt += SUMMARY_PROMPT
             try:
