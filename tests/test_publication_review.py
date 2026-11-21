@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+from hermes_codex_learning import publication_review
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.daemon import Bridge
 from hermes_codex_learning.knowledge import context_view
@@ -218,6 +219,60 @@ class PublicationReviewTests(unittest.TestCase):
             self.bridge.publish_checked(context)
         self.assertEqual(self.bridge.store.get('publications-v1')['portable']['artifact']['version'], 'v1')
         self.assertFalse(self.bridge.store.get('publication-decisions')['portable']['allowed'])
+
+    def test_native_restored_version_reuses_its_manual_approval(self):
+        self.bridge.settings = replace(self.settings, capture_scope='global')
+        original = self.value
+        original_approval = self.submit(dry_run=False)
+        self.publish()
+        self.add_resources('v2', **{'SKILL.md': original['content'] + 'Merged checks.\n',
+                                   'references/checks.md': 'Additional checks.'})
+        self.publish()
+        candidate, = self.review_action('list')['candidates']
+        with patch('hermes_codex_learning.native_reads.skill', return_value=self.value):
+            merged_approval = self.review_action('approve_generic', name='portable', revision=candidate['revision'])
+        self.publish()
+        reader = self.root.parent / (self.root.name + '-reader')
+        self.assertEqual(self.load_version(reader, 'v2')['version'], 'v2')
+
+        self.value = original
+        self.context['version'] = 'catalog-v1'
+        self.context['skills'][0]['artifact_version'] = 'v1'
+        self.bridge.store.set('artifact-read-cache', {'portable': {'artifact': original}})
+        restored = self.publish()
+
+        recalled = context_view(restored, str(reader), 'portable')['skills'][0]
+        self.assertEqual((recalled['scope'], recalled['artifact_version']), ('global', 'v1'))
+        self.assertEqual(self.load_version(reader, 'v1')['content'], original['content'])
+        with self.assertRaises(ValueError):
+            self.load_version(reader, 'v2')
+        self.assertEqual(self.review_action('list')['candidates'], [])
+        self.assertEqual(self.bridge.store.get('publications-v1')['portable']['check']['review_hash'],
+                         original_approval['review_hash'])
+        self.assertEqual(self.bridge.store.get('publication-reviews-v1')['portable']['review_hash'],
+                         merged_approval['review_hash'])
+        self.assertEqual(self.bridge.store.db.execute(
+            "SELECT count(*) FROM meta WHERE key GLOB 'publication-review:*'").fetchone()[0], 2)
+
+    def test_review_history_requires_matching_files_and_sources_and_honors_a_later_keep(self):
+        approval = self.submit(dry_run=False)
+        store = self.bridge.store
+        candidate = publication_review.identity('portable', self.value, [str(self.root)])
+        with store.db:
+            publication_review.record(store, str(self.root), {**self.review, 'version': 'v2'})
+        latest = store.get('publication-reviews-v1')['portable']
+        self.assertEqual(publication_review.review_for_version(store, candidate, latest)['review_hash'],
+                         approval['review_hash'])
+        for changed in ({'files': {'SKILL.md': 'different'}}, {'sources': ['/another-source']}):
+            with self.subTest(changed=changed):
+                self.assertIsNone(publication_review.review_for_version(store, {**candidate, **changed}, latest))
+
+        with store.db:
+            keep = publication_review.record(store, str(self.root), {**self.review, 'decision': publication_review.KEEP})
+            publication_review.record(store, str(self.root), {**self.review, 'version': 'v3'})
+        latest = store.get('publication-reviews-v1')['portable']
+        restored = publication_review.review_for_version(store, candidate, latest)
+        self.assertEqual((restored['decision'], restored['review_hash']), (publication_review.KEEP, keep['review_hash']))
 
     def test_stale_manifest_or_source_cannot_be_approved(self):
         for change in ({'version': 'old'}, {'files': {}}, {'sources': ['/foreign']}):

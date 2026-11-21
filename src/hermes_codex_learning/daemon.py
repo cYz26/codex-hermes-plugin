@@ -782,7 +782,8 @@ class Bridge:
                                   self.store.get('native-lifecycle-status', {}).get('state'), publication_reviews,
                                   [tuple(row) for row in self.store.db.execute("SELECT name,version FROM withheld_versions")]]
         if not self.settings.data_policy:
-            publication_inputs.extend((active_policy, publication_guardian.POLICY_VERSION, rollbacks))
+            publication_inputs.extend((active_policy, publication_guardian.POLICY_VERSION,
+                                       publication_review.REVIEW_HISTORY_VERSION, rollbacks))
         publication_key = digest(publication_inputs)
         waiting = any(d.get("reason") == publication_guardian.WAITING for d in old_decisions.values())
         if self.store.get("publication-context-version") != publication_key or waiting:
@@ -805,6 +806,8 @@ class Bridge:
                     candidate = publication_review.identity(name, value, origins)
                     previous = publications.get(name, {})
                     reviewed = publication_reviews.get(name)
+                    if not self.settings.data_policy:
+                        reviewed = publication_review.review_for_version(self.store, candidate, reviewed)
                     disposition = publication_review.disposition(reviewed, candidate)
                     intent = self.store.get('native-candidate-intents', {}).get(name, {})
                     native_review_candidate = (

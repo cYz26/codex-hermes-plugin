@@ -1,6 +1,7 @@
 """Project-scoped review of exact personal-library publication candidates."""
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -14,6 +15,7 @@ KEPT_REASON = 'operator_kept_in_project'
 AUTOMATIC_KEEP = 'automatic_kept_in_project'
 ROLLBACKS = 'publication-rollbacks-v1'
 ROLLED_BACK = 'publication_rolled_back'
+REVIEW_HISTORY_VERSION = 1
 STALE = '候选版本、文件或来源已变化，请刷新后重新审查。'
 
 
@@ -24,6 +26,23 @@ def identity(name, value, origins):
 def disposition(review, candidate):
     if review and all(review.get(key) == value for key, value in candidate.items()):
         return review.get('decision')
+    return None
+
+
+def review_for_version(store, candidate, latest):
+    """Find the most recent operator decision for this exact native artifact."""
+    if disposition(latest, candidate):
+        return latest
+    rows = store.db.execute(
+        "SELECT value FROM meta WHERE key GLOB 'publication-review:*' "
+        "AND json_extract(value, '$.name') = ? AND json_extract(value, '$.version') = ? "
+        "ORDER BY json_extract(value, '$.at') DESC, rowid DESC",
+        (candidate['name'], candidate['version']),
+    )
+    for (value,) in rows:
+        review = json.loads(value)
+        if review.get('project') in candidate['sources'] and disposition(review, candidate) in (APPROVE, KEEP):
+            return review
     return None
 
 
