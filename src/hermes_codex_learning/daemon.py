@@ -16,7 +16,7 @@ from .config import Settings
 from .delegation import exclude_internal, register_delegation, task_input
 from .knowledge import context_view, memory_entries, reconcile
 from .learning_health import native_policy, record_capacity_refusal, snapshot as learning_health
-from .normalize import merge_event, observation
+from .normalize import TERMINAL_EVENTS, merge_event, observation
 from .notify import approval_notice, macos_notification, message, notification_events, should_notify
 from .review_deadline import run_review
 from .review_receipt import ReviewWrites, receipt_text
@@ -165,6 +165,9 @@ class Bridge:
                 terminal = enriched.get("evidence_provenance", {}).get("terminal_event")
                 if terminal:
                     event_id = terminal
+        if enriched["source"].get("executor") != "Hermes" and enriched.get("_ended_by") in TERMINAL_EVENTS:
+            from .delivery import capture_observed_skill_reads
+            capture_observed_skill_reads(self.store, enriched, self.settings)
         from .scheduling import is_explicit_correction
         if (self.settings.proactive and enriched["status"] == "incomplete" and enriched.get("_ended_by") == "Stop"
                 and is_explicit_correction(enriched.get("user"))):
@@ -378,7 +381,7 @@ class Bridge:
                 evidence={"stage":"body_delivered","source_event":[payload["session_id"],payload.get("turn_id"),payload["tool_use_id"]]}
                 if native:
                     self.api.record_usage(native,evidence)
-                delivery_meta = {"delivery_mode": delivered["delivery_mode"]} if delivered.get("delivery_mode") else {}
+                delivery_meta = {key: delivered[key] for key in ("delivery_mode", "read_coverage") if delivered.get(key)}
                 self.store.set("issued-delivery:"+token,{**value,**delivery_meta,"project":payload["bridge_project"],"source_event":evidence["source_event"]})
                 self.store.set(key,{"recorded":True,"native_token":native})
                 return
@@ -991,6 +994,8 @@ class Bridge:
                 recover_shared_writes(self)
                 migrate(self, dry_run=False)
                 migrate_shared = False
+            from .feedback import reconcile as reconcile_feedback
+            reconcile_feedback(self.store)
             self.publish()
         else:
             # Validate native reads without publishing candidate-derived provenance
@@ -1003,6 +1008,7 @@ class Bridge:
         self.store.set("state", "idle" if self.resume.is_set() else "update-paused")
         self.ready.set()
         delay = 1
+        last_completion_scan = float("-inf")
         while not self.stop.is_set():
             if self.drain.is_set():
                 break
@@ -1020,7 +1026,9 @@ class Bridge:
                 drain_client(self)
                 self.ingest()
                 drain_shared_writes(self)
-                if self.settings.shared_profile is not None:
+                now = time.monotonic()
+                if now - last_completion_scan >= 5:
+                    last_completion_scan = now
                     from .host_evidence import recover_completions
                     recover_completions(self.settings, self.store)
                 self.retry_completed_inputs()

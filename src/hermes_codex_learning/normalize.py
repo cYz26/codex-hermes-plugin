@@ -239,7 +239,8 @@ def merge_event(store: Store, row: dict) -> dict | None:
             if gap:
                 data["coverage"] = sorted(set(data["coverage"]) | {gap + ":" + target_id})
     elif name in {"Stop", CODEX_COMPLETION}:
-        if name == CODEX_COMPLETION and (data.get("_ended_by") or not isinstance(event.get("bridge_completion"), str)):
+        if name == CODEX_COMPLETION and (data.get("_ended_by") not in {None, "stale_timeout"}
+                                         or not isinstance(event.get("bridge_completion"), str)):
             return None
         if name == "Stop" and data.get("_ended_by") == CODEX_COMPLETION and previous["observed_revision"] is not None:
             # A late Stop confirms an already accepted host terminal record.

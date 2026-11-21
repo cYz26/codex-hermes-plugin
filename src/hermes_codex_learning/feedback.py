@@ -232,9 +232,39 @@ def _correction(store, row, value):
     return None
 
 
+def _retire_automatic_holds(store):
+    if getattr(store, "_legacy_holds_reconciled", False):
+        return
+    with store.db:
+        store.db.execute("BEGIN IMMEDIATE")
+        inferred = store.db.execute("""
+            SELECT w.name, w.version, w.evidence
+            FROM withheld_versions w JOIN application_evidence a ON a.id=w.evidence
+            WHERE json_extract(a.payload,'$.application')='host_observed'
+        """).fetchall()
+        for name, version, evidence in inferred:
+            explicit = store.db.execute("""
+                SELECT id FROM application_evidence
+                WHERE json_extract(payload,'$.name')=? AND json_extract(payload,'$.version')=?
+                  AND json_extract(payload,'$.application')='self_reported'
+                  AND json_extract(payload,'$.validation')='host_test_failed'
+                  AND json_array_length(payload,'$.test_outcomes')>0
+                ORDER BY rowid DESC LIMIT 1
+            """, (name, version)).fetchone()
+            if explicit:
+                store.db.execute("UPDATE withheld_versions SET evidence=? WHERE name=? AND version=? AND evidence=?",
+                                 (explicit[0], name, version, evidence))
+            else:
+                store.db.execute("DELETE FROM withheld_versions WHERE name=? AND version=? AND evidence=?",
+                                 (name, version, evidence))
+    # Keep historical receipts available for audit. Repeat on process startup
+    # in case the worker ran an older release between activations.
+    store._legacy_holds_reconciled = True
+
+
 def reconcile(store, *, identifier=None):
     if identifier is None:
-        _reconcile_native_deliveries(store)
+        _retire_automatic_holds(store)
     pending = "SELECT rowid,id,payload FROM application_evidence WHERE json_extract(payload,'$.validation')='pending'"
     if identifier is None:
         cursor = store.get("application-feedback-cursor", 0)
@@ -271,124 +301,3 @@ def reconcile(store, *, identifier=None):
                                      (event["chat"],event["turn"],"skill_validation_failed",time.time()))
     if identifier is None and (cursor or rows):
         store.set("application-feedback-cursor", rows[-1]["rowid"] if len(rows) == 100 else 0)
-
-
-def _reconcile_native_deliveries(store) -> None:
-    rows = store.db.execute("""
-        SELECT m.key, m.value FROM meta m
-        WHERE m.key LIKE 'issued-delivery:%'
-          AND json_extract(m.value,'$.delivery_mode')='native_projection'
-          AND COALESCE(json_extract(m.value,'$.file_path'),'SKILL.md')='SKILL.md'
-          AND NOT EXISTS (
-              SELECT 1 FROM meta s WHERE s.key='native-feedback-settled:' || substr(m.key, 17)
-          )
-        ORDER BY m.rowid LIMIT 50
-    """).fetchall()
-    for key, raw in rows:
-        token = key[len("issued-delivery:"):]
-        delivery = json.loads(raw)
-        source_event = delivery.get("source_event") or []
-        project = delivery.get("project")
-        name = delivery.get("name")
-        version = delivery.get("version")
-        if len(source_event) != 3 or not project or not name or not version:
-            store.set("native-feedback-settled:" + token, {"settled_at": time.time(), "reason": "incomplete_delivery"})
-            continue
-        chat, turn, read_call_id = source_event
-        if store.db.execute("""
-            SELECT 1 FROM events
-            WHERE json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.turn_id')=?
-              AND delivered IS NULL LIMIT 1
-        """, (chat, turn)).fetchone():
-            continue
-        turn_row = store.db.execute("SELECT payload FROM turns WHERE id=?", (digest([chat, turn]),)).fetchone()
-        if not turn_row:
-            continue
-        turn_data = json.loads(turn_row[0])
-        if turn_data.get("status") not in {"completed", "interrupted"}:
-            continue
-        existing = store.db.execute("""
-            SELECT 1 FROM application_evidence
-            WHERE json_extract(payload,'$.project')=? AND json_extract(payload,'$.name')=?
-              AND json_extract(payload,'$.version')=?
-              AND json_extract(payload,'$.delivery_source_event[0]')=?
-              AND json_extract(payload,'$.delivery_source_event[1]')=?
-            LIMIT 1
-        """, (project, name, version, chat, turn)).fetchone()
-        if existing:
-            store.set("native-feedback-settled:" + token, {"settled_at": time.time(), "reason": "already_recorded"})
-            continue
-        read_event_row = store.db.execute("""
-            SELECT MAX(rowid) FROM events
-            WHERE json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.turn_id')=?
-              AND json_extract(payload,'$.tool_use_id')=? AND json_extract(payload,'$.hook_event_name')='PostToolUse'
-        """, (chat, turn, read_call_id)).fetchone()
-        read_rowid = read_event_row[0] or 0 if read_event_row else 0
-        post_test_rows = store.db.execute("""
-            SELECT rowid, json_extract(payload,'$.tool_use_id'), json_extract(payload,'$.bridge_test_key')
-            FROM events
-            WHERE rowid>? AND json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.turn_id')=?
-              AND json_extract(payload,'$.bridge_project')=? AND json_extract(payload,'$.hook_event_name')='PostToolUse'
-              AND json_extract(payload,'$.tool_use_id') IS NOT NULL
-            ORDER BY rowid
-        """, (read_rowid, chat, turn, project)).fetchall()
-        evidence_mode = turn_data.get("_evidence_mode")
-        latest_by_suite: dict[str, tuple[str, str, str]] = {}
-        for _, tool_id, test_key in post_test_rows:
-            tool = turn_data.get("tools", {}).get(tool_id)
-            if not tool:
-                continue
-            recognized = tool.get("name") == "workflow_test" if evidence_mode == MODE else _is_test(tool)
-            if not recognized:
-                continue
-            outcome = _test_outcome(tool, evidence_mode)
-            if outcome not in {"completed", "failed"}:
-                continue
-            suite = test_key or digest([tool.get("arguments", {}).get("command") or tool.get("arguments", {}).get("cmd") or tool_id])
-            latest_by_suite[suite] = (tool_id, outcome, _outcome_source(tool, evidence_mode))
-        if latest_by_suite:
-            events_list = [{"chat": chat, "turn": turn, "tool_call": tid} for tid, _, _ in latest_by_suite.values()]
-            outcomes = [{"source_event": {"chat": chat, "turn": turn, "tool_call": tid},
-                         "outcome": outcome, "outcome_source": src}
-                        for tid, outcome, src in latest_by_suite.values()]
-            passed = all(outcome == "completed" for _, outcome, _ in latest_by_suite.values())
-            validation = "host_test_passed" if passed else "host_test_failed"
-            identity = digest(["host_observed", token, "verified", events_list])
-            value = {
-                "id": identity,
-                "name": name,
-                "version": version,
-                "project": project,
-                "requested": "verified",
-                "events": events_list,
-                "application": "host_observed",
-                "delivery_source_event": source_event,
-                "validation": validation,
-                "test_outcomes": outcomes,
-                "effectiveness": "not_inferred",
-            }
-        else:
-            identity = digest(["host_observed", token, "applied", []])
-            value = {
-                "id": identity,
-                "name": name,
-                "version": version,
-                "project": project,
-                "requested": "applied",
-                "events": [],
-                "application": "host_observed",
-                "delivery_source_event": source_event,
-                "validation": "not_supplied",
-                "effectiveness": "not_inferred",
-            }
-        with store.db:
-            inserted = store.db.execute(
-                "INSERT OR IGNORE INTO application_evidence VALUES (?,?,?)",
-                (identity, dumps(value), time.time()),
-            )
-            if inserted.rowcount and value["validation"] == "host_test_failed":
-                store.db.execute("INSERT OR REPLACE INTO withheld_versions VALUES (?,?,?)",
-                                 (name, version, identity))
-                store.db.execute("INSERT OR IGNORE INTO learning_signals VALUES (?,?,?,?)",
-                                 (chat, turn, "skill_validation_failed", time.time()))
-        store.set("native-feedback-settled:" + token, {"settled_at": time.time(), "receipt_id": identity, "validation": value["validation"]})

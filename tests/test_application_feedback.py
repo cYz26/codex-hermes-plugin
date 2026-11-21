@@ -7,10 +7,35 @@ from types import SimpleNamespace
 from hermes_codex_learning.capture import hook
 from hermes_codex_learning.config import Settings
 from hermes_codex_learning.daemon import Bridge
-from hermes_codex_learning.store import Store, digest
+from hermes_codex_learning.store import Store, digest, dumps
 
 
 class ApplicationFeedbackTests(unittest.TestCase):
+    def test_old_automatic_holds_retire_without_losing_explicit_failures(self):
+        from hermes_codex_learning.feedback import reconcile
+
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        store = Store(Path(directory))
+        self.addCleanup(store.close)
+        failed = {"validation": "host_test_failed", "test_outcomes": [{"outcome": "failed"}]}
+        receipts = [
+            ("automatic", {"name": "one", "version": "v1", "application": "host_observed", **failed}),
+            ("explicit", {"name": "two", "version": "v1", "application": "self_reported", **failed}),
+            ("overwrite", {"name": "two", "version": "v1", "application": "host_observed", **failed}),
+            ("other-version", {"name": "one", "version": "v2", "application": "self_reported", **failed}),
+        ]
+        with store.db:
+            store.db.executemany("INSERT INTO application_evidence VALUES (?,?,?)",
+                                 [(key, dumps(receipt), 0) for key, receipt in receipts])
+            store.db.executemany("INSERT INTO withheld_versions VALUES (?,?,?)",
+                                 [("one", "v1", "automatic"), ("two", "v1", "overwrite"), ("manual", "v1", "operator")])
+        expected = [("manual", "v1", "operator"), ("two", "v1", "explicit")]
+        for _ in range(2):
+            reconcile(store)
+            self.assertEqual([tuple(row) for row in store.db.execute("SELECT * FROM withheld_versions ORDER BY name")], expected)
+        self.assertEqual([row[0] for row in store.db.execute("SELECT payload FROM application_evidence ORDER BY rowid")],
+                         [dumps(receipt) for _, receipt in receipts])
+
     def test_wrong_reference_is_superseded_by_the_copyable_same_version_feedback(self):
         from hermes_codex_learning.feedback import reconcile
         from hermes_codex_learning.normalize import merge_event

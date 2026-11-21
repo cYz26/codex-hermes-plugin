@@ -5,7 +5,7 @@ description: Use Hermes personal knowledge across Codex projects when hook conte
 
 Hermes learns from local main-chat execution in the background. In global mode, real hook cwd supplies the project identity: Git root (including worktrees), otherwise the chat working directory. No per-project installation is needed. Hook context supplies scoped memory and relevant skill names. Treat these as historical evidence; current user instructions, repository rules and new verification govern the task.
 
-Published generic and enterprise skills are materialized as immutable read-only snapshots and projected directly into Codex's native skills directory (`~/.agents/skills/`). Prefer Codex's native skill catalog and read those projected `SKILL.md` files and bundled resources directly from disk; hooks automatically record skill reads and correlate subsequent test outcomes in the same turn without extra MCP roundtrips.
+Published generic and enterprise skills are materialized as immutable read-only snapshots and projected into Codex's native skills directory (`~/.agents/skills/`). Prefer Codex's native skill catalog and read projected `SKILL.md` files and bundled resources directly. The bridge records confirmed reads against the delivered version.
 
 Scoped project memory is injected once at `SessionStart` via hook context (and updated only when memory changes or a new skill not yet in the session's initial scan becomes relevant). Use `context(cwd=<current chat's project path>, query=<brief task description>)` and `skill_load` mainly when the hook announces an unprojected project-private (`worktree`) skill, a skill newly learned mid-session, or when you need to inspect unpublished project experience. With no cwd, the service withholds project memory.
 
@@ -13,7 +13,7 @@ When loading an unprojected or mid-session skill via Hermes Learning MCP `skill_
 
 If experience changes your approach, briefly mention the relevant lesson. Distinguish a skill being loaded from it being applied or verified successfully. Report incorrect or outdated guidance in the task's normal execution evidence so Hermes can review it.
 
-For skills read natively from `~/.agents/skills/`, host hooks automatically record delivery and post-read test outcomes (`host_observed`). Explicit `record_application` (paired with `feedback_status`) remains supported when a skill was loaded through `skill_load` and you want to record explicit adoption or test references.
+To verify a skill, pass the delivery token from `skill_load` and references for tests that exercise the delivered skill to `record_application`. Obtain the host's test references from `feedback_status`. Use `stage=applied` to record adoption when you have no skill-specific test.
 
 Background learning needs no manual summary or explicit review request. `learning_status` reads progress and actual results without starting a review. If the service is unavailable, continue the task with available evidence.
 

@@ -60,7 +60,8 @@ def _candidate_read_paths(payload: dict, tool_kind: str) -> list[str]:
     return [tok for tok in tokens if "/" in tok or tok.endswith(".md") or tok.endswith(".py") or tok.endswith(".sh")]
 
 
-def _resolve_projected_skill_file(cand: str, base_cwd: str | None, settings, projection: dict) -> dict | None:
+def _resolve_projected_skill_file(cand: str, base_cwd: str | None, settings, projection: dict,
+                                  *, output: bytes | None = None, allow_partial: bool = False) -> dict | None:
     from .native_projection import catalog_root, snapshots_root
     versions = projection.get("versions") if isinstance(projection, dict) else None
     if not isinstance(versions, dict) or not versions:
@@ -102,20 +103,38 @@ def _resolve_projected_skill_file(cand: str, base_cwd: str | None, settings, pro
     if not matched_name or versions.get(matched_name) != version:
         return None
     try:
-        checksum = hashlib.sha256(resolved_file.read_bytes()).hexdigest()
+        body = resolved_file.read_bytes()
     except OSError:
         return None
-    return {"name": matched_name, "version": version, "file_path": rel_file, "content_hash": checksum, "scope": "global"}
+    artifact = {"name": matched_name, "version": version, "file_path": rel_file,
+                "content_hash": hashlib.sha256(body).hexdigest(), "scope": "global"}
+    if output is not None:
+        if output == body:
+            artifact["read_coverage"] = "full"
+        elif allow_partial and output in body:
+            artifact["read_coverage"] = "partial"
+        else:
+            return None
+    return artifact
 
 
-def _capture_native_skill_read(store, payload: dict, project: str, settings) -> None:
+def _capture_native_skill_read(store, payload: dict, project: str, settings, *,
+                               match_output: bool = False, allow_partial: bool = False) -> None:
     if settings is None or payload.get("hook_event_name") != "PostToolUse":
         return
     if not all(isinstance(payload.get(key), str) and payload[key]
                for key in ("session_id", "turn_id", "tool_use_id")):
         return
     tool_kind = str(payload.get("tool_name", "")).rsplit(".", 1)[-1].lower()
-    if tool_kind not in (_READ_TOOLS | _EXEC_TOOLS) or not _tool_succeeded(payload, tool_kind):
+    if tool_kind not in (_READ_TOOLS | _EXEC_TOOLS):
+        return
+    succeeded = _tool_succeeded(payload, tool_kind)
+    if match_output:
+        # This worker path supplements shell responses the installed hook cannot verify.
+        raw = payload.get("tool_response")
+        if succeeded or tool_kind not in _EXEC_TOOLS or not isinstance(raw, str) or not raw.strip():
+            return
+    elif not succeeded:
         return
     projection = store.get("native-skill-projection")
     if not projection:
@@ -123,11 +142,19 @@ def _capture_native_skill_read(store, payload: dict, project: str, settings) -> 
     candidates = _candidate_read_paths(payload, tool_kind)
     if not candidates:
         return
+    if allow_partial:
+        from .workflow import action
+        allow_partial = action(payload) == "inspect"
+    try:
+        output = raw.encode("utf-8") if match_output else None
+    except UnicodeEncodeError:
+        return
     from .read_receipts import initialize, issue
     initialize(settings.state)
     seen = set()
     for cand in candidates[:12]:
-        artifact = _resolve_projected_skill_file(cand, payload.get("cwd") or project, settings, projection)
+        artifact = _resolve_projected_skill_file(cand, payload.get("cwd") or project, settings, projection,
+                                                output=output, allow_partial=allow_partial)
         if not artifact:
             continue
         dedup = (artifact["name"], artifact["version"], artifact["file_path"])
@@ -142,6 +169,8 @@ def _capture_native_skill_read(store, payload: dict, project: str, settings) -> 
             "file_path": artifact["file_path"],
             "delivery_mode": "native_projection",
         }
+        if "read_coverage" in artifact:
+            safe["read_coverage"] = artifact["read_coverage"]
         event = {
             "session_id": payload["session_id"],
             "turn_id": payload["turn_id"],
@@ -151,10 +180,34 @@ def _capture_native_skill_read(store, payload: dict, project: str, settings) -> 
             "tool_response": {"structuredContent": safe},
         }
         with store.db:
+            identifier = digest(["native_projection", project, event["session_id"], event["turn_id"],
+                                 event["tool_use_id"], dedup])
             store.db.execute(
                 "INSERT OR IGNORE INTO delivery_events VALUES (?,?,NULL)",
-                (digest([token, project, event["session_id"], event["turn_id"], event["tool_use_id"]]), dumps(event)),
+                (identifier, dumps(event)),
             )
+
+
+def capture_observed_skill_reads(store, turn, settings):
+    """Recover delivery from a captured shell result and, for excerpts, its host exit."""
+    source = turn["source"]
+    for tool in turn["tools"].values():
+        if tool["status"] not in {"completed", "unknown"}:
+            continue
+        response = tool.get("result")
+        allow_partial = False
+        if tool.get("status_source") == "host_transcript" and isinstance(response, dict):
+            allow_partial = type(response.get("exit_code")) is int and response["exit_code"] == 0
+            response = response.get("output")
+        if not isinstance(response, str):
+            continue
+        arguments = tool.get("arguments") or {}
+        cwd = arguments.get("workdir") or arguments.get("cwd")
+        event = {"hook_event_name": "PostToolUse", "session_id": source["chat"], "turn_id": source["turn"],
+                 "tool_use_id": tool["call_id"], "tool_name": tool["name"], "tool_response": response,
+                 "tool_input": arguments, "cwd": cwd if isinstance(cwd, str) else source["project"]}
+        _capture_native_skill_read(store, event, source["project"], settings, match_output=True,
+                                   allow_partial=allow_partial)
 
 
 def capture_delivery(store, payload: dict, project: str, *, settings=None) -> None:

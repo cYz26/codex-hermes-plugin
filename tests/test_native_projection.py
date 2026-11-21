@@ -241,9 +241,11 @@ class NativeProjectionTests(unittest.TestCase):
         view = context_view(ctx, str(self.project), "现在codex+hermes这套框架，skills的发现架构方案如何对比权衡？")
         self.assertEqual(view["recommended_skills"][0], "learned-architecture-comparison")
 
-    def test_native_file_read_automatically_records_usage_and_post_read_test_outcomes(self):
+    def test_native_file_reads_record_delivery_and_leave_test_attribution_to_explicit_feedback(self):
         version, pub = _write_artifact(self.home, "learned-csv-guard", "Always normalize BOM before header split")
-        self.store.set("publications-v1", {"learned-csv-guard": pub})
+        other_version, other_pub = _write_artifact(self.home, "learned-typography", "Choose legible glyphs")
+        versions = {"learned-csv-guard": version, "learned-typography": other_version}
+        self.store.set("publications-v1", {"learned-csv-guard": pub, "learned-typography": other_pub})
         sync_published_skills(self.settings, self.store)
         self.store.close()
 
@@ -252,59 +254,98 @@ class NativeProjectionTests(unittest.TestCase):
             version=1,
             open=lambda source: {"handle": source["chat"]},
             observe=lambda *a, **kw: {"revision": 1},
-            read=lambda **kw: {"delivery_token": "native-tok-" + kw["name"], "version": version},
+            read=lambda **kw: {"delivery_token": "native-tok-" + kw["name"], "version": versions[kw["name"]]},
             record_usage=lambda tok, ev: usage_calls.append((tok, ev)) or {"recorded": True},
         )
         bridge = Bridge(self.settings, api)
         self.addCleanup(bridge.store.close)
 
-        common = {"cwd": str(self.project), "session_id": "chat-native", "turn_id": "turn-1"}
-        hook({**common, "hook_event_name": "UserPromptSubmit", "prompt": "Fix CSV BOM parsing"}, self.settings)
-        # A test failure BEFORE reading the skill must not taint the skill read later in the turn.
-        hook({**common, "hook_event_name": "PreToolUse", "tool_use_id": "pre-fail", "tool_name": "Bash",
-              "tool_input": {"command": "python3 -m unittest"}}, self.settings)
-        hook({**common, "hook_event_name": "PostToolUse", "tool_use_id": "pre-fail", "tool_name": "Bash",
-              "tool_input": {"command": "python3 -m unittest"}, "tool_response": {"exit_code": 1}}, self.settings)
-        # Codex natively reads the projected SKILL.md from ~/.agents/skills/ without MCP skill_load.
-        skill_path = self.codex_skills / "learned-csv-guard" / "SKILL.md"
-        hook({**common, "hook_event_name": "PostToolUse", "tool_use_id": "read-skill", "tool_name": "Bash",
-              "tool_input": {"cmd": f"cat {skill_path}"}, "tool_response": {"exit_code": 0, "output": "ok"}}, self.settings)
-        # Post-read test passes.
-        hook({**common, "hook_event_name": "PreToolUse", "tool_use_id": "post-pass", "tool_name": "Bash",
-              "tool_input": {"command": "python3 -m unittest"}}, self.settings)
-        hook({**common, "hook_event_name": "PostToolUse", "tool_use_id": "post-pass", "tool_name": "Bash",
-              "tool_input": {"command": "python3 -m unittest"}, "tool_response": {"exit_code": 0}}, self.settings)
-        hook({**common, "hook_event_name": "Stop", "last_assistant_message": "Fixed and verified"}, self.settings)
+        common = {"cwd": str(self.project), "session_id": "chat-native"}
 
-        bridge.ingest()
-        self.assertEqual(len(usage_calls), 1)
-        self.assertEqual(usage_calls[0][0], "native-tok-learned-csv-guard")
-        self.assertEqual(usage_calls[0][1]["source_event"], ["chat-native", "turn-1", "read-skill"])
+        def run_turn(turn, command, exit_code):
+            def emit(event, **fields):
+                hook({**common, "turn_id": turn, "hook_event_name": event, **fields}, self.settings)
+            emit("UserPromptSubmit", prompt="Read the references, then run the requested tests")
+            for name in versions:
+                skill_path = self.codex_skills / name / "SKILL.md"
+                emit("PostToolUse", tool_use_id="read-" + name, tool_name="Bash",
+                     tool_input={"cmd": f"cat {skill_path}"}, tool_response={"exit_code": 0, "output": skill_path.read_text()})
+            emit("PostToolUse", tool_use_id="test", tool_name="Bash",
+                 tool_input={"command": command}, tool_response={"exit_code": exit_code})
+            emit("Stop", last_assistant_message="Tests finished")
+            bridge.ingest()
+            return bridge.rpc("feedback_status", {"cwd": str(self.project), "chat": "chat-native", "turn": turn})
 
-        fb = bridge.rpc("feedback_status", {"cwd": str(self.project), "chat": "chat-native", "turn": "turn-1"})
-        self.assertEqual(len(fb["applications"]), 1)
-        app = fb["applications"][0]
-        self.assertEqual(app["name"], "learned-csv-guard")
-        self.assertEqual(app["application"], "host_observed")
-        self.assertEqual(app["validation"], "host_test_passed")
+        unrelated = run_turn("turn-1", "pytest tests/test_billing.py", 1)
+        self.assertEqual({(read["name"], read["version"]) for read in unrelated["deliveries"]}, set(versions.items()))
+        self.assertEqual(len(usage_calls), 2)
+        self.assertEqual(unrelated["test_references"][0]["outcome"], "failed")
+        self.assertEqual(unrelated["applications"], [])
+        self.assertEqual(sync_published_skills(self.settings, bridge.store)["projected_skills"], sorted(versions))
 
-        # Now verify that an actual post-read test failure withholds that skill version on next sync.
-        turn2 = {**common, "turn_id": "turn-2"}
-        hook({**turn2, "hook_event_name": "UserPromptSubmit", "prompt": "Check edge case"}, self.settings)
-        hook({**turn2, "hook_event_name": "PostToolUse", "tool_use_id": "read-skill-2", "tool_name": "Read",
-              "tool_input": {"file_path": str(skill_path)}, "tool_response": {"content": "ok"}}, self.settings)
-        hook({**turn2, "hook_event_name": "PreToolUse", "tool_use_id": "post-fail-2", "tool_name": "Bash",
-              "tool_input": {"command": "pytest"}}, self.settings)
-        hook({**turn2, "hook_event_name": "PostToolUse", "tool_use_id": "post-fail-2", "tool_name": "Bash",
-              "tool_input": {"command": "pytest"}, "tool_response": {"exit_code": 1}}, self.settings)
-        hook({**turn2, "hook_event_name": "Stop", "last_assistant_message": "Failed"}, self.settings)
-        bridge.ingest()
+        targeted = run_turn("turn-2", "pytest tests/test_csv_headers.py", 1)
+        token = next(key.removeprefix("issued-delivery:") for (key,) in bridge.store.db.execute(
+            "SELECT key FROM meta WHERE key LIKE 'issued-delivery:%' AND json_extract(value,'$.name')=? "
+            "AND json_extract(value,'$.source_event[1]')=?", ("learned-csv-guard", "turn-2"),
+        ))
+        bound = bridge.rpc("record_application", {"cwd": str(self.project), "delivery_token": token,
+                           "stage": "failed", "source_events": [targeted["test_references"][0]["source_event"]]})
+        self.assertEqual((bound["version"], bound["validation"]), (version, "host_test_failed"))
+        self.assertEqual(sync_published_skills(self.settings, bridge.store)["projected_skills"], ["learned-typography"])
 
-        fb2 = bridge.rpc("feedback_status", {"cwd": str(self.project), "chat": "chat-native", "turn": "turn-2"})
-        self.assertEqual(fb2["applications"][0]["validation"], "host_test_failed")
-        after_fail_sync = sync_published_skills(self.settings, bridge.store)
-        self.assertEqual(after_fail_sync["projected_skills"], [])
-        self.assertFalse((self.codex_skills / "learned-csv-guard").exists())
+    def test_plain_hook_output_confirms_full_reads_or_partial_reads_with_host_exit(self):
+        from functools import partial
+        from hermes_codex_learning.host_evidence import read_turn
+
+        name = "learned-csv-guard"
+        version, publication = _write_artifact(self.home, name, "Normalize BOM before splitting the header.\n")
+        self.store.set("publications-v1", {name: publication})
+        sync_published_skills(self.settings, self.store)
+        self.store.close()
+        usage_calls = []
+        api = SimpleNamespace(
+            version=1,
+            open=lambda source: {"handle": source["chat"]},
+            observe=lambda *args, **kwargs: {"revision": 1},
+            read=lambda **kwargs: {"delivery_token": "native-fixture", "version": version},
+            record_usage=lambda token, evidence: usage_calls.append(evidence["source_event"][2]),
+        )
+        bridge = Bridge(self.settings, api)
+        self.addCleanup(bridge.store.close)
+
+        chat, turn = "chat-native", "terminal-turn"
+        transcript = self.root / "rollout.jsonl"
+        rows = [{"type": "session_meta", "payload": {"id": chat, "cwd": str(self.project)}}]
+        for call, code in (("partial", 0), ("nonzero", 1), ("different-content", 0)):
+            rows.append({"type": "event_msg", "payload": {"type": "item_completed", "turn_id": turn, "item": {
+                "id": call, "type": "CommandExecution", "status": "completed" if code == 0 else "failed",
+                "exit_code": code,
+            }}})
+        transcript.write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+        common = {"cwd": str(self.project), "session_id": chat, "turn_id": turn, "transcript_path": str(transcript)}
+        skill = self.codex_skills / name / "SKILL.md"
+        body = skill.read_text()
+        excerpt = "Normalize BOM before splitting the header.\n"
+        with patch("hermes_codex_learning.host_evidence.read_turn", partial(read_turn, sessions_root=self.root)):
+            hook({**common, "hook_event_name": "UserPromptSubmit", "prompt": "Read the released skill"}, self.settings)
+            for call, command, response in (
+                ("full", f"cat {skill}", body),
+                ("partial", f"tail -1 {skill}", excerpt),
+                ("unconfirmed-partial", f"tail -1 {skill}", excerpt),
+                ("nonzero", f"cat {skill}", body),
+                ("different-content", f"tail -1 {skill}", "A different file\n"),
+            ):
+                hook({**common, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": call,
+                      "tool_input": {"command": command}, "tool_response": response}, self.settings)
+            hook({**common, "hook_event_name": "Stop", "last_assistant_message": "Read the skill"}, self.settings)
+            bridge.ingest()
+            bridge.ingest()
+
+        self.assertCountEqual(usage_calls, ["full", "partial"])
+        feedback = bridge.rpc("feedback_status", {"cwd": str(self.project), "chat": chat, "turn": turn})
+        self.assertEqual(feedback["deliveries"], [{"name": name, "version": version}] * 2)
+        self.assertEqual(feedback["applications"], [])
 
     def test_scoped_history_search_uses_fts5_and_enforces_workspace_isolation(self):
         import sys

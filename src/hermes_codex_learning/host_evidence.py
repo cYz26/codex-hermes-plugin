@@ -40,7 +40,7 @@ def _verify_path(path, sessions_root):
 
 def _header(stream, chat, project):
     line = stream.readline(HEADER_LIMIT + 1)
-    if len(line.encode()) > HEADER_LIMIT or not line.endswith("\n"):
+    if len(line) > HEADER_LIMIT or not line.endswith(b"\n"):
         raise ValueError("Host transcript metadata exceeds the bounded header")
     first = json.loads(line)
     meta = first.get("payload") if isinstance(first, dict) and first.get("type") == "session_meta" else None
@@ -94,7 +94,7 @@ def _boundary_hash(path, offset):
 def read_host_relation(path: Path, chat: str, project: str, *, sessions_root: Path | None = None) -> dict:
     """Read only the host's relation fields; directory proximity proves no relation."""
     _verify_path(path, sessions_root)
-    with path.open() as stream:
+    with path.open("rb") as stream:
         return _relation(_header(stream, chat, project))
 
 
@@ -161,7 +161,7 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
         raise ValueError("Host transcript ownership or bounded-read limit failed")
     inputs, commands, trace, code_execs, tool_names = [], {}, {}, {}, {}
     completion = None
-    with path.open() as stream:
+    with path.open("rb") as stream:
         meta = _header(stream, chat, project)
         identity = [stat.st_dev, stat.st_ino, chat, turn]
         if (cursor and cursor.get("version") == CURSOR_VERSION and cursor.get("identity") == identity
@@ -179,11 +179,11 @@ def read_turn(path: Path, chat: str, turn: str, project: str, *, sessions_root: 
             stream.readline()  # Discard the partial old record at the bounded tail.
             trace["prefix_omitted"] = True
         offset = stream.tell()
-        for line in iter(stream.readline, ""):
+        for line in iter(stream.readline, b""):
             try:
                 row = json.loads(line)
-            except json.JSONDecodeError:
-                if not line.endswith("\n"):
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                if not line.endswith(b"\n"):
                     break  # The host may still be appending the final record.
                 raise
             offset = stream.tell()
@@ -294,49 +294,64 @@ def recover_completions(settings, store):
     """Use an exact, owned Codex terminal record when a live hook omitted Stop."""
     import time
     from .policy import admit
-    if settings.shared_profile is None:
-        return
-    marker = settings.shared_profile / "shared-learning-client.json"
-    if not marker.is_file():
-        return
-    since = marker.stat().st_mtime
+
     now = time.time()
+    since = now - settings.raw_event_retention_days * 86400
+    if settings.shared_profile is not None:
+        marker = settings.shared_profile / "shared-learning-client.json"
+        if marker.is_file():
+            since = max(since, marker.stat().st_mtime)
     rows = store.db.execute("""
-        SELECT t.id,t.payload,e.payload AS request FROM turns t
+        SELECT t.id,t.payload,e.payload AS request,m.value AS last_check,
+               COALESCE(json_extract(m.value,'$.at'),CAST(m.value AS REAL),0) AS checked_at
+        FROM turns t
         JOIN events e ON e.id=json_extract(t.payload,'$.evidence_provenance.request_event')
         LEFT JOIN meta m ON m.key='codex-completion-check:'||t.id
         WHERE t.observed_revision IS NULL AND e.created >= ?
-          AND t.activity <= ? AND COALESCE(CAST(m.value AS REAL), 0) <= ?
-          AND json_extract(t.payload,'$._ended_by') IS NULL
-          AND json_extract(t.payload,'$.source.executor') = 'Codex App'
+          AND t.activity <= ? AND checked_at <= ?
+          AND COALESCE(json_extract(t.payload,'$._ended_by'),'') IN ('','stale_timeout')
+          AND json_extract(t.payload,'$.source.executor') IN ('Codex App','Codex CLI')
+          AND json_extract(e.payload,'$.hook_event_name') = 'UserPromptSubmit'
+          AND json_extract(e.payload,'$.bridge_admission.allowed') IS NOT 0
           AND json_extract(e.payload,'$.transcript_path') IS NOT NULL
           AND json_extract(t.payload,'$._evidence_mode') IS NOT 'workflow-v1'
-        ORDER BY COALESCE(CAST(m.value AS REAL),0),t.activity LIMIT 6
+        ORDER BY checked_at,t.activity LIMIT 6
     """, (since, now-4, now-15)).fetchall()
     for row in rows:
-        store.set("codex-completion-check:" + row["id"], now)
+        check = {"at": now}
         turn, request = json.loads(row["payload"]), json.loads(row["request"])
         source = turn["source"]
-        if store.get("withheld-turn:" + row["id"]):
-            continue
-        if (request.get("bridge_host"), request.get("bridge_project"), request.get("session_id"), request.get("turn_id")) != (
-                source["host"], source["project"], source["chat"], source["turn"]):
-            continue
         try:
-            completion = read_turn(Path(request["transcript_path"]), source["chat"], source["turn"],
-                                   source["project"], include_task=False, completion_only=True)
+            if (store.get("withheld-turn:" + row["id"]) or store.get("excluded-chat:" + source["chat"])
+                    or settings.project_for(source["project"]) != source["project"]):
+                continue
+            if (request.get("bridge_host"), request.get("bridge_project"), request.get("session_id"), request.get("turn_id")) != (
+                    source["host"], source["project"], source["chat"], source["turn"]):
+                continue
+            path = Path(request["transcript_path"])
+            stat = path.stat()
+            file_stamp = [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns]
+            previous = json.loads(row["last_check"]) if row["last_check"] else None
+            if isinstance(previous, dict) and previous.get("file") == file_stamp:
+                check["file"] = file_stamp
+                continue
+            completion = read_turn(path, source["chat"], source["turn"], source["project"],
+                                   include_task=False, completion_only=True)
+            if completion:
+                event = {key: request[key] for key in ("cwd", "transcript_path", "session_id", "turn_id",
+                                                       "bridge_project", "bridge_host")}
+                event.update(hook_event_name=CODEX_COMPLETION, last_assistant_message=completion["message"],
+                             bridge_completion=completion["id"], bridge_executor=completion["executor"])
+                assessment = admit(event, settings.data_policy, source["project"])
+                if assessment.get("allowed"):
+                    if assessment.get("schema_version") == 2:
+                        event = {**assessment.pop("payload"), "bridge_evidence_mode": "semantic-v2"}
+                    store.capture({**event, "bridge_admission": assessment})
+            check["file"] = file_stamp
         except (OSError, ValueError, TypeError):
             continue
-        if not completion:
-            continue
-        event = {key:request[key] for key in ("cwd", "transcript_path", "session_id", "turn_id", "bridge_project", "bridge_host")}
-        event.update(hook_event_name=CODEX_COMPLETION, last_assistant_message=completion["message"],
-                     bridge_completion=completion["id"], bridge_executor=completion["executor"])
-        assessment = admit(event, settings.data_policy, source["project"])
-        if assessment.get("allowed"):
-            if assessment.get("schema_version") == 2:
-                event = {**assessment.pop("payload"), "bridge_evidence_mode":"semantic-v2"}
-            store.capture({**event, "bridge_admission":assessment})
+        finally:
+            store.set("codex-completion-check:" + row["id"], check)
 
 
 def _join_background(store, data, facts, transcript_path):

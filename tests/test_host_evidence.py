@@ -238,6 +238,57 @@ class HostEvidenceTests(unittest.TestCase):
         finally:
             bridge.store.close()
 
+    def test_standalone_recovers_missing_stop_after_timeout_once(self):
+        import time
+        from functools import partial
+
+        from hermes_codex_learning.capture import hook
+        from hermes_codex_learning.config import Settings
+        from hermes_codex_learning.daemon import Bridge
+        from hermes_codex_learning.host_evidence import recover_completions
+        from hermes_codex_learning.normalize import CODEX_COMPLETION
+
+        settings = Settings(self.root / "home", self.project, self.root, Path("/usr/bin/python3"))
+        observed = []
+
+        def observe(handle, body, **kwargs):
+            observed.append(body)
+            return {"revision": len(observed)}
+
+        bridge = Bridge(settings, SimpleNamespace(open=lambda source: {"handle": source["chat"]}, observe=observe))
+        self.addCleanup(bridge.store.close)
+        common = {"session_id": "chat", "turn_id": "turn", "cwd": str(self.project), "transcript_path": str(self.path)}
+        terminal = {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "another-turn",
+                                                    "last_agent_message": "Unrelated task ended"}}
+        self.write([terminal])
+        with patch("hermes_codex_learning.host_evidence.read_turn", partial(read_turn, sessions_root=self.sessions)):
+            hook({**common, "hook_event_name": "UserPromptSubmit", "prompt": "Run the tests"}, settings)
+            hook({**common, "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "test",
+                  "tool_input": {"command": "pytest"}, "tool_response": "Raw test output"}, settings)
+            bridge.ingest()
+            self.assertFalse(observed)
+            overdue = time.time() + settings.active_turn_timeout_seconds + 5
+            with patch("time.time", return_value=overdue):
+                self.assertEqual(bridge.reap_stale_turns(), 1)
+                recover_completions(settings, bridge.store)
+            self.assertFalse(bridge.store.pending())
+
+            self.write([terminal, {"type": "event_msg", "payload": {"type": "item_completed", "turn_id": "turn",
+                        "item": {"type": "CommandExecution", "id": "test", "status": "completed", "exit_code": 0}}},
+                        {**terminal, "payload": {**terminal["payload"], "turn_id": "turn", "last_agent_message": "Tests passed"}}])
+            with patch("time.time", return_value=overdue + 20):
+                recover_completions(settings, bridge.store)
+                recover_completions(settings, bridge.store)
+            self.assertEqual([json.loads(row["payload"])["hook_event_name"] for row in bridge.store.pending()],
+                             [CODEX_COMPLETION])
+            bridge.ingest()
+            hook({**common, "hook_event_name": "Stop", "last_assistant_message": "Tests passed"}, settings)
+            bridge.ingest()
+
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0]["assistant"], "Tests passed")
+        self.assertEqual(observed[0]["tools"][0]["result"]["exit_code"], 0)
+
     def test_reads_only_bound_turn_task_and_actual_command_exit(self):
         item = {"type": "FunctionCallOutput", "id": "input-item", "namespace": "codex_app", "name": "send_message_to_thread",
                 "output": {"text": "<codex_delegation><source_thread_id>parent</source_thread_id><input>synthetic task</input></codex_delegation>", "truncated": False}}
@@ -275,3 +326,17 @@ class HostEvidenceTests(unittest.TestCase):
         with self.path.open("a") as stream:
             stream.write('{"type":"response_item"')
         self.assertIsNone(read_turn(self.path, "chat", "turn", str(self.project), sessions_root=self.sessions)["input"])
+
+    def test_bounded_tail_skips_an_old_record_split_inside_a_utf8_character(self):
+        self.write([])
+        prefix = self.path.read_bytes()
+        old = (json.dumps({"type": "old", "payload": {"text": "结束"}}, ensure_ascii=False) + "\n").encode()
+        terminal = {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn",
+                                                    "last_agent_message": "Done"}}
+        data = prefix + old + (json.dumps(terminal) + "\n").encode()
+        split = len(prefix) + old.index("结".encode()) + 1
+        self.path.write_bytes(data)
+        with patch("hermes_codex_learning.host_evidence.LIMIT", len(data) - split):
+            result = read_turn(self.path, "chat", "turn", str(self.project), sessions_root=self.sessions,
+                               include_task=False, completion_only=True)
+        self.assertEqual(result["message"], "Done")

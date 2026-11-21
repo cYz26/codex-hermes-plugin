@@ -65,9 +65,11 @@ MCP `learning_status` 同样接受 `cwd`、`chat`、`turn`、`limit` 和 `after_
 
 Hook 在 256 UTF-8 字节内优先放入至多三个完整技能名。召回按当前项目和发布范围筛选，再补充直接相关技能的双向关联。`offered_skills` 记录该回合由 hook 提供的技能名。`offered_versions` 给出当时可读取的正文版本，旧回合可能缺少该字段。按项目和聊天查状态时，`mcp_recommendations` 列出该回合保留的 MCP 召回记录。`context.skills[].artifact_version` 可传给 `skill_load`，确认读取的是召回时的版本。原生目录指纹仍由 `context.skills[].version` 提供。
 
-应用验证根据宿主保留的命令和终态核对，反馈优先调度关闭时也会工作。识别常用的 Python、包管理器测试入口及本项目的发布检查。旧回合保留了命令时可按同一规则识别。
+Codex 直接读取已发布的技能文件时，桥接层记录版本和正文交付。纯文本输出可通过发布文件的内容校验确认完整读取。摘录需要匹配文件内容和宿主的成功退出记录。同回合的测试结果仍作为该回合的执行证据。
 
-提交反馈时，向 `feedback_status` 传入 `cwd` 和 `chat`，可选指定 `turn`。把对应的 `test_references[].source_event` 原样放进 `record_application.source_events`。完整诊断 `learning_status` 继续在 `execution.test_references` 返回同样的引用。已采集的测试可以先提交，worker 随后核对终态。保存返回的回执 ID，可用 `feedback_status` 的 `receipt_id` 读取结果。
+应用验证需要将交付回执与该技能的实际验证测试绑定。它根据宿主保留的命令和终态核对，反馈优先调度关闭时也会工作。识别常用的 Python、包管理器测试入口及本项目的发布检查。旧回合保留了命令时可按同一规则识别。
+
+提交反馈时，用 `skill_load` 返回的版本回执指定所验证的技能，向 `feedback_status` 传入 `cwd` 和 `chat`，可选指定 `turn`。把验证该技能的 `test_references[].source_event` 原样放进 `record_application.source_events`。完整诊断 `learning_status` 继续在 `execution.test_references` 返回同样的引用。已采集的测试可以先提交，worker 随后核对终态。绑定测试的失败结果会扣留报告中的技能版本。旧版自动关联的回执保留为历史记录，其扣留会在服务启动后重新核对。
 
 反馈回执会区分待消费、待宿主终态、找不到引用、引用非测试以及终态无退出码。针对同次交付和同一批回合提交更正后，错误引用的旧回执可以标为 `superseded`，并记录替代回执 ID。已确认的测试结果可追溯至 Hook 退出码、宿主 transcript 或工作流投影。发往原生复盘的状态工具结果保留状态与版本等字段，完整状态仍可通过原入口读取。
 

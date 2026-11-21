@@ -233,7 +233,7 @@ class PublicationReviewTests(unittest.TestCase):
         self.add_resources('v3', **{'SKILL.md': body})
         publication_review.verify_candidate(self.bridge.settings, self.bridge.store, 'portable', self.value, [str(self.root)])
 
-        leaked = '---\nname: portable\n---\nAuthorization: Bearer eyJhbGciOiJIUzI1NiJ9.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbb\n'
+        leaked = '---\nname: portable\n---\nAuthorization: ' + 'Bearer ' + 'eyJhbGciOiJIUzI1NiJ9.aaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbb\n'
         self.add_resources('v4', **{'SKILL.md': leaked})
         with self.assertRaisesRegex(ValueError, 'credential_material'):
             publication_review.verify_candidate(self.bridge.settings, self.bridge.store, 'portable', self.value, [str(self.root)])
