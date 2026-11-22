@@ -21,12 +21,14 @@ class DesktopReceiverTests(unittest.TestCase):
             shared = Path(directory) / "Hermes 全局共享.app/Contents/MacOS/HermesLearningNotifier"
             config = {"notifier": str(project)}
             self.assertEqual(receiver.batch_notifier(config, "global"), str(project))
+            self.assertEqual(receiver.batch_notifier(config, "system"), str(project))
             shared.parent.mkdir(parents=True)
             shared.touch()
             for identifier in ("com.cy.hermes-learning-global-receipts", "com.cy.hermes-learning-global-receipts-v2"):
                 with self.subTest(identifier=identifier):
                     (shared.parents[2] / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": identifier}))
                     self.assertEqual(receiver.batch_notifier(config, "global"), str(shared))
+                    self.assertEqual(receiver.batch_notifier(config, "system"), str(shared))
                     self.assertEqual(receiver.batch_notifier(config, "project"), str(project))
 
     def test_delivery_resolves_legacy_app_while_canonical_app_is_unavailable(self):

@@ -150,7 +150,7 @@ def macos_notification(state: Path, event: dict) -> dict:
         record["receipt_path"] = str(path)
         project_app = notifier_app()
         app = project_app
-        if notification_scope(event) == "global":
+        if notification_scope(event) in {"global", "system"}:
             sender = global_notifier_app(project_app)
             if (bundle_identifier(sender) in (GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID)
                     and (sender / "Contents/MacOS" / APP_EXECUTABLE).is_file()):

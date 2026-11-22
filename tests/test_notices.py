@@ -177,17 +177,21 @@ class NoticeTests(unittest.TestCase):
         event = {**self.event(), "id": "scope-project"}
         publication = {**event, "id": "scope-publication", "kind": "approval.required",
                        "approval_subject": "publication", "project_approval": True}
+        update = {"id": "update:check-failed", "kind": "update.notice", "receipt": "Version check failed",
+                  "message": "Hermes 版本检查失败，将按周期重试，当前学习继续运行。"}
         with patch("hermes_codex_learning.notify.notifier_app", return_value=project), \
              patch("hermes_codex_learning.notify.subprocess.run", return_value=SimpleNamespace(returncode=0)) as post:
             self.assertEqual(macos_notification(self.queue.state, event)["transport"], APP_ID)
             self.assertEqual(macos_notification(self.queue.state, publication)["transport"], GLOBAL_APP_ID)
+            self.assertEqual(Path(post.call_args.args[0][0]).parents[2], shared)
+            self.assertEqual(macos_notification(self.queue.state, update)["transport"], GLOBAL_APP_ID)
             self.assertEqual(Path(post.call_args.args[0][0]).parents[2], shared)
             legacy_id = "com.cy.hermes-learning-global-receipts"
             (shared / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": legacy_id}))
             self.assertEqual(macos_notification(self.queue.state, publication)["transport"], legacy_id)
             (shared / "Contents/MacOS" / APP_EXECUTABLE).unlink()
             self.assertEqual(macos_notification(self.queue.state, publication)["transport"], APP_ID)
-            self.assertEqual(post.call_count, 4)
+            self.assertEqual(post.call_count, 5)
 
     def test_success_without_changes_is_silent(self):
         event = self.event()

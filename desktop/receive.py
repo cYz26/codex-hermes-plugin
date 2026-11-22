@@ -94,7 +94,7 @@ def notifier_binary(configured: str) -> str:
 
 def batch_notifier(config, scope):
     configured = Path(config["notifier"])
-    if scope == "global" and configured.is_absolute() and len(configured.parents) >= 3:
+    if scope in {"global", "system"} and configured.is_absolute() and len(configured.parents) >= 3:
         project_app = configured.parents[2]
         binary = project_app.with_name(GLOBAL_APP) / "Contents/MacOS" / configured.name
         if project_app.suffix == ".app" and binary.is_file():
