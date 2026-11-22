@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from hermes_codex_learning.macos_bundle import APP_ID, GLOBAL_APP_ID, LEGACY_APP_ID, LEGACY_GLOBAL_APP_ID
+from hermes_codex_learning.macos_bundle import APP_ID, GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID, PROJECT_LEGACY_APP_IDS
 
 
 def receiver_config() -> Path:
@@ -55,7 +55,7 @@ def icns_entries(data: bytes) -> list[dict]:
 
 def diagnose(app: Path, output: Path) -> dict:
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
-    if info.get("CFBundleIdentifier") not in (APP_ID, GLOBAL_APP_ID, LEGACY_APP_ID, LEGACY_GLOBAL_APP_ID):
+    if info.get("CFBundleIdentifier") not in (APP_ID, GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID, *PROJECT_LEGACY_APP_IDS):
         raise ValueError("接收器目标不是 Hermes 学习通知 App")
     report = {"app": str(app), "bundle_identifier": info["CFBundleIdentifier"],
               "bundle_version": info.get("CFBundleVersion"),

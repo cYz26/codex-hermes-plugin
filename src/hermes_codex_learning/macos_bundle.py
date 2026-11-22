@@ -14,13 +14,15 @@ import time
 from pathlib import Path
 
 APP_NAME = "Hermes 学习"
-APP_ID = "com.cy.hermes-learning-receipts"
+APP_ID = "com.cy.hermes-learning-receipts-v2"
+PREVIOUS_APP_ID = "com.cy.hermes-learning-receipts"
 LEGACY_APP_ID = "com.cy.hermes-learning-notifier"
+PROJECT_LEGACY_APP_IDS = (PREVIOUS_APP_ID, LEGACY_APP_ID)
 GLOBAL_APP_NAME = "Hermes 全局共享"
 GLOBAL_APP_ID = "com.cy.hermes-learning-global-receipts-v2"
 LEGACY_GLOBAL_APP_ID = "com.cy.hermes-learning-global-receipts"
 APP_EXECUTABLE = "HermesLearningNotifier"
-APP_BUILD = "11"
+APP_BUILD = "12"
 REVIEW_ASSETS = ("review.py", "review.html")
 APPROVAL_ICON = "hermes-approval-indicator.png"
 REGISTER = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
@@ -34,8 +36,19 @@ def global_notifier_app(project_app: Path | None = None) -> Path:
     return (project_app or notifier_app()).with_name(f"{GLOBAL_APP_NAME}.app")
 
 
-def legacy_notifier_app(app: Path) -> Path:
-    return app.parent / ".hermes-learning-legacy" / app.name
+def legacy_notifier_app(app: Path, identifier: str | None = None) -> Path:
+    archive = app.parent / ".hermes-learning-legacy"
+    if identifier == PREVIOUS_APP_ID:
+        archive = archive / PREVIOUS_APP_ID
+    return archive / app.name
+
+
+def installed_legacy_project_notifier(app: Path) -> Path | None:
+    for identifier in PROJECT_LEGACY_APP_IDS:
+        legacy = legacy_notifier_app(app, identifier)
+        if bundle_identifier(legacy) == identifier:
+            return legacy
+    return None
 
 
 def pending_notifier_app(app: Path) -> Path:
@@ -116,7 +129,7 @@ def normalize_bundle_permissions(app: Path) -> dict:
         if path.is_symlink():
             raise ValueError("通知 App 的目标路径不能是符号链接：" + str(path))
     info = plistlib.loads(info_path.read_bytes())
-    if info.get("CFBundleIdentifier") not in (APP_ID, LEGACY_APP_ID, GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID):
+    if info.get("CFBundleIdentifier") not in (APP_ID, GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID, *PROJECT_LEGACY_APP_IDS):
         raise ValueError("不是受管 Hermes 通知 App")
     executable = info.get("CFBundleExecutable")
     icon = info.get("CFBundleIconFile")
@@ -155,25 +168,27 @@ def install_notification_app(root: Path, app: Path | None = None, *, global_send
     """Authorize a new sender before replacing the active App; keep legacy receipts."""
     app = app or (global_notifier_app() if global_sender else notifier_app())
     identifier = GLOBAL_APP_ID if global_sender else APP_ID
-    legacy_id = LEGACY_GLOBAL_APP_ID if global_sender else LEGACY_APP_ID
+    legacy_ids = (LEGACY_GLOBAL_APP_ID,) if global_sender else PROJECT_LEGACY_APP_IDS
     name = GLOBAL_APP_NAME if global_sender else APP_NAME
     icon_stem = "hermes-global-notification" if global_sender else "hermes-project-notification"
     created_parent = not app.parent.exists()
     app.parent.mkdir(parents=True, exist_ok=True)
     if created_parent:
         app.parent.chmod(0o755)
-    legacy = legacy_notifier_app(app)
+    archives = {legacy_id: legacy_notifier_app(app, legacy_id) for legacy_id in legacy_ids}
     pending = pending_notifier_app(app)
     with install_lock(app.parent / ".hermes-learning-notifier.lock"), \
             tempfile.TemporaryDirectory(prefix=".hermes-learning-", dir=app.parent) as temporary:
         staging = Path(temporary)
         staging.chmod(0o755)
         installed_id = bundle_identifier(app)
-        if app.is_symlink() or (app.exists() and installed_id not in (identifier, legacy_id)):
+        if app.is_symlink() or (app.exists() and installed_id not in (identifier, *legacy_ids)):
             raise FileExistsError(str(app))
-        migrating = installed_id == legacy_id
-        if legacy.exists() and (migrating or bundle_identifier(legacy) != legacy_id):
-            raise FileExistsError(str(legacy))
+        for legacy_id, archive in archives.items():
+            if archive.is_symlink() or (archive.exists() and
+                    (installed_id == legacy_id or bundle_identifier(archive) != legacy_id)):
+                raise FileExistsError(str(archive))
+        legacy = archives.get(installed_id)
         candidate = staging / app.name
         contents = candidate / "Contents"
         binary = contents / "MacOS" / APP_EXECUTABLE
@@ -203,7 +218,7 @@ def install_notification_app(root: Path, app: Path | None = None, *, global_send
         subprocess.run(["/usr/bin/codesign", "--verify", "--strict", str(candidate)], check=True)
         # Authorization must run through LaunchServices from a registered, stable path.
         if pending.exists():
-            if pending.is_symlink() or bundle_identifier(pending) != identifier:
+            if pending.is_symlink() or bundle_identifier(pending) not in (identifier, *legacy_ids):
                 raise FileExistsError(str(pending))
             subprocess.run([str(binary), "--prepare-upgrade", str(pending)], check=True, timeout=15)
             previous_pending = staging / "previous-pending.app"
@@ -221,17 +236,18 @@ def install_notification_app(root: Path, app: Path | None = None, *, global_send
         authorization = authorize_notification_app(pending, staging / "authorization-result.json")
         if app.exists():
             subprocess.run([str(binary), "--prepare-upgrade", str(app)], check=True, timeout=15)
-        backup = legacy if migrating else staging / "previous.app"
+        backup = legacy if legacy is not None else staging / "previous.app"
         try:
             if app.exists():
-                created_backup_parent = not backup.parent.exists()
-                backup.parent.mkdir(exist_ok=True)
-                if created_backup_parent:
-                    backup.parent.chmod(0o755)
+                if legacy is not None:
+                    for directory in (legacy_notifier_app(app).parent, legacy.parent):
+                        if not directory.exists():
+                            directory.mkdir()
+                            directory.chmod(0o755)
                 app.rename(backup)
             pending.rename(app)
-            applications = [str(legacy), str(app)] if legacy.exists() else [str(app)]
-            subprocess.run([REGISTER, "-f", *applications], check=True)
+            archived = [str(archive) for archive in archives.values() if archive.exists()]
+            subprocess.run([REGISTER, "-f", *archived, str(app)], check=True)
         except (OSError, subprocess.SubprocessError, KeyboardInterrupt):
             if app.exists() and not pending.exists():
                 app.rename(pending)
@@ -241,8 +257,8 @@ def install_notification_app(root: Path, app: Path | None = None, *, global_send
                 with contextlib.suppress(OSError, subprocess.SubprocessError):
                     subprocess.run([REGISTER, "-f", str(app)], check=True, capture_output=True)
             raise
-    return {"app": str(app), "transport": identifier, "migrated": migrating, "authorization": authorization,
-            "legacy_app": str(legacy) if legacy.exists() else None, "visibility": "not_inferred"}
+    return {"app": str(app), "transport": identifier, "migrated": legacy is not None, "authorization": authorization,
+            "legacy_app": archived[0] if archived else None, "visibility": "not_inferred"}
 
 
 def install_notification_apps(root: Path, app: Path | None = None) -> dict:

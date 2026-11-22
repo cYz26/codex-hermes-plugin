@@ -11,8 +11,8 @@ from .review_input import BUDGET_EXHAUSTED
 from .review_receipt import receipt_text
 from .review_summary import summary_text
 from .store import atomic_json, digest
-from .macos_bundle import (APP_ID, APP_EXECUTABLE, GLOBAL_APP_ID, LEGACY_APP_ID, LEGACY_GLOBAL_APP_ID, bundle_identifier,
-                           global_notifier_app, legacy_notifier_app, notifier_app)
+from .macos_bundle import (APP_ID, APP_EXECUTABLE, GLOBAL_APP_ID, LEGACY_GLOBAL_APP_ID, bundle_identifier,
+                           global_notifier_app, installed_legacy_project_notifier, notifier_app)
 
 APPROVAL_REQUIRED = "approval.required"
 
@@ -156,9 +156,7 @@ def macos_notification(state: Path, event: dict) -> dict:
                     and (sender / "Contents/MacOS" / APP_EXECUTABLE).is_file()):
                 app = sender
         if not app.exists():
-            legacy = legacy_notifier_app(app)
-            if bundle_identifier(legacy) == LEGACY_APP_ID:
-                app = legacy
+            app = installed_legacy_project_notifier(app) or app
         record["transport"] = bundle_identifier(app) or APP_ID
         binary = app / "Contents" / "MacOS" / APP_EXECUTABLE
         result = subprocess.run([str(binary), "--post", str(path)], capture_output=True, text=True, timeout=10)

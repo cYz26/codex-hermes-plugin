@@ -41,11 +41,11 @@ python3 -B -m pm.build_env --source . --out /absolute/learning/runtime --group d
 python3 -B scripts/bridge launchd --settings /absolute/learning/pilot/bridge.json --start
 ```
 
-可选：运行 `scripts/bridge install-notifier` 安装 **Hermes 学习**（蓝色文件夹）和 **Hermes 全局共享**（带小地球的紫色 Codex + Hermes 自进化图标）。两个发送方在系统设置中分别管理。待审批使用系统提示音，普通回执保持静音。交互详见[待审批通知](./PENDING-REVIEWS.zh-CN.md#mac-桌面入口)。
+可选：运行 `scripts/bridge install-notifier` 安装 **Hermes 学习**（带文件夹的蓝色 Codex + Hermes 图标）和 **Hermes 全局共享**（带小地球的紫色 Codex + Hermes 图标）。两个发送方在系统设置中分别管理。待审批使用系统提示音，普通回执保持静音。交互详见[待审批通知](./PENDING-REVIEWS.zh-CN.md#mac-桌面入口)。
 
 从旧地球图标升级时，全局发送方使用新的 macOS 通知标识。首次安装时为新版「Hermes 全局共享」允许通知，旧发送方保留用于打开历史回执。更新学习服务后再升级通知 App。
 
-已有通知 App 时，重新运行此命令即可迁移。首次迁移按 macOS 提示允许「Hermes 学习」发送通知；授权成功并等待运行中的通知 App 退出后才替换。旧发送方保留在 `~/Applications/.hermes-learning-legacy/Hermes 学习.app` 并重新注册，供历史通知打开回执。
+已有通知 App 时，重新运行此命令即可迁移。按 macOS 提示允许新版「Hermes 学习」发送通知。授权成功并等待运行中的通知 App 退出后，安装器会替换发送方，并在 `~/Applications/.hermes-learning-legacy/` 下保留和重新注册历史发送方，供历史通知打开回执。再次安装时，登记范围为当前发送方及该归档目录中仍存在的历史 App。
 
 ## 更新现有学习服务
 

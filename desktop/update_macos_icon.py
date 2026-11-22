@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from hermes_codex_learning.macos_bundle import (
-    APP_ID, LEGACY_APP_ID, bundle_identifier,
+    APP_ID, PROJECT_LEGACY_APP_IDS, bundle_identifier,
     install_notification_app, legacy_notifier_app, notifier_app,
 )
 
@@ -17,9 +17,10 @@ from hermes_codex_learning.macos_bundle import (
 def update_icon(app: Path, *, dry_run: bool = False) -> dict:
     # A resource-only update cannot migrate the notification identity safely.
     if dry_run:
+        installed = bundle_identifier(app)
         return {"app": str(app), "transport": APP_ID,
-                "migrating": bundle_identifier(app) == LEGACY_APP_ID,
-                "legacy_app": str(legacy_notifier_app(app)), "dry_run": True}
+                "migrating": installed in PROJECT_LEGACY_APP_IDS,
+                "legacy_app": str(legacy_notifier_app(app, installed)), "dry_run": True}
     return install_notification_app(Path(__file__).resolve().parent.parent, app)
 
 

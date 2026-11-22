@@ -11,7 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from hermes_codex_learning.macos_bundle import APP_ID, LEGACY_APP_ID, NotificationAuthorizationError, bundle_identifier, install_notification_app, legacy_notifier_app
+from hermes_codex_learning.macos_bundle import (APP_ID, LEGACY_APP_ID, NotificationAuthorizationError,
+    bundle_identifier, install_notification_app, installed_legacy_project_notifier)
 from diagnose_macos_icon import diagnose, receiver_config, sender_app
 from repair_and_test_macos_icon import save
 
@@ -94,8 +95,11 @@ def main() -> int:
     try:
         app, source = sender_app(receiver_config())
         report["app"], report["sender_source"] = str(app), source
-        report["before"] = diagnose(app, output) if app.exists() else {
-            "app_present": False, "legacy_identifier": bundle_identifier(legacy_notifier_app(app))}
+        if app.exists():
+            report["before"] = diagnose(app, output)
+        else:
+            legacy = installed_legacy_project_notifier(app)
+            report["before"] = {"app_present": False, "legacy_identifier": bundle_identifier(legacy) if legacy else None}
         print("正在安装新的通知发送方；首次迁移时，请在 macOS 提示中允许「Hermes 学习」发送通知。", flush=True)
         report["installation"] = install_with_authorization_recovery(
             Path(__file__).resolve().parent.parent, app, report, destination, arguments.recover_authorization)

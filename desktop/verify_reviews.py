@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from hermes_codex_learning.macos_bundle import APP_ID
 from review import RemoteReviews
 
 
@@ -19,7 +21,7 @@ def local_checks(root, config):
     info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
     assets = all((state / name).is_file() and (state / name).read_bytes() == (root / "desktop" / name).read_bytes()
                  for name in ("review.py", "review.html"))
-    return {"assets_match_package": assets, "sender_matches": info.get("CFBundleIdentifier") == "com.cy.hermes-learning-receipts",
+    return {"assets_match_package": assets, "sender_matches": info.get("CFBundleIdentifier") == APP_ID,
             "review_protocol": info.get("HermesReviewProtocolVersion") == 1,
             "source_matches_package": info.get("HermesReviewSourceSHA256") == hashlib.sha256(
                 (root / "macos/HermesLearningNotifier.swift").read_bytes()).hexdigest()}

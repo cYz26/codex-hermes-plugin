@@ -1,11 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 512 512" role="img" aria-labelledby="title">
+  <title id="title">Codex and Hermes project learning</title>
   <defs>
-    <linearGradient id="back" x2="0" y2="1" gradientUnits="objectBoundingBox">
-      <stop stop-color="#2969ce"/>
-      <stop offset="1" stop-color="#17429b"/>
+    <linearGradient id="tile" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop stop-color="#347ccf"/>
+      <stop offset=".56" stop-color="#2159ad"/>
+      <stop offset="1" stop-color="#16387f"/>
     </linearGradient>
   </defs>
-  <rect x="18" y="18" width="220" height="220" rx="52" fill="url(#back)"/>
-  <path fill="#fff" d="M59 84a13 13 0 0 1 13-13h34a13 13 0 0 1 9 4l15 14h54a13 13 0 0 1 13 13v69a14 14 0 0 1-14 14H73a14 14 0 0 1-14-14Z"/>
-  <path d="M84 121h88" stroke="#a9d5ff" stroke-width="9" stroke-linecap="round"/>
+  <rect x="12" y="12" width="488" height="488" rx="114" fill="url(#tile)" stroke="#a4d1ff" stroke-opacity=".52" stroke-width="3"/>
+  <path d="M103 262c4-55 28-101 67-135m-30 3 30-3-6 29" fill="none" stroke="#c2e3ff" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <use href="../docs/design/hermes-learning-icon/hermes-learning-icon.svg#codex" transform="translate(62 281) scale(.68) translate(-52 -216)"/>
+  <use href="../docs/design/hermes-learning-icon/hermes-learning-icon.svg#hermes" transform="translate(171 65) scale(1.17) translate(-250 -52)"/>
+  <g transform="translate(406 410)">
+    <circle r="46" fill="#c2e3ff"/>
+    <path fill="#1a468e" d="M-28-14a5 5 0 0 1 5-5h12a7 7 0 0 1 5 2l6 6h23a5 5 0 0 1 5 5v24a5 5 0 0 1-5 5h-46a5 5 0 0 1-5-5Z"/>
+  </g>
 </svg>

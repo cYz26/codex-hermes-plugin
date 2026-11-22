@@ -21,7 +21,7 @@ if sys.platform != "darwin":
     parser.error("Run this installer on the Mac that runs Codex Desktop")
 root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(root / "src"))
-from hermes_codex_learning.macos_bundle import GLOBAL_APP_ID, install_notification_apps
+from hermes_codex_learning.macos_bundle import APP_ID, GLOBAL_APP_ID, install_notification_apps
 state = Path.home() / "Library/Application Support/HermesLearningSSH"
 app = Path.home() / "Applications/Hermes 学习.app"
 binary = app / "Contents/MacOS/HermesLearningNotifier"
@@ -33,7 +33,7 @@ if not all(Path(value).is_absolute() for value in (args.bridge,args.settings,arg
     parser.error("Remote bridge, settings and Python must use absolute paths")
 if args.dry_run:
     print(json.dumps({"config": config, "app": str(app), "launch_agent": str(plist),
-                      "chat_ui": "unavailable", "notification_sender": "com.cy.hermes-learning-receipts",
+                      "chat_ui": "unavailable", "notification_sender": APP_ID,
                       "global_notification_sender": GLOBAL_APP_ID, "codex_settings_changed": False}, ensure_ascii=False, indent=2))
     raise SystemExit(0)
 os.umask(0o077)

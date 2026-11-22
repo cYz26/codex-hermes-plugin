@@ -11,8 +11,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from hermes_codex_learning.macos_bundle import (APP_ID, GLOBAL_APP_ID, LEGACY_APP_ID, APP_EXECUTABLE, APPROVAL_ICON,
-    NotificationAuthorizationError, authorize_notification_app, bundle_identifier, install_notification_app,
+from hermes_codex_learning.macos_bundle import (APP_EXECUTABLE, APP_ID, APPROVAL_ICON, GLOBAL_APP_ID, LEGACY_APP_ID,
+    LEGACY_GLOBAL_APP_ID, PREVIOUS_APP_ID, NotificationAuthorizationError, authorize_notification_app,
+    bundle_identifier, global_notifier_app, install_notification_app, install_notification_apps,
     legacy_notifier_app, normalize_bundle_permissions, pending_notifier_app)
 
 
@@ -130,7 +131,7 @@ class MacOSBundleTests(unittest.TestCase):
 
     def test_failed_registration_restores_the_original_and_retains_the_candidate(self):
         root = Path(__file__).resolve().parents[1]
-        for identifier in (LEGACY_APP_ID, APP_ID):
+        for identifier in (LEGACY_APP_ID, PREVIOUS_APP_ID, APP_ID):
             with self.subTest(identifier=identifier), tempfile.TemporaryDirectory() as temporary:
                 app = Path(temporary) / "Hermes 学习.app"
                 original = self.installed(app, identifier)
@@ -149,7 +150,7 @@ class MacOSBundleTests(unittest.TestCase):
                 self.assertEqual((app / "Contents/Info.plist").read_bytes(), original)
                 self.assertEqual((app / "Contents/MacOS" / APP_EXECUTABLE).read_bytes(), b"original notifier")
                 self.assertEqual(bundle_identifier(pending_notifier_app(app)), APP_ID)
-                self.assertFalse(legacy_notifier_app(app).exists())
+                self.assertFalse(legacy_notifier_app(app, identifier).exists())
 
     def test_replacement_refuses_to_move_the_running_app(self):
         root = Path(__file__).resolve().parents[1]
@@ -203,6 +204,54 @@ class MacOSBundleTests(unittest.TestCase):
             self.assertIn([str(legacy), str(app)], [
                 call.args[0][-2:] for call in calls.call_args_list if Path(call.args[0][0]).name == "lsregister"
             ])
+
+    def test_project_icon_upgrade_registers_both_historical_senders(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary) / "Hermes 学习.app"
+            older = legacy_notifier_app(app)
+            previous = legacy_notifier_app(app, PREVIOUS_APP_ID)
+            earlier_receipts = self.installed(older, LEGACY_APP_ID)
+            recent_receipts = self.installed(app, PREVIOUS_APP_ID)
+            self.installed(pending_notifier_app(app), PREVIOUS_APP_ID)
+            with patch("hermes_codex_learning.macos_bundle.subprocess.run", side_effect=self.native) as calls:
+                result = install_notification_app(root, app)
+            self.assertTrue(result["migrated"])
+            self.assertEqual(bundle_identifier(app), APP_ID)
+            self.assertEqual(result["legacy_app"], str(previous))
+            self.assertEqual((previous / "Contents/Info.plist").read_bytes(), recent_receipts)
+            self.assertEqual((older / "Contents/Info.plist").read_bytes(), earlier_receipts)
+            registrations = [call.args[0] for call in calls.call_args_list if Path(call.args[0][0]).name == "lsregister"]
+            self.assertEqual(registrations[-1][-3:], [str(previous), str(older), str(app)])
+
+    def test_reinstall_keeps_retired_senders_out_of_launchservices(self):
+        root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary) / "Applications/Hermes 学习.app"
+            shared = global_notifier_app(project)
+            self.installed(project, APP_ID)
+            self.installed(shared, GLOBAL_APP_ID)
+            recovery = Path(temporary) / "backups"
+            recovery.mkdir()
+            retired = [(legacy_notifier_app(project), LEGACY_APP_ID),
+                       (legacy_notifier_app(project, PREVIOUS_APP_ID), PREVIOUS_APP_ID),
+                       (legacy_notifier_app(shared), LEGACY_GLOBAL_APP_ID)]
+            for archive, identifier in retired:
+                self.installed(archive, identifier)
+                archive.rename(recovery / (identifier + ".app-backup"))
+
+            with patch("hermes_codex_learning.macos_bundle.subprocess.run", side_effect=self.native) as calls:
+                install_notification_apps(root, project)
+
+            registrations = [call.args[0][2:] for call in calls.call_args_list
+                             if Path(call.args[0][0]).name == "lsregister"]
+            self.assertEqual(registrations, [[str(pending_notifier_app(shared))], [str(shared)],
+                                             [str(pending_notifier_app(project))], [str(project)]])
+            self.assertEqual(bundle_identifier(project), APP_ID)
+            self.assertEqual(bundle_identifier(shared), GLOBAL_APP_ID)
+            for archive, identifier in retired:
+                self.assertFalse(archive.exists())
+                self.assertEqual(bundle_identifier(recovery / (identifier + ".app-backup")), identifier)
 
     def test_ssh_installer_exports_readable_app_and_private_receiver_state(self):
         root = Path(__file__).resolve().parents[1]

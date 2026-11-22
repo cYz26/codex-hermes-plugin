@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from hermes_codex_learning.notify import (LEGACY_APP_ID, APP_EXECUTABLE, legacy_notifier_app,
-                                         macos_notification, message)
+from hermes_codex_learning.macos_bundle import APP_EXECUTABLE, LEGACY_APP_ID, PREVIOUS_APP_ID, legacy_notifier_app
+from hermes_codex_learning.notify import macos_notification, message
 from hermes_codex_learning.review_input import BUDGET_EXHAUSTED
 from hermes_codex_learning.review_receipt import ReviewWrites, receipt_text
 
@@ -19,14 +19,15 @@ class ReviewReceiptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             state = Path(temporary)
             app = state / "Hermes 学习.app"
-            legacy = legacy_notifier_app(app)
-            (legacy / "Contents/MacOS").mkdir(parents=True)
-            (legacy / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": LEGACY_APP_ID}))
             with patch("hermes_codex_learning.notify.notifier_app", return_value=app), \
                  patch("hermes_codex_learning.notify.subprocess.run", return_value=subprocess.CompletedProcess([], 0)) as run:
-                result = macos_notification(state, self.event("fallback"))
-            self.assertEqual(result["transport"], LEGACY_APP_ID)
-            self.assertEqual(run.call_args.args[0][0], str(legacy / "Contents/MacOS" / APP_EXECUTABLE))
+                for identifier in (LEGACY_APP_ID, PREVIOUS_APP_ID):
+                    legacy = legacy_notifier_app(app, identifier)
+                    (legacy / "Contents/MacOS").mkdir(parents=True)
+                    (legacy / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": identifier}))
+                    result = macos_notification(state, self.event("fallback"))
+                    self.assertEqual(result["transport"], identifier)
+                    self.assertEqual(run.call_args.args[0][0], str(legacy / "Contents/MacOS" / APP_EXECUTABLE))
 
     def event(self, identity="review-a", **fields):
         event = {"id": identity, "kind": "review.finished", "run_status": "completed", **fields}

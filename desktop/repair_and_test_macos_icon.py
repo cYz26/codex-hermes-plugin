@@ -16,7 +16,7 @@ from pathlib import Path
 
 from diagnose_macos_icon import diagnose, receiver_config, sender_app
 from update_macos_icon import update_icon
-from hermes_codex_learning.macos_bundle import APP_ID, LEGACY_APP_ID, NotificationAuthorizationError, bundle_identifier
+from hermes_codex_learning.macos_bundle import APP_ID, PROJECT_LEGACY_APP_IDS, NotificationAuthorizationError, bundle_identifier
 
 
 def save(path: Path, value: dict) -> None:
@@ -38,7 +38,7 @@ def save(path: Path, value: dict) -> None:
 def post_tests(app: Path, output: Path, icon_hash: str, *, new_test: bool = False) -> dict:
     plan_path = output / "notification-icon-test-plan.json"
     transport = bundle_identifier(app)
-    if transport not in (APP_ID, LEGACY_APP_ID):
+    if transport not in (APP_ID, *PROJECT_LEGACY_APP_IDS):
         raise ValueError("测试目标不是受管 Hermes 通知 App")
     if plan_path.exists():
         plan = json.loads(plan_path.read_text())

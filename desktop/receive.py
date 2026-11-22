@@ -18,6 +18,8 @@ from pathlib import Path
 APPROVAL_REQUIRED = "approval.required"
 GLOBAL_SENDER_IDS = ("com.cy.hermes-learning-global-receipts-v2", "com.cy.hermes-learning-global-receipts")
 GLOBAL_APP = "Hermes 全局共享.app"
+PREVIOUS_PROJECT_SENDER = "com.cy.hermes-learning-receipts"
+LEGACY_PROJECT_SENDER = "com.cy.hermes-learning-notifier"
 
 
 def approval_group(item):
@@ -82,13 +84,16 @@ def notifier_binary(configured: str) -> str:
     app = binary.parents[2]
     if app.suffix != ".app" or app.exists():
         return configured
-    legacy = app.parent / ".hermes-learning-legacy" / app.name
-    try:
-        with (legacy / "Contents/Info.plist").open("rb") as info:
-            if plistlib.load(info).get("CFBundleIdentifier") == "com.cy.hermes-learning-notifier":
-                return str(legacy / "Contents/MacOS" / binary.name)
-    except FileNotFoundError:
-        pass
+    archive = app.parent / ".hermes-learning-legacy"
+    for directory, identifier in ((archive / PREVIOUS_PROJECT_SENDER, PREVIOUS_PROJECT_SENDER),
+                                  (archive, LEGACY_PROJECT_SENDER)):
+        legacy = directory / app.name
+        try:
+            with (legacy / "Contents/Info.plist").open("rb") as info:
+                if plistlib.load(info).get("CFBundleIdentifier") == identifier:
+                    return str(legacy / "Contents/MacOS" / binary.name)
+        except FileNotFoundError:
+            continue
     return configured
 
 

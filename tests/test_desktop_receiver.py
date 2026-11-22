@@ -39,6 +39,10 @@ class DesktopReceiverTests(unittest.TestCase):
             (legacy / "Contents/MacOS").mkdir(parents=True)
             (legacy / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": "com.cy.hermes-learning-notifier"}))
             self.assertEqual(receiver.notifier_binary(configured), str(legacy / "Contents/MacOS/HermesLearningNotifier"))
+            previous = legacy.with_name(receiver.PREVIOUS_PROJECT_SENDER) / app.name
+            (previous / "Contents/MacOS").mkdir(parents=True)
+            (previous / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": receiver.PREVIOUS_PROJECT_SENDER}))
+            self.assertEqual(receiver.notifier_binary(configured), str(previous / "Contents/MacOS/HermesLearningNotifier"))
 
     def test_reconnect_deduplicates_and_batches_only_within_a_workspace(self):
         with tempfile.TemporaryDirectory() as directory:

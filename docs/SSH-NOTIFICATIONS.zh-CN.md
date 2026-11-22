@@ -36,7 +36,7 @@ python3 desktop/install_macos.py --host YOUR_SSH_HOST \
 
 通知 App 使用[现有 Hermes Learning 图标](./design/hermes-learning-icon/README.md)。已有安装需要在 Mac 上从更新后的仓库重跑安装命令，沿用原 host、bridge 和 settings；安装器会打包图标并刷新应用注册信息。下一条真实学习通知可用于核对显示效果。
 
-如果接收器已安装且只需更新通知 App，在 Mac 上运行 `python3 desktop/update_macos_icon.py --dry-run` 核对目标，再去掉 `--dry-run` 执行。迁移使用新的标识 `com.cy.hermes-learning-receipts`，先获得该发送方的通知授权，再等待运行中的通知 App 退出并替换。旧标识 `com.cy.hermes-learning-notifier` 的 App 保留在 `~/Applications/.hermes-learning-legacy/Hermes 学习.app` 并重新注册，历史通知继续通过它打开回执。
+如果接收器已安装且只需更新通知 App，在 Mac 上运行 `python3 desktop/update_macos_icon.py --dry-run` 核对目标，再去掉 `--dry-run` 执行。项目图标使用新发送方 `com.cy.hermes-learning-receipts-v2`。安装器先获得通知授权，再等待运行中的通知 App 退出并替换。此前的发送方保留在 `~/Applications/.hermes-learning-legacy/` 下并重新注册，供历史通知打开回执。
 
 新发送方先保留在 `~/Applications/.hermes-learning-pending/Hermes 学习.app`，注册到 LaunchServices 后以前台应用启动授权。安装器核对候选路径、发送方标识、允许状态及系统错误；授权被拒、结果缺失或超时时不替换原 App，候选也会保留供系统设置定位。重新运行会从当前源码构建并替换受管候选，继续使用同一发送方标识。macOS 已记录拒绝时不会再次弹窗，需要在「系统设置 → 通知 → Hermes 学习」允许该发送方，再重新运行安装。发布后注册失败会尝试恢复原 App，并保留新候选。
 
@@ -50,7 +50,7 @@ python3 desktop/install_macos.py --host YOUR_SSH_HOST \
 
 若安装报告中的 `authorization.allowed=false`、`authorization_status=1`，本次安装停在新版授权步骤。可双击 `desktop/recover_macos_notification.command`，或在终端运行 `python3 desktop/refresh_macos_notification.py --recover-authorization`。脚本先读取授权；仍被拒绝时，使用[通知设置的应用入口](https://neat.software/blog/swift-go-to-apps-notification-settings-on-macos)打开新标识对应的页面。开启「允许通知」后返回终端按回车，脚本重新读取一次系统结果，再决定是否继续迁移。重新检查仍被拒绝时保留原 App，不发送测试。报告记录生成时间、各次授权结果和失败后的实际发送方，不能以旧的 `before` 快照判断当前安装。
 
-接收器每五秒查询通知，按来源项目、显示范围和审批类别合并。「Hermes 学习」以蓝色文件夹显示项目通知，「Hermes 全局共享」以带小地球的紫色 Codex + Hermes 自进化图标显示跨项目通知和系统级版本检查与更新通知。仅待审批使用系统提示音。记忆待审和共享待审的横幅分别打开项目差异和共享审批区。更新学习服务和桌面接收器后即可使用。状态、回执和本地投递记录位于 `~/Library/Application Support/HermesLearningSSH/`。
+接收器每五秒查询通知，按来源项目、显示范围和审批类别合并。「Hermes 学习」以带文件夹的蓝色 Codex + Hermes 图标显示项目通知，「Hermes 全局共享」以带小地球的紫色图标显示跨项目通知和系统版本检查及更新通知。仅待审批使用系统提示音。记忆待审和共享待审的横幅分别打开项目差异和共享审批区。更新学习服务和桌面接收器后即可使用。状态、回执和本地投递记录位于 `~/Library/Application Support/HermesLearningSSH/`。
 
 断线后补收，系统已接受的记录不会重复发送。进程在系统确认前中断的投递保留为不确定状态，先核对记录再处理，不能盲目重复通知。
 
