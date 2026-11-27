@@ -75,7 +75,7 @@ class Bridge:
         self.bind_chat_handle(source, result["handle"])
         return result["handle"]
 
-    def ingest(self) -> None:
+    def ingest(self) -> int:
         from .delivery import drain_deliveries
         drain_deliveries(self.store, self.usage)
         self.store.set("loop-progress",{**self.store.get("loop-progress",{}),"phase":"consuming","updated_at":time.time()})
@@ -95,6 +95,7 @@ class Bridge:
             break
         from .feedback import reconcile as reconcile_feedback
         reconcile_feedback(self.store)
+        return consumed
 
     def consume_event(self, row) -> bool:
         payload = json.loads(row["payload"])
@@ -187,6 +188,9 @@ class Bridge:
                 and is_explicit_correction(enriched.get("user"))):
             enriched={**enriched,"status":"completed","learning_basis":"dialogue_with_unresolved_execution",
                       "coverage":sorted(set(enriched.get("coverage",[])) | {"execution_results_unresolved"})}
+        if (retrying_input and enriched == data and enriched["status"] not in {"completed", "interrupted"}
+                and (self.store.get("turn-admission:" + key) or {}).get("state") == "awaiting_terminal_evidence"):
+            return
         projected = observation(enriched)
         if self.settings.data_policy:
             from .policy import admit
@@ -646,20 +650,36 @@ class Bridge:
         from .scheduling import flush
         flush(self.store, self.api, recovery_only=not self.settings.proactive)
 
-    def latest_turns(self):
-        cutoff = time.time() - self.settings.active_turn_timeout_seconds
-        rows = self.store.db.execute("""
-            SELECT t.payload,t.stopped,t.activity FROM latest_turns l JOIN turns t ON t.id=l.turn_id
-            WHERE l.activity>=? AND json_extract(t.payload,'$.status') IN ('running','incomplete')
-              AND NOT EXISTS (SELECT 1 FROM meta WHERE key='excluded-chat:'||l.chat AND value<>'null')
-            ORDER BY l.activity
-        """, (cutoff,))
-        return rows.fetchall()
+    def latest_turns(self, *, since: float | None = None):
+        sql = "SELECT l.chat, t.payload, t.stopped, t.activity FROM latest_turns l JOIN turns t ON t.id=l.turn_id"
+        params: tuple = ()
+        if since is not None:
+            sql += " WHERE t.activity IS NULL OR t.activity >= ?"
+            params = (since,)
+        rows = self.store.db.execute(sql, params).fetchall()
+        latest = {}
+        for row in sorted(rows, key=lambda item: item["activity"] if isinstance(item["activity"], (int, float)) else 0):
+            chat = row["chat"]
+            if self.store.get("excluded-chat:" + chat):
+                continue
+            latest[chat] = row
+        return list(latest.values())
+
+    def latest_activity(self) -> float | None:
+        if "latest_turns" in self.__dict__:
+            return max((row["activity"] for row in self.latest_turns() if isinstance(row["activity"], (int, float))), default=None)
+        for row in self.store.db.execute(
+                "SELECT l.chat, t.activity FROM latest_turns l JOIN turns t ON t.id=l.turn_id "
+                "WHERE t.activity IS NOT NULL ORDER BY t.activity DESC"):
+            if not self.store.get("excluded-chat:" + row["chat"]):
+                return row["activity"]
+        return None
 
     def has_active_turns(self):
         now = time.time()
         cutoff = now - self.settings.active_turn_timeout_seconds
-        for row in self.latest_turns():
+        rows = self.latest_turns() if "latest_turns" in self.__dict__ else self.latest_turns(since=cutoff)
+        for row in rows:
             activity = row["activity"] if "activity" in row.keys() else None
             if isinstance(activity, (int, float)) and activity < cutoff:
                 continue
@@ -1116,6 +1136,8 @@ class Bridge:
         self.ready.set()
         delay = 1
         last_completion_scan = float("-inf")
+        last_context_recovery = float("-inf")
+        last_maintenance = float("-inf")
         while not self.stop.is_set():
             if self.drain.is_set():
                 break
@@ -1131,14 +1153,18 @@ class Bridge:
                 from .review_resolution import process as resolve_reviews
                 resolve_reviews(self)
                 drain_client(self)
-                self.ingest()
+                consumed = self.ingest()
                 drain_shared_writes(self)
                 now = time.monotonic()
                 if now - last_completion_scan >= 5:
                     last_completion_scan = now
                     from .host_evidence import recover_completions
                     recover_completions(self.settings, self.store)
-                self.recover_context()
+                if consumed or now - last_context_recovery >= 30:
+                    last_context_recovery = now
+                    self.recover_context()
+                else:
+                    self.retry_completed_inputs()
                 from .learning_dispatch import prepare
                 prepare(self)
                 self.idle_reviews()
@@ -1149,17 +1175,20 @@ class Bridge:
                         self.reviews()
                         self.store.set("backlog-drain-start",time.time())
                 else:
-                    self.store.set("backlog-drain-start",None)
+                    if self.store.get("backlog-drain-start") is not None:
+                        self.store.set("backlog-drain-start",None)
                     self.reviews()
                 if self.drain.is_set():
                     break
                 closing = self.store.get("closing", {})
-                for event_id, handle in list(closing.items()):
-                    if self.api.close(handle=handle, event_id=event_id)["status"] != "deferred":
-                        del closing[event_id]
-                self.store.set("closing", closing)
+                if closing:
+                    for event_id, handle in list(closing.items()):
+                        if self.api.close(handle=handle, event_id=event_id)["status"] != "deferred":
+                            del closing[event_id]
+                    self.store.set("closing", closing)
                 self.reap_stale_turns()
-                if not self.has_active_turns():
+                if (consumed or now - last_maintenance >= 30) and not self.has_active_turns():
+                    last_maintenance = now
                     from .lifecycle import maintenance
                     maintenance(self)
                 if self.store.get('native-curator-config-request'):
@@ -1175,7 +1204,8 @@ class Bridge:
                     from .retention import run as retain
                     retain(self.settings, self.store, self.api, dry_run=False)
                     self.store.set("retention-request", None)
-                self.store.set("last_error", None)
+                if self.store.get("last_error") is not None:
+                    self.store.set("last_error", None)
                 delay = 1
             except Exception as exc:
                 self.store.set("last_error", f"{type(exc).__name__}: {exc}")

@@ -19,16 +19,31 @@ def digest(value: Any) -> str:
     return hashlib.sha256(dumps(value).encode()).hexdigest()
 
 
+_REDACT_KEY = re.compile(r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|authorization|secret)$|^token$|^private_key$")
+_BEARER_TOKEN = re.compile(r"(?i)Bearer\s+[\w.\-]+")
+_PREFIX_TOKEN = re.compile(r"\b(?:sk-[a-zA-Z0-9_-]{12,}|gh[pousr]_[a-zA-Z0-9_]{16,})")
+_SECRET_ASSIGN = re.compile(r"(?im)(\b[\w]*(?:API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|PASSWORD|SECRET)[\w]*\s*[=:]\s*)[^\s,;]+")
+
+
+def redact_key(key: str) -> bool:
+    return bool(_REDACT_KEY.search(key))
+
+
+def redact_text(value: str) -> str:
+    value = _BEARER_TOKEN.sub("Bearer [REDACTED]", value)
+    value = _PREFIX_TOKEN.sub("[REDACTED]", value)
+    value = _SECRET_ASSIGN.sub(r"\1[REDACTED]", value)
+    return value
+
+
 def redact(value: Any) -> Any:
     if isinstance(value, dict):
-        return {k: "[REDACTED]" if re.search(r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|authorization|secret)$|^token$|^private_key$", k)
+        return {k: "[REDACTED]" if redact_key(k)
                 else redact(v) for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v) for v in value]
     if isinstance(value, str):
-        value = re.sub(r"(?i)Bearer\s+[\w.\-]+", "Bearer [REDACTED]", value)
-        value = re.sub(r"\b(?:sk-[a-zA-Z0-9_-]{12,}|gh[pousr]_[a-zA-Z0-9_]{16,})", "[REDACTED]", value)
-        value = re.sub(r"(?im)((?:[\w]*(?:API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|PASSWORD|SECRET))[\w]*\s*[=:]\s*)[^\s,;]+", r"\1[REDACTED]", value)
+        return redact_text(value)
     return value
 
 
