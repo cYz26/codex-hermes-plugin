@@ -1,0 +1,12 @@
+{
+  "description": "Workspace-scoped Hermes learning evidence and recall for Codex. No model calls in hooks.",
+  "hooks": {
+    "SessionStart": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 5, "additionalContextLimit": 1536}]}],
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 5, "additionalContextLimit": 512}]}],
+    "PreToolUse": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 5}]}],
+    "PostToolUse": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 5, "additionalContextLimit": 512}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 5}]}],
+    "Interrupt": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 2}]}],
+    "SessionEnd": [{"hooks": [{"type": "command", "command": "\"$PLUGIN_ROOT/scripts/bridge\" hook", "timeout": 3}]}]
+  }
+}

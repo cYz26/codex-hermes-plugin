@@ -95,16 +95,24 @@ def chat_workspace(store: Store, payload: dict) -> str | None:
     return workspace
 
 
-def hook(payload: dict, settings: Settings) -> dict:
-    if payload.get("agent_id") or payload.get("hook_event_name") == CODEX_COMPLETION:
+def hook(payload: dict, settings: Settings, *, host: str = "codex") -> dict:
+    if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("hook_event_name") == CODEX_COMPLETION:
         return {}
+    # Host facts are produced by the selected adapter, never by a hook body.
+    payload = {key: value for key, value in payload.items() if not key.startswith("bridge_")}
+    technical = {}
+    if host == "claude":
+        from .claude_hooks import adapt
+        payload, technical = adapt(payload)
+        if not payload:
+            return {}
     command_cwd = payload.get("cwd")
     command_project = settings.project_for(command_cwd)
     if settings.capture_scope == "project" and command_project is None:
         return {}
     store = Store(settings.state)
     try:
-        if exclude_internal(store, payload):
+        if host == "codex" and exclude_internal(store, payload):
             return {}
         project = command_project
         if settings.capture_scope == "global":
@@ -113,10 +121,8 @@ def hook(payload: dict, settings: Settings) -> dict:
         if project is None or command_project is None:
             return {}
         from .policy import admit
-        # Reserved fields are produced by this bridge, never accepted from a hook body.
-        payload = {key: value for key, value in payload.items() if not key.startswith('bridge_')}
         host_context = {}
-        if payload.get("transcript_path") and payload.get("hook_event_name") in {"SessionStart","UserPromptSubmit"}:
+        if host == "codex" and payload.get("transcript_path") and payload.get("hook_event_name") in {"SessionStart","UserPromptSubmit"}:
             from .host_evidence import read_host_relation
             try:
                 host_context["relation"] = read_host_relation(Path(payload["transcript_path"]), payload["session_id"], project)
@@ -125,7 +131,8 @@ def hook(payload: dict, settings: Settings) -> dict:
             payload["bridge_host_context"] = host_context
         event = payload.get("hook_event_name")
         transient_query = str(payload.get("prompt") or "")[:4000] if event == "UserPromptSubmit" else ""
-        technical = {"bridge_host_context":host_context} if host_context else {}
+        if host_context:
+            technical["bridge_host_context"] = host_context
         if event in {"PreToolUse", "PostToolUse"}:
             from .workflow import action
             technical["bridge_action"] = action(payload)
@@ -135,8 +142,16 @@ def hook(payload: dict, settings: Settings) -> dict:
         if settings.proactive and event == "UserPromptSubmit":
             from .scheduling import record_dialogue_signals
             record_dialogue_signals(payload, store)
+        if technical.get("bridge_stop_continuation"):
+            latest = store.db.execute(
+                "SELECT id FROM events WHERE json_extract(payload,'$.session_id')=? "
+                "AND json_extract(payload,'$.turn_id')=? AND json_extract(payload,'$.tool_use_id') IS NOT NULL "
+                "ORDER BY rowid DESC LIMIT 1", (payload.get("session_id"), payload.get("turn_id")),
+            ).fetchone()
+            if latest:
+                technical["bridge_stop_tool_watermark"] = latest[0]
         from .delivery import capture_delivery
-        capture_delivery(store, payload, project, settings=settings)
+        capture_delivery(store, {**payload, **technical}, project, settings=settings)
         admission = admit(payload, settings.data_policy, project)
         if admission.get("allowed") and admission.get("schema_version") == 2:
             payload = admission.pop("payload")
@@ -144,7 +159,7 @@ def hook(payload: dict, settings: Settings) -> dict:
         if (not admission['allowed'] and admission.get("reason")!="explicitly_restricted_material"
                 and settings.data_policy.get('workflow_projection') is True):
             from .workflow import project_event
-            payload = project_event(payload)
+            payload = project_event({**payload, **technical})
             admission = {'allowed': True, 'basis': 'closed_vocabulary_workflow', 'body_retained': False}
         if not admission["allowed"]:
             if payload.get("session_id") and payload.get("turn_id"):
@@ -175,15 +190,20 @@ def hook(payload: dict, settings: Settings) -> dict:
         except (OSError, TimeoutError):
             pass
         event = payload.get("hook_event_name")
-        if event not in {"SessionStart", "UserPromptSubmit", "PostToolUse"}:
+        recall_events = {"SessionStart", "UserPromptSubmit"}
+        if host == "codex":
+            recall_events.add("PostToolUse")
+        if event not in recall_events:
             return {}
         cache_file = settings.state / "context.json"
         cache = json.loads(cache_file.read_text()) if cache_file.exists() else {}
         from .enterprise import scope_view, requires_scoping
         cache=scope_view(cache,settings.data_policy)
-        current_projected = sorted(set(cache.get("native_projected_skills") or []))
+        projection_key = "claude_projected_skills" if host == "claude" else "native_projected_skills"
+        current_projected = sorted(set(cache.get(projection_key) or []))
         session = payload.get("session_id", "unknown")
-        projected_key = f"session-projected-skills:{session}"
+        projected_key = (f"claude-session-projected-skills:{session}" if host == "claude"
+                         else f"session-projected-skills:{session}")
         baseline_projected = store.get(projected_key)
         if event == "SessionStart" or baseline_projected is None:
             baseline_projected = current_projected
@@ -224,7 +244,7 @@ def hook(payload: dict, settings: Settings) -> dict:
             hook_recommended, limit=context_limit,
         )
         version = cache.get("version")
-        has_context = bool(memory or offered or (settings.capture_scope == "global" and not baseline_set))
+        has_context = bool(memory or offered or (host == "codex" and settings.capture_scope == "global" and not baseline_set))
         delivery_version = digest([text]) if version and has_context else None
         key = f"context-delivered:{session}:{project}" if settings.capture_scope == "global" else f"context-delivered:{session}"
         mem_key = f"memory-delivered:{session}:{project}" if settings.capture_scope == "global" else f"memory-delivered:{session}"
@@ -236,11 +256,12 @@ def hook(payload: dict, settings: Settings) -> dict:
                 and not offered and store.get(key) is not None
                 and store.get(mem_key) == memory_digest):
             return {}
-        if not delivery_version or (event != "UserPromptSubmit" and store.get(key) == delivery_version):
+        new_context = host == "claude" and event == "SessionStart"
+        if not delivery_version or (not new_context and event != "UserPromptSubmit" and store.get(key) == delivery_version):
             return {}
         with store.db:
             store.db.execute("BEGIN IMMEDIATE")
-            returning_context = bool(delivery_version and store.get(key) != delivery_version)
+            returning_context = new_context or store.get(key) != delivery_version
             records = {key: delivery_version, mem_key: memory_digest} if returning_context else {}
             if turn and (event == "UserPromptSubmit" or returning_context):
                 offer_key = "recall-offer:" + digest([session, turn])
@@ -278,22 +299,22 @@ def hook(payload: dict, settings: Settings) -> dict:
         store.close()
 
 
-def main() -> int:
+def main(*, host: str = "codex") -> int:
     if os.environ.get("HERMES_LEARNING_MAINTENANCE") == "1":
         return 0
     try:
-        settings = Settings.load()
-    except FileNotFoundError:
-        return 0  # An installed plugin is inert until a project is explicitly configured.
-    try:
+        try:
+            settings = Settings.load()
+        except FileNotFoundError:
+            return 0  # An installed plugin is inert until the learning service is configured.
         raw = sys.stdin.buffer.read(16 * 1024 * 1024 + 1)
         if len(raw) > 16 * 1024 * 1024:
             raise ValueError("Hook payload exceeds 16 MiB; capture coverage is incomplete")
-        print(json.dumps(hook(json.loads(raw), settings), ensure_ascii=False))
+        print(json.dumps(hook(json.loads(raw), settings, host=host), ensure_ascii=False))
         return 0
     except Exception as exc:
-        # Hook failures never block business execution or request another model turn.
-        print(f"Hermes learning capture failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        # Non-blocking hook error. Exception text can include private payload data.
+        print(f"Hermes learning capture failed: {type(exc).__name__}", file=sys.stderr)
         return 1
 
 

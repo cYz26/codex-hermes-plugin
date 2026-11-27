@@ -115,8 +115,9 @@ class LifecycleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             bridge = self.bridge(Path(directory), [])
             versions = [str(i)*64 for i in range(1, 8)]
+            old = time.time() - 40 * 86400
             def record(v):
-                return {'artifact': {'version': v}, 'retired_at': time.time()-40*86400}
+                return {'artifact': {'version': v}, 'retired_at': old + versions.index(v)}
             bridge.store.set('publications-v1', {'skill': record(versions[0])})
             bridge.store.set('publication-history:skill', {v: record(v) for v in versions[1:4]})
             bridge.store.set('artifact-retired-at', {versions[4]: time.time()})

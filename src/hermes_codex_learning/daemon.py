@@ -12,11 +12,12 @@ import time
 import uuid
 from pathlib import Path
 
+from .claude_hooks import EXECUTOR as CLAUDE, STOP_FAILURE
 from .config import Settings
 from .delegation import exclude_internal, register_delegation, task_input
 from .knowledge import context_view, memory_entries, reconcile
 from .learning_health import native_policy, record_capacity_refusal, snapshot as learning_health
-from .normalize import TERMINAL_EVENTS, merge_event, observation
+from .normalize import CODEX_EXECUTORS, TERMINAL_EVENTS, close_claude_turns, end_without_stop, merge_event, observation
 from .notify import approval_notice, macos_notification, message, notification_events, should_notify
 from .publication_guardian import PublicationGuardian
 from .review_deadline import run_review
@@ -97,10 +98,15 @@ class Bridge:
 
     def consume_event(self, row) -> bool:
         payload = json.loads(row["payload"])
-        excluded = exclude_internal(self.store, payload)
+        executor = payload.get("bridge_executor", "Codex App")
+        event = payload.get("hook_event_name")
+        excluded = executor in CODEX_EXECUTORS and exclude_internal(self.store, payload)
         prepared = None
         if not excluded:
-            register_delegation(self.store, row["id"], payload, settings=self.settings)
+            if executor in CODEX_EXECUTORS:
+                register_delegation(self.store, row["id"], payload, settings=self.settings)
+            if executor == CLAUDE and event in {"UserPromptSubmit", "SessionEnd"}:
+                close_claude_turns(self.store, row, payload)
             if payload.get("session_id") and payload.get("turn_id"):
                 key = digest([payload["session_id"], payload["turn_id"]])
                 prepared = self.store.get("background-observation:" + key)
@@ -111,12 +117,12 @@ class Bridge:
         data = None if excluded or (prepared and prepared["event"] == row["id"]) else merge_event(self.store, row)
         if data:
             self.observe_turn(data, row["id"])
-        if not excluded and payload.get("hook_event_name") in {"UserPromptSubmit", "PostToolUse", "Stop", "Interrupt"}:
+        if not excluded and event in {"UserPromptSubmit", "PostToolUse", "Stop", "Interrupt", STOP_FAILURE}:
             missing = [key for key in ("session_id", "turn_id") if not payload.get(key)]
             if missing:
                 gaps = self.store.get("coverage_gaps", [])
-                self.store.set("coverage_gaps", (gaps + [{"id": row["id"], "event": payload["hook_event_name"], "missing": missing}])[-100:])
-        if not excluded and payload.get("hook_event_name") == "SessionEnd" and payload.get("session_id"):
+                self.store.set("coverage_gaps", (gaps + [{"id": row["id"], "event": event, "missing": missing}])[-100:])
+        if not excluded and event == "SessionEnd" and payload.get("session_id"):
             source = {"host": payload["bridge_host"], "project": payload["bridge_project"], "chat": payload["session_id"]}
             closing = self.store.get("closing", {})
             handles = self.store.get("chat-handles:" + digest(source), [])
@@ -140,6 +146,12 @@ class Bridge:
         key = digest([data["source"]["chat"],data["source"]["turn"]])
         if data.get("_skip_observation") == event_id:
             return
+        executor = data["source"].get("executor", "Codex App")
+        if executor == CLAUDE and data["status"] not in {"completed", "interrupted"}:
+            if data.get("_ended_by") == STOP_FAILURE:
+                self.store.set("turn-admission:" + key, {"state": "awaiting_terminal_evidence",
+                               "reason": "claude_api_failure", "at": time.time()})
+            return
         if data.get('_evidence_mode') == 'workflow-v1':
             self.observe_workflow(data, event_id)
             return
@@ -155,9 +167,9 @@ class Bridge:
             previous = self.store.get("observation-receipt:" + key, {})
             if previous.get("background") and previous.get("event") == event_id:
                 return
-            native_host = data["source"].get("executor") == "Hermes"
-            enriched = data if native_host else task_input(self.store, data, settings=self.settings)
-            if not native_host and (not enriched.get("user") or data["status"] in {"completed", "interrupted", "incomplete"}):
+            codex = executor in CODEX_EXECUTORS
+            enriched = task_input(self.store, data, settings=self.settings) if codex else data
+            if codex and (not enriched.get("user") or data["status"] in {"completed", "interrupted", "incomplete"}):
                 from .host_evidence import supplement
                 enriched = supplement(self.store, enriched, settings=self.settings, event_id=event_id)
             states = [tool["background_session"] for tool in enriched["tools"].values() if tool.get("background_session")]
@@ -167,7 +179,7 @@ class Bridge:
                 terminal = enriched.get("evidence_provenance", {}).get("terminal_event")
                 if terminal:
                     event_id = terminal
-        if enriched["source"].get("executor") != "Hermes" and enriched.get("_ended_by") in TERMINAL_EVENTS:
+        if executor in CODEX_EXECUTORS and enriched.get("_ended_by") in TERMINAL_EVENTS:
             from .delivery import capture_observed_skill_reads
             capture_observed_skill_reads(self.store, enriched, self.settings)
         from .scheduling import is_explicit_correction
@@ -197,7 +209,7 @@ class Bridge:
                 with self.store.db:
                     self.store.db.execute("UPDATE turns SET payload=?,revision=? WHERE id=?", (dumps(enriched), digest(enriched), key))
             return
-        if enriched.get("source", {}).get("executor") != "Hermes":
+        if executor in CODEX_EXECUTORS:
             from .model_sync import record_observed_codex_model
             record_observed_codex_model(self.store, enriched)
         handle = self.handle_for(enriched["source"])
@@ -250,7 +262,7 @@ class Bridge:
         from .workflow import observation as workflow_observation
         if data.get('_ended_by') not in {'Stop', 'Interrupt'}:
             return
-        if data["source"].get("executor") != "Hermes":
+        if data["source"].get("executor", "Codex App") in CODEX_EXECUTORS:
             from .host_evidence import supplement
             data = supplement(self.store, data, settings=self.settings, include_task=False)
         data['status'] = 'interrupted' if data['_ended_by'] == 'Interrupt' else 'completed'
@@ -284,37 +296,47 @@ class Bridge:
                                      (self.store.get("recovery-cursor", 0),)).fetchall()
         for row in rows:
             payload = json.loads(row["payload"])
-            if not exclude_internal(self.store, payload):
+            if payload.get("bridge_executor", "Codex App") in CODEX_EXECUTORS and not exclude_internal(self.store, payload):
                 register_delegation(self.store, row["id"], payload, settings=self.settings)
             self.store.set("recovery-cursor", row["rowid"])
-        for row in self.store.db.execute("SELECT payload FROM turns WHERE observed_revision IS NULL "
-                                         "AND json_extract(payload,'$.user')='' "
-                                         "AND json_extract(payload,'$.status') IN ('completed','interrupted')").fetchall():
-            data = json.loads(row["payload"])
-            if self.store.get("excluded-chat:" + data["source"]["chat"]):
-                continue
-            from .host_evidence import supplement
-            if not supplement(self.store, task_input(self.store, data, settings=self.settings), settings=self.settings)["user"]:
-                continue
-            event = self.store.db.execute("SELECT id FROM events WHERE json_extract(payload,'$.session_id')=? "
-                                          "AND json_extract(payload,'$.turn_id')=? "
-                                          "AND json_extract(payload,'$.hook_event_name') IN ('Stop','Interrupt','CodexTranscriptComplete') "
-                                          "ORDER BY created DESC LIMIT 1", (data["source"]["chat"], data["source"]["turn"])).fetchone()
-            if event:
-                self.observe_turn(data, event["id"])
+        self.retry_completed_inputs()
 
     def retry_completed_inputs(self) -> None:
         now = time.time()
         if now - self.store.get("last_input_retry", 0) < 30:
             return
         self.store.set("last_input_retry", now)
-        rows = self.store.db.execute("SELECT t.id,t.payload,t.observed_revision FROM turns t LEFT JOIN meta m ON m.key='input-retry:'||t.id "
-                                     "WHERE json_extract(t.payload,'$.status') IN ('completed','interrupted','incomplete') "
-                                     "AND (observed_revision IS NULL OR (json_extract(t.payload,'$.coverage') LIKE '%background_exit_pending%' AND EXISTS ("
-                                     "SELECT 1 FROM json_each(t.payload,'$.tools') "
-                                     "WHERE json_extract(value,'$.background_session.pending_exit_event') IS NOT NULL))) "
-                                     "AND COALESCE(json_extract(m.value,'$.retry_at'),0)<=? "
-                                     "ORDER BY COALESCE(json_extract(m.value,'$.last_attempt'),0),activity,t.id LIMIT 8",(now,)).fetchall()
+        rows = self.store.db.execute("""
+            SELECT t.id,t.payload,t.observed_revision FROM turns t
+            LEFT JOIN meta m ON m.key='input-retry:'||t.id
+            WHERE json_extract(t.payload,'$.status') IN ('completed','interrupted','incomplete')
+              AND COALESCE(json_extract(m.value,'$.retry_at'),0)<=?
+              AND NOT EXISTS (SELECT 1 FROM meta WHERE key='withheld-turn:'||t.id AND value<>'null')
+              AND NOT EXISTS (SELECT 1 FROM meta WHERE key='excluded-chat:'||json_extract(t.payload,'$.source.chat') AND value<>'null')
+              AND (
+                EXISTS (SELECT 1 FROM meta WHERE key='background-observation:'||t.id AND value<>'null')
+                OR (json_extract(t.payload,'$.coverage') LIKE '%background_exit_pending%' AND EXISTS (
+                    SELECT 1 FROM json_each(t.payload,'$.tools')
+                    WHERE json_extract(value,'$.background_session.pending_exit_event') IS NOT NULL))
+                OR (t.observed_revision IS NULL
+                    AND EXISTS (SELECT 1 FROM events e
+                                WHERE json_extract(e.payload,'$.session_id')=json_extract(t.payload,'$.source.chat')
+                                  AND json_extract(e.payload,'$.turn_id')=json_extract(t.payload,'$.source.turn')
+                                  AND json_extract(e.payload,'$.hook_event_name') IN ('Stop','Interrupt','CodexTranscriptComplete'))
+                    AND ((json_extract(t.payload,'$.status') IN ('completed','interrupted')
+                          AND json_extract(t.payload,'$.user')<>'')
+                         OR (COALESCE(json_extract(t.payload,'$.source.executor'),'Codex App') IN ('Codex App','Codex CLI')
+                             AND (EXISTS (SELECT 1 FROM events e
+                                          WHERE json_extract(e.payload,'$.session_id')=json_extract(t.payload,'$.source.chat')
+                                            AND json_extract(e.payload,'$.turn_id')=json_extract(t.payload,'$.source.turn')
+                                            AND json_extract(e.payload,'$.transcript_path') IS NOT NULL)
+                                  OR EXISTS (SELECT 1 FROM meta d WHERE d.key IN (
+                                      'delegated-input:'||json_extract(t.payload,'$.source.chat'),
+                                      'delegated-turn-input:'||json_extract(t.payload,'$.source.chat')||':'||json_extract(t.payload,'$.source.turn'))))))
+                )
+              )
+            ORDER BY COALESCE(json_extract(m.value,'$.last_attempt'),0),t.activity,t.id LIMIT 8
+        """, (now,)).fetchall()
         for row in rows:
             data = json.loads(row["payload"])
             prepared = self.store.get("background-observation:" + row["id"])
@@ -384,7 +406,11 @@ class Bridge:
                 if native:
                     self.api.record_usage(native,evidence)
                 delivery_meta = {key: delivered[key] for key in ("delivery_mode", "read_coverage") if delivered.get(key)}
-                self.store.set("issued-delivery:"+token,{**value,**delivery_meta,"project":payload["bridge_project"],"source_event":evidence["source_event"]})
+                executor = payload.get("bridge_executor")
+                if executor:
+                    delivery_meta["executor"] = executor
+                self.store.set("issued-delivery:"+token, {**value, **delivery_meta, "project": payload["bridge_project"],
+                               "source_event": evidence["source_event"], "confirmed_at": time.time()})
                 self.store.set(key,{"recorded":True,"native_token":native})
                 return
             if token.startswith("bridge:"):
@@ -424,11 +450,16 @@ class Bridge:
                                "error": retry.get("error"), "retry": retry})
             self.retry_queue.process(self.api)
         status = native_reads.status(self.api)
-        from .scheduling import ordered_intents
+        from .scheduling import AUTOMATIC, ordered_intents
         from . import learning_dispatch
         intents = status["intents"] + learning_dispatch.recover_intents(self, status["intents"])
-        self.store.set("review-queue",{"updated_at":time.time(),"intents":[{key:intent[key] for key in
-                       ("id","handle","revision","status","reason") if key in intent} for intent in intents]})
+        interval = self.settings.automatic_review_interval_seconds
+        last_automatic = self.store.get("review:last-automatic-started")
+        next_automatic = last_automatic + interval if interval and last_automatic is not None else None
+        queue = {"updated_at": time.time(), "automatic_review_not_before": next_automatic,
+                 "intents": [{key: intent[key] for key in ("id", "handle", "revision", "status", "reason")
+                              if key in intent} for intent in intents]}
+        self.store.set("review-queue", queue)
         for intent in ordered_intents(self.store, intents):
             if self.drain.is_set():
                 break
@@ -439,15 +470,18 @@ class Bridge:
                 if required and (not enterprise or required!=enterprise["id"]):
                     self.store.set("policy-withheld:"+intent["id"],"enterprise_boundary_not_active")
                     continue
-            if not learning_dispatch.begin(self, intent):
-                continue
-            if intent.get("reason") in {"native_threshold", "idle_flush"} and type(intent.get("revision")) is int:
+            automatic = intent.get("reason") in AUTOMATIC
+            if automatic and type(intent.get("revision")) is int:
                 reviewed = native_reads.reviewed_revision(self.api, intent["handle"])
                 if reviewed is not None and intent["revision"] <= reviewed:
                     # Retire the old intent through the native owner's guard.
                     # It can close it without a model call or a started receipt.
                     self.api.run_review(intent["handle"], intent["id"], attempt_id=str(uuid.uuid4()))
                     continue
+            if automatic and next_automatic is not None and time.time() < next_automatic:
+                continue
+            if not learning_dispatch.begin(self, intent):
+                continue
             attempt_id = self.store.get("attempt:" + intent["id"])
             if not attempt_id:
                 attempt_id = str(uuid.uuid4())
@@ -463,14 +497,20 @@ class Bridge:
                 self.store.set("assessment:"+intent["handle"],{**assessment,"allowed":True,"classification":"approved",
                                "audience":"local","policy_version":"local-v1"})
             local = self.store.get("workflow-local-source:" + intent["handle"], source)
-            provenance = {"project": local.get("project"), "source_chat": local.get("chat")}
+            provenance = {"project": local.get("project"), "source_chat": local.get("chat"),
+                          "executor": local.get("executor")}
             before_context = self.api.read(kind="context")
             before_versions = self.skill_versions(before_context)
             if self.settings.capture_scope == "global" or enterprise:
                 self.update_knowledge(before_context)
             started_at = time.time()
+            if automatic:
+                self.store.set("review:last-automatic-started", started_at)
+                if interval:
+                    next_automatic = started_at + interval
+                    self.store.set("review-queue", {**queue, "automatic_review_not_before": next_automatic})
             self.emit({"id": attempt_id + ":start", "kind": "review.started", **provenance,
-                       "retry_index": intent.get("retry_index", 0)})
+                       "reason": intent.get("reason"), "retry_index": intent.get("retry_index", 0)})
             self.store.set("state", "reviewing")
             self.store.set("loop-progress",{**self.store.get("loop-progress",{}),"phase":"reviewing","updated_at":started_at,"handle":intent["handle"],"intent":intent["id"]})
             self.store.set("review-progress:"+intent["handle"],{"state":"running","intent":intent["id"],
@@ -552,7 +592,7 @@ class Bridge:
                     previous_entries = {key for key, _, _ in memory_entries(before_context)}
                     applied_entities += ["memory:" + key for key, _, _ in memory_entries(after_context) if key not in previous_entries]
                 event = {**result, "id": attempt_id + ":result", "kind": "review.finished", **provenance,
-                         "started_at": started_at, "finished_at": finished_at,
+                         "reason": intent.get("reason"), "started_at": started_at, "finished_at": finished_at,
                          "applied_entities": sorted(set(applied_entities)), "review_summary": summary["text"]}
                 if retry_available:
                     event["retry"] = self.retry_queue.record(intent, {**result, "id": attempt_id}, local)
@@ -607,13 +647,14 @@ class Bridge:
         flush(self.store, self.api, recovery_only=not self.settings.proactive)
 
     def latest_turns(self):
-        latest = {}
-        for row in self.store.db.execute("SELECT t.payload,t.stopped,t.activity FROM latest_turns l JOIN turns t ON t.id=l.turn_id ORDER BY t.activity"):
-            data = json.loads(row["payload"])
-            if self.store.get("excluded-chat:" + data["source"]["chat"]):
-                continue
-            latest[data["source"]["chat"]] = row
-        return list(latest.values())
+        cutoff = time.time() - self.settings.active_turn_timeout_seconds
+        rows = self.store.db.execute("""
+            SELECT t.payload,t.stopped,t.activity FROM latest_turns l JOIN turns t ON t.id=l.turn_id
+            WHERE l.activity>=? AND json_extract(t.payload,'$.status') IN ('running','incomplete')
+              AND NOT EXISTS (SELECT 1 FROM meta WHERE key='excluded-chat:'||l.chat AND value<>'null')
+            ORDER BY l.activity
+        """, (cutoff,))
+        return rows.fetchall()
 
     def has_active_turns(self):
         now = time.time()
@@ -625,8 +666,7 @@ class Bridge:
             data = json.loads(row['payload'])
             if data['status'] == 'running':
                 return True
-            if (data['status'] == 'incomplete' and data.get('_ended_by') not in {'Stop', 'Interrupt'}
-                    and not data.get('assistant')):
+            if data['status'] == 'incomplete' and not data.get('_ended_by') and not data.get('assistant'):
                 return True
         return False  # Unknown tool outcomes do not reopen a terminated host turn.
 
@@ -638,8 +678,9 @@ class Bridge:
         self._last_stale_turn_reap = now
         cutoff = now - self.settings.active_turn_timeout_seconds
         rows = self.store.db.execute(
-            "SELECT id, payload FROM turns WHERE (stopped IS NULL OR stopped = 0) AND activity < ? "
-            "AND json_extract(payload, '$.status') IN ('running', 'incomplete')",
+            "SELECT id,payload FROM turns WHERE (stopped IS NULL OR stopped=0) AND activity<? "
+            "AND json_extract(payload,'$.status') IN ('running','incomplete') "
+            "AND json_extract(payload,'$._ended_by') IS NULL ORDER BY activity LIMIT 1000",
             (cutoff,),
         ).fetchall()
         if not rows:
@@ -648,15 +689,10 @@ class Bridge:
         with self.store.db:
             for row in rows:
                 data = json.loads(row["payload"])
-                if data.get("status") not in {"running", "incomplete"}:
-                    continue
-                if data.get("_ended_by") in {"Stop", "Interrupt", "stale_timeout"}:
-                    continue
-                data["status"] = "incomplete"
-                data["_ended_by"] = "stale_timeout"
+                end_without_stop(data, "stale_timeout")
                 self.store.db.execute(
-                    "UPDATE turns SET payload=?, stopped=COALESCE(stopped, ?) WHERE id=?",
-                    (dumps(data), now, row["id"]),
+                    "UPDATE turns SET payload=?,revision=?,stopped=COALESCE(stopped, ?) WHERE id=?",
+                    (dumps(data), digest(data), now, row["id"]),
                 )
                 reaped += 1
         return reaped
@@ -711,7 +747,8 @@ class Bridge:
         projection = sync_published_skills(self.settings, store)
         context=scope_view({**context,
             "native_projected_skills": projection["projected_skills"],
-            "native_projection": {k: projection[k] for k in ("enabled", "catalog_dir", "codex_skills_dir", "projected_skills", "shadowed")},
+            "claude_projected_skills": (projection["claude"] or {}).get("projected_skills", []),
+            "native_projection": {k: projection[k] for k in ("enabled", "catalog_dir", "codex_skills_dir", "projected_skills", "shadowed", "claude")},
             "enterprise_memory_boundaries":{key:proof["boundary_id"] for key,proof in store.get("semantic-memory-attestations",{}).items() if proof.get("boundary_id")},
             "enterprise_skill_boundaries":{key:proof["boundary_id"] for key,proof in store.get("semantic-skill-attestations",{}).items() if proof.get("boundary_id")}},
             self.settings.data_policy)
@@ -1101,7 +1138,6 @@ class Bridge:
                     last_completion_scan = now
                     from .host_evidence import recover_completions
                     recover_completions(self.settings, self.store)
-                self.retry_completed_inputs()
                 self.recover_context()
                 from .learning_dispatch import prepare
                 prepare(self)

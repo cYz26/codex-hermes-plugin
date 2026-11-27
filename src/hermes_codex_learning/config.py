@@ -59,6 +59,8 @@ class Settings:
     active_turn_timeout_seconds: float = 1800
     raw_event_retention_days: float = 7
     session_context_limit: int = 256
+    claude_skills_dir: Path | None = None
+    automatic_review_interval_seconds: float = 120
 
     def __post_init__(self):
         if self.shared_profile is not None or self.shared_client_id is not None:
@@ -95,12 +97,19 @@ class Settings:
         if not isinstance(self.data_policy, dict) or ('workflow_projection' in self.data_policy
                 and not isinstance(self.data_policy['workflow_projection'], bool)):
             raise ValueError('data_policy.workflow_projection must be a boolean')
-        if self.codex_skills_dir is not None:
-            resolved_target = self.codex_skills_dir.resolve()
-            resolved_home = self.home.resolve()
-            if (not self.codex_skills_dir.is_absolute() or resolved_target == Path("/")
-                    or resolved_target == resolved_home or resolved_target.is_relative_to(resolved_home / "skills")):
-                raise ValueError("codex_skills_dir must be an independent absolute host skills directory")
+        for key in ("codex_skills_dir", "claude_skills_dir"):
+            directory = getattr(self, key)
+            if directory is not None:
+                target, owner = directory.resolve(), self.home.resolve()
+                if not directory.is_absolute() or target.is_relative_to(owner) or owner.is_relative_to(target):
+                    raise ValueError(f"{key} must be an independent absolute host skills directory")
+        if self.codex_skills_dir is not None and self.claude_skills_dir is not None:
+            codex, claude = self.codex_skills_dir.resolve(), self.claude_skills_dir.resolve()
+            if codex.is_relative_to(claude) or claude.is_relative_to(codex):
+                raise ValueError("Codex and Claude skills directories must be distinct")
+        interval = self.automatic_review_interval_seconds
+        if type(interval) not in (int, float) or not 0 <= interval <= 86400:
+            raise ValueError("learning.automatic_review_interval_seconds must be between 0 and 86400")
         if self.review_protocol not in REVIEW_PROTOCOLS:
             raise ValueError("learning.review_protocol must be native or strict_evidence")
         if self.review_reasoning_effort is not None and (
@@ -280,4 +289,6 @@ class Settings:
             active_turn_timeout_seconds=float(data.get("learning", {}).get("active_turn_timeout_seconds", 1800)),
             raw_event_retention_days=float(data.get("retention", {}).get("raw_event_days", 7)),
             session_context_limit=int(data.get("hook", {}).get("session_context_limit", 256)),
+            claude_skills_dir=Path(projection["claude_skills_dir"]).expanduser() if projection.get("claude_skills_dir") else None,
+            automatic_review_interval_seconds=data.get("learning", {}).get("automatic_review_interval_seconds", 120),
         )

@@ -1,0 +1,11 @@
+{
+  "name": "hermes-learning",
+  "version": "0.11.0",
+  "description": "Share project memory and learned skills with Codex through the Hermes learning service.",
+  "mcpServers": {
+    "hermes_learning": {
+      "command": "python3",
+      "args": ["-I", "-B", "${CLAUDE_PLUGIN_ROOT}/scripts/bridge", "mcp"]
+    }
+  }
+}

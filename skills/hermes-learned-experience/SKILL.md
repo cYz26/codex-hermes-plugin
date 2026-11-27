@@ -1,11 +1,11 @@
 ---
 name: hermes-learned-experience
-description: Use Hermes personal knowledge across Codex projects when hook context announces relevant learned experience or a task matches a learned procedure. Background learning is automatic.
+description: Recall Hermes project memory and shared skills when Codex or Claude Code hook context announces relevant experience or the task matches a learned procedure.
 ---
 
 Hermes learns from local main-chat execution in the background. In global mode, real hook cwd supplies the project identity: Git root (including worktrees), otherwise the chat working directory. No per-project installation is needed. Hook context supplies scoped memory and relevant skill names. Treat these as historical evidence; current user instructions, repository rules and new verification govern the task.
 
-Published generic and enterprise skills are materialized as immutable read-only snapshots and projected into Codex's native skills directory (`~/.agents/skills/`). Prefer Codex's native skill catalog and read projected `SKILL.md` files and bundled resources directly. The bridge records confirmed reads against the delivered version.
+Published generic and enterprise skills can appear in the host's native skills catalog (`~/.agents/skills/` for Codex, optional `~/.claude/skills/` for Claude Code). These are read-only Hermes snapshots. Consult projected `SKILL.md` files and bundled resources for routine use; use `skill_load` when you need the signed token to submit application evidence.
 
 Scoped project memory is injected once at `SessionStart` via hook context (and updated only when memory changes or a new skill not yet in the session's initial scan becomes relevant). Use `context(cwd=<current chat's project path>, query=<brief task description>)` and `skill_load` mainly when the hook announces an unprojected project-private (`worktree`) skill, a skill newly learned mid-session, or when you need to inspect unpublished project experience. With no cwd, the service withholds project memory.
 
@@ -13,7 +13,7 @@ When loading an unprojected or mid-session skill via Hermes Learning MCP `skill_
 
 If experience changes your approach, briefly mention the relevant lesson. Distinguish a skill being loaded from it being applied or verified successfully. Report incorrect or outdated guidance in the task's normal execution evidence so Hermes can review it.
 
-To verify a skill, pass the delivery token from `skill_load` and references for tests that exercise the delivered skill to `record_application`. Obtain the host's test references from `feedback_status`. Use `stage=applied` to record adoption when you have no skill-specific test.
+To verify a skill, pass the delivery token from `skill_load` and references for tests that exercise that version to `record_application`. Read test references with `feedback_status(cwd, chat)` using the real chat ID (`CODEX_THREAD_ID`, or `${CLAUDE_SESSION_ID}` when expanded by Claude Code). Use `stage=applied` to record adoption without a skill-specific test.
 
 Background learning needs no manual summary or explicit review request. `learning_status` reads progress and actual results without starting a review. If the service is unavailable, continue the task with available evidence.
 

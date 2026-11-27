@@ -33,12 +33,15 @@ def digest(path):
 
 
 def check_versions_and_patch():
-    plugin = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+    codex = json.loads((ROOT / ".codex-plugin/plugin.json").read_text(encoding="utf-8"))
+    claude = json.loads((ROOT / ".claude-plugin/plugin.json").read_text(encoding="utf-8"))
+    marketplace = json.loads((ROOT / ".claude-plugin/marketplace.json").read_text(encoding="utf-8"))
+    assert any(entry["name"] == claude["name"] and entry["source"] == "./" for entry in marketplace["plugins"])
     package = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     module = ast.parse((ROOT / "src/hermes_codex_learning/__init__.py").read_text(encoding="utf-8"))
     version = next(ast.literal_eval(node.value) for node in module.body if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets))
-    assert plugin["version"] == package["project"]["version"] == version
+    assert codex["version"] == claude["version"] == package["project"]["version"] == version
     native_plugin = (ROOT / "hermes-plugin/plugin.yaml").read_text(encoding="utf-8")
     assert re.search(r"^version:\s*" + re.escape(version) + r"\s*$", native_plugin, re.M)
     manifest = json.loads((ROOT / "patches/manifest.json").read_text(encoding="utf-8"))

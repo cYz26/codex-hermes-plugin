@@ -126,6 +126,30 @@ class NativeProjectionTests(unittest.TestCase):
         self.assertFalse((snapshots_root(self.settings) / v1).exists())
         self.assertTrue((self.codex_skills / MANIFEST_NAME).is_file())
 
+    def test_claude_projection_reuses_snapshot_and_preserves_host_owned_links(self):
+        claude_skills = self.root / "claude-skills"
+        settings = replace(self.settings, claude_skills_dir=claude_skills)
+        version, publication = _write_artifact(self.home, "learned-alpha", "Shared lesson")
+        self.store.set("publications-v1", {"learned-alpha": publication})
+        preview = sync_published_skills(settings, self.store, dry_run=True)
+        self.assertEqual(preview["claude"]["projected_skills"], ["learned-alpha"])
+        self.assertFalse(claude_skills.exists())
+        sync_published_skills(settings, self.store)
+        claude_link = claude_skills / "learned-alpha"
+        codex_link = self.codex_skills / "learned-alpha"
+        self.assertEqual(claude_link.resolve(), codex_link.resolve())
+        self.assertEqual(claude_link.resolve(), snapshots_root(settings) / version)
+        custom = self.root / "custom-skill"
+        custom.mkdir()
+        claude_link.unlink()
+        claude_link.symlink_to(custom, target_is_directory=True)
+        projected = sync_published_skills(settings, self.store)
+        self.assertEqual(projected["claude"]["shadowed"], {"learned-alpha": "unmanaged_host_entry"})
+        self.store.set("publications-v1", {})
+        sync_published_skills(settings, self.store)
+        self.assertEqual(claude_link.resolve(), custom)
+        self.assertFalse(codex_link.is_symlink())
+
     def test_enterprise_boundary_change_immediately_unlinks_enterprise_skills(self):
         (self.home / "config.yaml").write_text("_config_version: 1\nmodel:\n  default: enterprise-a\n", encoding="utf-8")
         boundary_file = self.settings.state / "enterprise-boundary.json"

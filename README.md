@@ -1,8 +1,8 @@
-# Hermes Learning for Codex
+# Hermes Learning for Codex and Claude Code
 
-主分支同时支持本地 macOS 学习和云端 Linux／SSH 学习，使用同一个 Codex 插件、学习核心和更新合同。当前外围版本为 **0.11.0**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包含 **Hermes v0.23.0**、**v0.23.1** 和 **v0.23.2**。
+Codex 和 Claude Code 使用各自的宿主插件，共用一个 Hermes 学习服务。服务从获准的执行证据学习，向同一工作区召回项目记忆，并在发布检查通过后共享通用技能。插件和服务应部署在实际执行任务的宿主上：本地 macOS 使用 launchd，Linux／SSH 使用 systemd。
 
-Codex 执行任务，独立 Hermes 从获准的执行证据学习，再向后续任务提供项目记忆和经过检查的通用技能。安装插件和启动学习服务应在实际执行 Codex 任务的宿主完成。
+当前外围版本为 **0.11.0**；固定原生版本及补丁见 [兼容清单](./patches/compatibility.json)，包括 **Hermes v0.23.3**。Claude Code 接入不需要修改原生 Learning API v1 补丁。
 
 0.11.0 整合 [Codex 与原生 Hermes 共用学习服务](./docs/SHARED-LEARNING.zh-CN.md)、**Hermes v0.23.2** 兼容适配、后台进程待退出回合观察、精确版本发布审查与只读日审，并完成云端开发机与跨端维护修复：企业出口代理与 GitHub 限流恢复、原生更新重入保护、分版本 site 适配与受管 CLI 绑定、企业专用环境下的共享学习边界保护，以及 macOS Python 3.9 通知接收器兼容。见 [0.11.0 发布说明](./docs/RELEASE-0.11.0.zh-CN.md)。
 
@@ -36,7 +36,7 @@ python3 -B scripts/check_release.py
 scripts/bridge --help
 ```
 
-[安装与更新](./docs/INSTALL.zh-CN.md) 说明同一插件的安装和 macOS 本地服务。Linux 宿主使用 `scripts/bridge systemd`；macOS 本地宿主使用 `scripts/bridge launchd`。SSH 模式只在 Mac 安装接收器，由它查询开发机上的回执，详见 [SSH 桌面通知](./docs/SSH-NOTIFICATIONS.zh-CN.md)。
+按 [安装与更新](./docs/INSTALL.zh-CN.md) 为 Codex 或 Claude Code 加载插件。已有服务时复用原 `bridge.json`、学习目录和认证，无需为 Claude Code 初始化第二个 Hermes 实例。SSH 模式只在 Mac 安装桌面接收器，由它查询开发机上的回执，详见 [SSH 桌面通知](./docs/SSH-NOTIFICATIONS.zh-CN.md)。
 
 初始化先使用 `init --dry-run` 核对固定源码、解释器、project、home、provider 和模型参数。选择 `--capture-scope global` 时，新配置默认启用资料准入、固定流程投影和检查后的共享；已有配置保留已选择的策略。模型、provider、API 模式和推理档位通过原生配置选择，认证由 Hermes 管理。
 
@@ -53,7 +53,7 @@ scripts/bridge update status --settings /ABS/pilot/bridge.json
 
 [企业专用环境学习](./docs/ENTERPRISE-LEARNING.zh-CN.md)由操作人确认当前企业模型与专用部署后启用：普通内部任务正文参与学习，通用技能在该企业知识库复用；项目归属、凭据过滤和显式禁学约束继续生效。
 
-hooks 使用真实 cwd 确定项目身份，将获准的执行证据写入持久事件箱；hooks 不调用模型。独立监督进程托管 Hermes worker，复用原生 review、Memory、Skills 和 Curator。项目记忆按工作区召回，通用候选通过来源、资源、摘要及共享准入检查后才发布。
+hooks 使用真实 cwd 确定项目身份，将获准的执行证据写入持久事件箱；hooks 不调用模型。独立监督进程托管 Hermes worker，复用原生 review、Memory、Skills 和 Curator。项目记忆按工作区召回，通用候选通过来源、资源、摘要及共享准入检查后才发布。新一轮自动复盘默认至少间隔 120 秒；显式学习和既有重试不受此间隔限制。用 [运行说明](./docs/LOCAL-OPERATIONS.zh-CN.md#验证与回退) 查看阶段、复盘用量和留存预览。
 
 [实现整理](./docs/SELF-EVOLUTION.zh-CN.md) 说明共同的执行与学习闭环；[流程学习](./docs/WORKFLOW-METADATA.zh-CN.md) 说明固定流程投影的边界。新建全局配置默认学习固定动作／状态；企业专用部署可按已绑定策略学习正文，其他部署沿用显式来源准入；流程投影不提供通用脱敏服务。
 
@@ -70,7 +70,7 @@ hooks 使用真实 cwd 确定项目身份，将获准的执行证据写入持久
 ```text
 src/hermes_codex_learning/   共用 hooks、学习桥接、MCP、资料准入、发布与更新
 hermes-plugin/              原生 Hermes 插件入口
-hooks/ skills/              Codex hooks 与技能加载策略
+hooks/ skills/              双宿主 hooks 与共用技能加载策略
 scripts/ probes/ tests/     客户端、平台服务、显式探针与离线回归
 desktop/ macos/ assets/     SSH 接收器、共用通知 App 源码与图标
 patches/ docs/ evidence/    固定兼容材料、操作说明与保留证据

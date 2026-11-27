@@ -12,11 +12,37 @@ from .store import digest, dumps
 from .notices import NoticeQueue
 
 
+BATCH_SIZE = 1000
+VACUUM_PAGES = 4096
+_TURN_EVENTS = """json_extract(e.payload,'$.session_id')=json_extract(t.payload,'$.source.chat')
+    AND json_extract(e.payload,'$.turn_id')=json_extract(t.payload,'$.source.turn')"""
+_SETTLED = f"""t.activity<? AND t.observed_revision=t.revision
+    AND json_extract(t.payload,'$.status') IN ('completed','interrupted')
+    AND instr(COALESCE(json_extract(t.payload,'$.coverage'),''),'background_exit_pending')=0
+    AND NOT EXISTS (SELECT 1 FROM events e WHERE {_TURN_EVENTS} AND e.delivered IS NULL)"""
+
+
+def _prune_delivered_events(store, chat, turn, *, dry_run):
+    rows = store.db.execute("""
+        SELECT rowid,id,source_key,created FROM events WHERE delivered IS NOT NULL
+          AND json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.turn_id')=?
+    """, (chat, turn)).fetchall()
+    if rows and not dry_run:
+        # Commit the cursor floor with the deletion. New writers allocate above it.
+        floor = max(store.get("events-rowid-floor", 0), *(row["rowid"] for row in rows))
+        store.db.execute("INSERT OR REPLACE INTO meta VALUES ('events-rowid-floor',?)", (dumps(floor),))
+        store.db.executemany("INSERT OR IGNORE INTO retired_events VALUES (?,?,?)",
+                             ((row["source_key"], row["id"], row["created"]) for row in rows if row["source_key"]))
+        store.db.executemany("DELETE FROM events WHERE id=?", ((row["id"],) for row in rows))
+    return len(rows)
+
+
 def run(settings, store, api, *, dry_run=True):
     cutoff = time.time() - 30 * 86400
     raw_cutoff = time.time() - settings.raw_event_retention_days * 86400
     result = {"dry_run":dry_run, "eligible_turns":0, "retired_turns":0,
-              "eligible_raw_events": 0, "pruned_raw_events": 0, "pruned_transcript_cursors": 0}
+              "eligible_raw_events": 0, "pruned_raw_events": 0, "pruned_transcript_cursors": 0,
+              "pruned_with_retired_turns": 0}
     if not hasattr(api, "prune"):
         result.update(state="native_retention_unavailable")
         if not dry_run:
@@ -26,32 +52,26 @@ def run(settings, store, api, *, dry_run=True):
     from .learning_requests import retire
     result["explicit_learning"] = retire(store, cutoff, dry_run=dry_run)
     # Trim delivered raw events and settled transcript cursors once their turn is observed and older than raw_cutoff.
-    settled_rows = store.db.execute(
-        "SELECT id, payload FROM turns WHERE activity < ? AND observed_revision = revision "
-        "AND json_extract(payload, '$.status') IN ('completed', 'interrupted') ORDER BY activity LIMIT 1000",
-        (raw_cutoff,),
-    ).fetchall()
-    for row in settled_rows:
-        data = json.loads(row["payload"])
-        src = data.get("source") or {}
-        chat, turn = src.get("chat"), src.get("turn")
-        if not chat or not turn:
-            continue
-        raw_events = store.db.execute(
-            "SELECT id, source_key, created FROM events WHERE delivered IS NOT NULL "
-            "AND json_extract(payload, '$.session_id')=? AND json_extract(payload, '$.turn_id')=?",
-            (chat, turn),
-        ).fetchall()
-        result["eligible_raw_events"] += len(raw_events)
-        if dry_run:
-            continue
+    settled_rows = store.db.execute(f"""
+        SELECT t.id, json_extract(t.payload,'$.source.chat') chat, json_extract(t.payload,'$.source.turn') turn
+        FROM turns t WHERE {_SETTLED}
+          AND EXISTS (SELECT 1 FROM events e WHERE {_TURN_EVENTS} AND e.delivered IS NOT NULL)
+        ORDER BY t.activity,t.id LIMIT ?
+    """, (raw_cutoff, BATCH_SIZE + 1)).fetchall()
+    result["more_raw_candidates"] = len(settled_rows) > BATCH_SIZE
+    for row in settled_rows[:BATCH_SIZE]:
+        chat, turn = row["chat"], row["turn"]
         with store.db:
-            for event in raw_events:
-                if event["source_key"]:
-                    store.db.execute("INSERT OR IGNORE INTO retired_events VALUES (?,?,?)",
-                                     (event["source_key"], event["id"], event["created"]))
-                store.db.execute("DELETE FROM events WHERE id=?", (event["id"],))
-            result["pruned_raw_events"] += len(raw_events)
+            if not dry_run:
+                store.db.execute("BEGIN IMMEDIATE")
+                if not store.db.execute(f"SELECT 1 FROM turns t WHERE t.id=? AND {_SETTLED}",
+                                        (row["id"], raw_cutoff)).fetchone():
+                    continue
+            pruned = _prune_delivered_events(store, chat, turn, dry_run=dry_run)
+            result["eligible_raw_events"] += pruned
+            if dry_run:
+                continue
+            result["pruned_raw_events"] += pruned
             cursor_keys = [
                 "transcript-cursor:" + digest([chat, turn]),
                 "transcript-cursor:" + digest([chat, turn, True]),
@@ -60,30 +80,36 @@ def run(settings, store, api, *, dry_run=True):
             for ck in cursor_keys:
                 deleted = store.db.execute("DELETE FROM meta WHERE key=?", (ck,)).rowcount
                 result["pruned_transcript_cursors"] += deleted
-    rows = store.db.execute("SELECT id,payload FROM turns WHERE activity<? AND observed_revision=revision "
-                            "AND json_extract(payload,'$.status') IN ('completed','interrupted') ORDER BY activity LIMIT 1000",
-                            (cutoff,)).fetchall()
+    cursor = store.get("retention:turn-cursor") or [0, ""]
+    rows = store.db.execute(f"""
+        SELECT t.id,t.payload,t.activity FROM turns t WHERE {_SETTLED} AND (t.activity,t.id)>(?,?)
+        ORDER BY t.activity,t.id LIMIT ?
+    """, (cutoff, *cursor, BATCH_SIZE + 1)).fetchall()
+    result["more_turn_candidates"] = len(rows) > BATCH_SIZE
+    rows = rows[:BATCH_SIZE]
+    eligible_handles = set(result["native"].get("eligible_handles", [])) if dry_run else set()
+    retired_handles = {}
     for row in rows:
         data = json.loads(row["payload"])
         source = {key:data["source"][key] for key in ("host","project","chat")}
         handles = store.get("chat-handles:"+digest(source), [])
         if not handles:
             continue
-        eligible = set(result["native"].get("eligible_handles", [])) if dry_run else set()
-        if not all(handle in eligible or api.read(kind="retention_state", name=handle).get("retired") for handle in handles):
+        for handle in handles:
+            if handle not in retired_handles:
+                retired_handles[handle] = handle in eligible_handles or api.read(kind="retention_state", name=handle).get("retired")
+        if not all(retired_handles[handle] for handle in handles):
             continue
         result["eligible_turns"] += 1
         if dry_run:
             continue
         with store.db:
-            events = store.db.execute("SELECT id,source_key,created FROM events WHERE delivered IS NOT NULL "
-                                      "AND json_extract(payload,'$.session_id')=? AND json_extract(payload,'$.turn_id')=?",
-                                      (source["chat"],data["source"]["turn"])).fetchall()
-            for event in events:
-                if event["source_key"]:
-                    store.db.execute("INSERT OR IGNORE INTO retired_events VALUES (?,?,?)",
-                                     (event["source_key"],event["id"],event["created"]))
-                store.db.execute("DELETE FROM events WHERE id=?", (event["id"],))
+            store.db.execute("BEGIN IMMEDIATE")
+            if not store.db.execute(f"SELECT 1 FROM turns t WHERE t.id=? AND {_SETTLED}",
+                                    (row["id"], cutoff)).fetchone():
+                continue
+            result["pruned_with_retired_turns"] += _prune_delivered_events(
+                store, source["chat"], data["source"]["turn"], dry_run=False)
             retired = {"source":data["source"], "user":"", "assistant":"", "tools":{}, "status":"retired",
                        "coverage":["body_retired_after_30_days"]}
             store.db.execute("UPDATE turns SET payload=? WHERE id=?", (dumps(retired),row["id"]))
@@ -119,6 +145,9 @@ def run(settings, store, api, *, dry_run=True):
             if changed:
                 store.set(key, records)
         result["retired_turns"] += 1
+    if not dry_run:
+        last = rows[-1] if result["more_turn_candidates"] else None
+        store.set("retention:turn-cursor", [last["activity"], last["id"]] if last else None)
     queue = NoticeQueue(settings.state)
     try:
         result["notices"] = queue.retire(before=time.time()-90*86400,dry_run=dry_run)
@@ -127,11 +156,18 @@ def run(settings, store, api, *, dry_run=True):
     if not dry_run:
         with store.db:
             store.db.execute("DELETE FROM delivery_events WHERE delivered IS NOT NULL AND delivered<?", (cutoff,))
-        if result["pruned_raw_events"] > 0 or result["retired_turns"] > 0:
-            try:
-                store.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            except Exception:
-                pass
+    incremental = store.db.execute("PRAGMA auto_vacuum").fetchone()[0] == 2
+    reusable = store.db.execute("PRAGMA freelist_count").fetchone()[0]
+    if not dry_run and incremental and reusable:
+        store.db.execute(f"PRAGMA incremental_vacuum({VACUUM_PAGES})").fetchall()
+    if not dry_run and (result["pruned_raw_events"] or result["retired_turns"] or (incremental and reusable)):
+        store.db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    page_size = store.db.execute("PRAGMA page_size").fetchone()[0]
+    result["database"] = {
+        "allocated_bytes": page_size * store.db.execute("PRAGMA page_count").fetchone()[0],
+        "reusable_bytes": page_size * store.db.execute("PRAGMA freelist_count").fetchone()[0],
+        "incremental_vacuum": incremental,
+    }
     result["runtime"] = runtime_cleanup(settings,dry_run=dry_run)
     result['artifacts'] = retain_artifacts(store, api, dry_run=dry_run)
     if not dry_run:

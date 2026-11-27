@@ -1,13 +1,15 @@
-"""Codex-specific projection. The Hermes core accepts executor-neutral observations."""
+"""Fold host hook receipts into observations for Hermes Learning API v1."""
 from __future__ import annotations
 
 import json
 import re
 import time
 
+from .claude_hooks import EXECUTOR as CLAUDE, MISSING_STOP, STOP_FAILURE
 from .store import Store, digest, dumps
 
 
+CODEX_EXECUTORS = {"Codex App", "Codex CLI"}
 _EXECUTION_TOOLS = {"bash", "exec_command", "write_stdin", "exec", "wait", "terminal"}
 BACKGROUND_EXIT_PENDING = "background_exit_pending"
 CODEX_COMPLETION = "CodexTranscriptComplete"
@@ -66,22 +68,37 @@ def _result_state(name: str, response) -> tuple[str, str, str | None]:
     return "completed", "", None
 
 
+def event_tool_state(event: dict) -> tuple[str, str, str | None]:
+    if event.get("bridge_executor") == CLAUDE and "bridge_tool_status" in event:
+        status = event["bridge_tool_status"]
+        return status, "", "unrecognized_execution_result" if status == "unknown" else None
+    name = event.get("tool_name", "unknown")
+    if event.get("bridge_executor") == "Hermes" and name == "process":
+        name = "terminal"
+    return _result_state(name, event.get("tool_response"))
+
+
 def settle_turn(data: dict) -> None:
     ended_by = data.get("_ended_by") or ("Stop" if data["status"] == "incomplete" and data.get("assistant") else None)
     pending = [tool for tool in data["tools"].values() if tool["status"] in {"running", "unknown"}]
     background = [tool for tool in pending if tool["status"] == "running" and tool.get("background_session")]
-    coverage = set(data.get("coverage", [])) - {BACKGROUND_EXIT_PENDING}
+    coverage = set(data.get("coverage", [])) - {BACKGROUND_EXIT_PENDING, "claude_tool_result_unavailable"}
     if background:
         coverage.add(BACKGROUND_EXIT_PENDING)
-    data["coverage"] = sorted(coverage)
     if ended_by == "Interrupt":
         data["status"] = "interrupted"
+    elif ended_by and data.get("source", {}).get("executor") == CLAUDE:
+        # Stop establishes the prompt ending independently of tool outcomes.
+        data["status"] = "completed" if ended_by == "Stop" else "incomplete"
+        if pending:
+            coverage.add("claude_tool_result_unavailable")
     elif ended_by in {"Stop", CODEX_COMPLETION}:
         unresolved = len(pending) != len(background) or (background and "missing_tool_use_id" in coverage)
         data["status"] = "incomplete" if unresolved else "completed"
         if data.get('_evidence_mode') == 'workflow-v1':
             # The lifecycle ended; unknown tool outcomes remain explicitly unknown.
             data['status'] = 'completed'
+    data["coverage"] = sorted(coverage)
 
 
 def _background_poll_targets(data, event):
@@ -116,8 +133,10 @@ def merge_event(store: Store, row: dict) -> dict | None:
                    "executor": event.get("bridge_executor", "Codex App")},
         "user": "", "assistant": "", "tools": {}, "status": "running", "coverage": [],
     }
+    claude = event.get("bridge_executor") == CLAUDE
     if previous and (event.get("bridge_host", "codex-desktop") != data["source"]["host"]
-                     or event.get("bridge_project", event["cwd"]) != data["source"]["project"]):
+                     or event.get("bridge_project", event["cwd"]) != data["source"]["project"]
+                     or claude != (data["source"].get("executor") == CLAUDE)):
         return None
     provenance = data.setdefault("evidence_provenance", {})
     captured_at = row["created"] if "created" in row.keys() else time.time()
@@ -145,8 +164,12 @@ def merge_event(store: Store, row: dict) -> dict | None:
         poll_targets = _background_poll_targets(data, event)
         if len(poll_targets) == 1:
             return None  # A same-session poll retrieves evidence for the original call.
-        data["status"] = "running"
         tool_id = event.get("tool_use_id")
+        if claude and data.get("_ended_by") in {"Stop", STOP_FAILURE} and tool_id not in data["tools"]:
+            # A new call can follow a Stop when another hook asked Claude to continue.
+            data.pop("_ended_by")
+            data["assistant"] = ""
+        data["status"] = "running"
         if tool_id:
             data["tools"].setdefault(tool_id, {
                 "call_id": tool_id, "name": event.get("tool_name", "unknown"),
@@ -163,8 +186,8 @@ def merge_event(store: Store, row: dict) -> dict | None:
             response = event.get("tool_response", {})
             tool_name = event.get("tool_name", "unknown")
             native = event.get("bridge_executor") == "Hermes"
-            status, process, gap = _result_state("terminal" if native and tool_name == "process" else tool_name, response)
-            if event.get("bridge_executor") == "Hermes":
+            status, process, gap = event_tool_state(event)
+            if native:
                 # Transport completion is separate from the operation's terminal state.
                 if event.get("native_status") in {"cancelled", "blocked"}:
                     status = "interrupted"
@@ -228,17 +251,24 @@ def merge_event(store: Store, row: dict) -> dict | None:
                 arguments = previous_call.get("arguments") or arguments
                 tool_action = previous_call.get("action") or tool_action
                 test_key = previous_call.get("test_key") or test_key
+            if claude and status == "unknown" and previous_call.get("status") in {"completed", "failed", "interrupted"}:
+                return None  # A less informative duplicate cannot erase a terminal result.
+            status_source = "hermes_lifecycle" if native else event.get("bridge_tool_status_source") if claude else None
             data["tools"][target_id] = {
                 "call_id": target_id, "name": original["name"] if original else tool_name,
                 "arguments": arguments,
                 "result": response, "status": status, "process": process,
                 "action": tool_action, "test_key": test_key,
-                **({"status_source": "hermes_lifecycle"} if native else {}),
+                **({"status_source": status_source} if status_source else {}),
                 **({"background_session": background} if background else {}),
             }
+            coverage = set(data["coverage"])
             if gap:
-                data["coverage"] = sorted(set(data["coverage"]) | {gap + ":" + target_id})
-    elif name in {"Stop", CODEX_COMPLETION}:
+                coverage.add(gap + ":" + target_id)
+            elif claude and status != "unknown":
+                coverage.discard("unrecognized_execution_result:" + target_id)
+            data["coverage"] = sorted(coverage)
+    elif name in {"Stop", CODEX_COMPLETION} or (claude and name == STOP_FAILURE):
         if name == CODEX_COMPLETION and (data.get("_ended_by") not in {None, "stale_timeout"}
                                          or not isinstance(event.get("bridge_completion"), str)):
             return None
@@ -250,6 +280,13 @@ def merge_event(store: Store, row: dict) -> dict | None:
             return data
         data["assistant"] = event.get("last_assistant_message", "")
         provenance.update(terminal_event=row["id"], terminal_at=captured_at)
+        if claude:
+            coverage = set(data["coverage"]) - {MISSING_STOP, "claude_api_failure", "claude_session_background_tasks"}
+            if name == STOP_FAILURE:
+                coverage.add("claude_api_failure")
+            if event.get("bridge_background_pending"):
+                coverage.add("claude_session_background_tasks")
+            data["coverage"] = sorted(coverage)
         if name == CODEX_COMPLETION and event.get("bridge_executor") == "Codex CLI":
             data["source"]["executor"] = "Codex CLI"
         if data.get("_ended_by") != "Interrupt" and data["status"] != "interrupted":
@@ -260,14 +297,59 @@ def merge_event(store: Store, row: dict) -> dict | None:
             data["assistant"] = event.get("last_assistant_message", "")
     settle_turn(data)
     revision = digest(data)
+    if claude and previous and revision == previous["observed_revision"]:
+        return None
     now = time.time()
-    stopped = now if data["status"] == "completed" else None
+    stopped = now if data["status"] == "completed" or (claude and data.get("_ended_by")) else None
     with store.db:
         store.db.execute("INSERT INTO turns(id,payload,revision,stopped,activity) VALUES (?,?,?,?,?) "
                          "ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,revision=excluded.revision,"
                          "stopped=excluded.stopped,activity=excluded.activity", (key, dumps(data), revision, stopped, now))
-        store.db.execute("INSERT OR REPLACE INTO latest_turns VALUES (?,?,?)", (session, key, now))
+        if claude:
+            store.db.execute("INSERT INTO latest_turns VALUES (?,?,?) ON CONFLICT(chat) DO UPDATE SET "
+                             "turn_id=excluded.turn_id,activity=excluded.activity WHERE latest_turns.turn_id=excluded.turn_id "
+                             "OR COALESCE((SELECT json_extract(payload,'$.evidence_provenance.first_captured_at') "
+                             "FROM turns WHERE id=latest_turns.turn_id),0)<=?",
+                             (session, key, now, provenance["first_captured_at"]))
+        else:
+            store.db.execute("INSERT OR REPLACE INTO latest_turns VALUES (?,?,?)", (session, key, now))
     return data
+
+
+def end_without_stop(data: dict, reason: str) -> None:
+    data["status"] = "incomplete"
+    data["_ended_by"] = reason
+    if data["source"].get("executor") == CLAUDE:
+        data["coverage"] = sorted(set(data.get("coverage", [])) | {MISSING_STOP})
+        settle_turn(data)
+
+
+def close_claude_turns(store: Store, row: dict, event: dict) -> None:
+    """A new prompt or session exit ends waiting for older prompts' Stop receipts."""
+    chat, turn = event["session_id"], event.get("turn_id")
+    reason = "SessionEnd" if event["hook_event_name"] == "SessionEnd" else "superseded_by_prompt"
+    current = digest([chat, turn])
+    if reason == "superseded_by_prompt":
+        if not turn:
+            return
+        prior = store.db.execute("SELECT json_extract(payload,'$.evidence_provenance.request_event') "
+                                 "FROM turns WHERE id=?", (current,)).fetchone()
+        if prior and prior[0] and prior[0] != row["id"]:
+            return  # A changed replay of an older prompt is not a new prompt.
+    rows = store.db.execute("""
+        SELECT id,payload FROM turns WHERE json_extract(payload,'$.source.chat')=?
+          AND json_extract(payload,'$.source.executor')='Claude Code' AND stopped IS NULL
+          AND json_extract(payload,'$._ended_by') IS NULL
+          AND json_extract(payload,'$.source.host')=? AND json_extract(payload,'$.source.project')=?
+          AND json_extract(payload,'$.status') IN ('running','incomplete') AND id<>?
+          AND json_extract(payload,'$.evidence_provenance.first_captured_at')<=?
+    """, (chat, event["bridge_host"], event["bridge_project"], current, row["created"])).fetchall()
+    with store.db:
+        for previous in rows:
+            data = json.loads(previous["payload"])
+            end_without_stop(data, reason)
+            store.db.execute("UPDATE turns SET payload=?,revision=?,stopped=? WHERE id=?",
+                             (dumps(data), digest(data), row["created"], previous["id"]))
 
 
 def compact_learning_result(response):

@@ -3,7 +3,7 @@
   "version": "0.11.0",
   "description": "Automatic Hermes native learning from Codex tasks, with visible feedback and learned skills.",
   "skills": "./skills/",
-  "hooks": "./hooks/hooks.json",
+  "hooks": "./hooks/codex.json",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Hermes Learning",

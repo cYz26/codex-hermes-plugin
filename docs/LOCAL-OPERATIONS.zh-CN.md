@@ -54,11 +54,17 @@ scripts/bridge review-metrics --cwd /ABS/project --date 2026-11-13 --timezone As
 
 记忆预览按项目列出条目和当前快照的 `revision`。压缩 JSON 包含 `revision` 和 `replacements`，后者以条目 ID 为键、缩短后的完整条目为值。预览显示原文、拟替换文本和预计释放的原生字符数。实际修订沿用原生记忆审批。
 
-发布预览显示当前和开启严格共享时的目录、可读版本、项目来源及已有判定。日报指标从复盘回执统计各组的 API 次数、tokens、墙钟耗时和实际变更。用已知聊天 ID 标注验收与审查，其他组包含尚未标注的聊天。各指标同时给出采集覆盖次数。旧回执可能只能提供两条通知的间隔，其中可能包含 worker 中断的时间。
+发布预览显示当前和开启严格共享时的目录、可读版本、项目来源及已有判定。`review-metrics` 按已标注的验收／审查聊天分组，并按触发原因与执行宿主给出 API 调用、tokens 和耗时。各指标同时给出采集覆盖次数；缺失不记为零，实付费用不推算。旧回执可能只提供两条通知的间隔，可能包含 worker 中断时间。
+
+`skill_evidence` 以当日确认的交付调用为分母，按技能和版本去重，匹配查询时已有的应用声明与明确宿主测试。旧交付没有确认时间时单列，不补到当日。一次交付可以有不同的测试结果；测试通过不是技能造成收益的证明。
+
+`learning.automatic_review_interval_seconds` 默认 `120`，单位秒。它限制 `native_threshold` 和 `idle_flush` 的启动频率，重启后仍生效；`0` 仅关闭这层限频，不关闭自动学习。显式学习与已有重试保持原调度。用 `status` 或 `doctor` 的 `review_queue.automatic_review_not_before` 核对当前队列的最早自动启动时间。
 
 `effective_policy.executable_validation` 显示独立验证后端。Linux 使用 `bwrap`。macOS 使用系统 `sandbox-exec` 和 Apple 开发工具自带 Python，执行前探测文件、网络和子进程限制。脚本只运行受信的合成用例。macOS 有 CPU、输出文件和墙钟上限，另采样监控常驻内存。后端或探测不可用时，脚本验证保持待核对。
 
-`scripts/bridge retention` 默认预览过期回合与产物。恢复演练使用停止写入后的隔离备份，核对原生库和派生目录能恢复，宿主回合的删除标记仍能阻止旧事件重放。需要保留清理前的宿主证据时，可用 SQLite 备份单独封存，并从备份中只读核对。服务更新的回退会保留正在使用的宿主事件箱。
+`scripts/bridge retention` 默认预览，不删除内容。核对后可用 `retention --apply` 排队执行一批，回读 `status` 的 `retention`；`more_raw_candidates` 或 `more_turn_candidates` 为真时还有下一批。`retention.enabled` 仍为显式选择，开启后默认每天执行一批。已消费且已被原生观察的终态，原始事件默认保留 7 天（`retention.raw_event_days`）；仅在原生证据也已退休时移除超过 30 天的回合正文。待消费事件、等待后台退出的回合和受保护的制品版本不删除。
+
+`retention.database` 区分 SQLite 已分配和可复用字节。新库启用有限的增量回收；旧库不做全量 `VACUUM`，删除形成的空页可能继续占用文件空间，可供 SQLite 后续复用。更新回退保留当前宿主事件箱；需要保留清理前的证据时，应先做独立 SQLite 备份。
 
 原本地分支在 Linux 开发机执行离线 Python 回归、包版本／补丁、历史证据、文档链接和凭据扫描，保留结果见 [0.4.2 基线记录](../evidence/releases/local-0.4.2.json)。测试能够验证便携核心，不能验证 macOS 的 Swift 编译、系统通知显示和实际点击；这些项明确保留为待 Mac 验证。
 

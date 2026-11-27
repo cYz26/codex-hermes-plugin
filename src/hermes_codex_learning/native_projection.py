@@ -1,4 +1,4 @@
-"""Materialize immutable read-only skill snapshots for Codex and Hermes native discovery."""
+"""Materialize immutable read-only skill snapshots for host skill discovery."""
 from __future__ import annotations
 
 import hashlib
@@ -183,72 +183,85 @@ def _load_manifest(skills_dir: Path) -> dict:
         return {}
 
 
-def _is_managed_symlink(entry: Path, name: str, manifest: dict, settings: Settings) -> bool:
+def _is_managed_symlink(entry: Path, settings: Settings) -> bool:
     if not entry.is_symlink():
         return False
-    owned_manifest = (manifest.get("schema") == 1 and manifest.get("owner") == "hermes-learning"
-                      and manifest.get("home") == str(settings.home.resolve()))
-    if owned_manifest and name in (manifest.get("skills") or {}):
-        return True
     try:
-        raw_target = Path(os.readlink(entry))
-        resolved = (entry.parent / raw_target).resolve() if not raw_target.is_absolute() else raw_target.resolve()
-        return resolved.is_relative_to(export_root(settings).resolve())
-    except OSError:
+        target = entry.resolve()
+        # A formerly managed name may have been replaced by a user-owned link.
+        return target.parent == snapshots_root(settings).resolve() and bool(_VERSION_RE.fullmatch(target.name))
+    except (OSError, RuntimeError):
         return False
+
+
+def _host_projection(settings: Settings, skills_dir: Path, eligible: dict, *, dry_run: bool) -> dict:
+    result = {"directory": str(skills_dir), "projected_skills": [], "shadowed": {}, "removed": []}
+    if skills_dir.is_symlink() or (skills_dir.exists() and not skills_dir.is_dir()):
+        result["shadowed"] = dict.fromkeys(eligible, "unmanaged_host_directory")
+        return result
+    manifest = _load_manifest(skills_dir)
+    owner = str(settings.home.resolve())
+    manifest_home = manifest.get("home")
+    same_owner = manifest.get("owner") == "hermes-learning" and manifest_home == owner
+    if (manifest.get("owner") == "hermes-learning" and not same_owner
+            and isinstance(manifest_home, str) and Path(manifest_home).is_dir()):
+        result["shadowed"] = dict.fromkeys(eligible, "owned_by_other_learning_home")
+        return result
+
+    projected = {}
+    for name, info in sorted(eligible.items()):
+        entry = skills_dir / name
+        if (entry.exists() or entry.is_symlink()) and not _is_managed_symlink(entry, settings):
+            result["shadowed"][name] = "unmanaged_host_entry"
+            continue
+        target = (snapshots_root(settings) / info["version"]).resolve()
+        if not dry_run:
+            if entry.is_symlink():
+                if Path(os.readlink(entry)) != target:
+                    _swap_symlink(entry, target)
+            else:
+                skills_dir.mkdir(parents=True, exist_ok=True)
+                try:
+                    entry.symlink_to(target, target_is_directory=True)
+                except FileExistsError:
+                    result["shadowed"][name] = "unmanaged_host_entry"
+                    continue
+        projected[name] = {"version": info["version"], "snapshot": str(target), "audience": info["audience"]}
+    result["projected_skills"] = sorted(projected)
+    if skills_dir.is_dir():
+        for entry in sorted(skills_dir.iterdir()):
+            if entry.name not in eligible and _is_managed_symlink(entry, settings):
+                if not dry_run:
+                    entry.unlink(missing_ok=True)
+                result["removed"].append(entry.name)
+    if not dry_run:
+        path = skills_dir / MANIFEST_NAME
+        updated = {"schema": 1, "owner": "hermes-learning", "home": owner,
+                   "catalog_dir": str(catalog_root(settings).resolve()), "skills": projected}
+        if projected and updated != {key: manifest.get(key) for key in updated}:
+            atomic_json(path, {**updated, "updated_at": time.time()})
+        elif not projected and same_owner and path.is_file():
+            path.unlink(missing_ok=True)
+    return result
 
 
 def sync_published_skills(settings: Settings, store, *, dry_run: bool = False) -> dict:
     enabled = bool(settings.native_skill_projection and settings.checked_publication)
     eligible = eligible_publications(settings, store) if enabled else {}
     root = export_root(settings)
-    snaps = snapshots_dir = snapshots_root(settings)
+    snaps = snapshots_root(settings)
     cat = catalog_root(settings)
-    projected: dict[str, str] = {}
-    shadowed: dict[str, str] = {}
-    removed: list[str] = []
-
     if dry_run:
-        if settings.codex_skills_dir is not None and settings.codex_skills_dir.is_dir():
-            manifest = _load_manifest(settings.codex_skills_dir)
-            manifest_home = manifest.get("home")
-            foreign_owner = (
-                manifest.get("owner") == "hermes-learning"
-                and isinstance(manifest_home, str)
-                and manifest_home != str(settings.home.resolve())
-                and Path(manifest_home).is_dir()
-            )
-            for name, info in eligible.items():
-                dest = settings.codex_skills_dir / name
-                if foreign_owner:
-                    shadowed[name] = "owned_by_other_learning_home"
-                elif (dest.exists() or dest.is_symlink()) and not _is_managed_symlink(dest, name, manifest, settings):
-                    shadowed[name] = "unmanaged_host_entry"
-                else:
-                    projected[name] = info["version"]
-            if manifest.get("owner") == "hermes-learning" and manifest.get("home") == str(settings.home.resolve()):
-                removed = sorted(set(manifest.get("skills") or {}) - set(eligible))
-        else:
-            projected = {name: info["version"] for name, info in eligible.items()}
-        return {
-            "dry_run": True,
-            "enabled": enabled,
-            "catalog_dir": str(cat),
-            "codex_skills_dir": str(settings.codex_skills_dir) if settings.codex_skills_dir else None,
-            "projected_skills": sorted(projected),
-            "versions": projected,
-            "shadowed": shadowed,
-            "removed": removed,
-        }
+        return _projection_summary(settings, enabled, eligible, dry_run=True)
 
     materialized: dict[str, Path] = {}
     if enabled and eligible:
         root.mkdir(parents=True, exist_ok=True, mode=0o755)
-        snapshots_dir.mkdir(parents=True, exist_ok=True, mode=0o755)
+        snaps.mkdir(parents=True, exist_ok=True, mode=0o755)
         cat.mkdir(parents=True, exist_ok=True, mode=0o755)
         for name, info in list(eligible.items()):
             try:
-                snap = materialize_snapshot(snapshots_dir, info["version"], info["resource_dir"], info["files"])
+                snap = materialize_snapshot(snaps, info["version"], info["resource_dir"], info["files"])
                 materialized[name] = snap
             except (OSError, ValueError):
                 eligible.pop(name, None)
@@ -270,70 +283,8 @@ def sync_published_skills(settings: Settings, store, *, dry_run: bool = False) -
         for name, snap in sorted(materialized.items()):
             _swap_symlink(cat / name, Path("..") / "snapshots" / snap.name)
 
-    codex_projected: dict[str, dict] = {}
-    if settings.codex_skills_dir is not None:
-        skills_dir = settings.codex_skills_dir
-        if materialized:
-            skills_dir.mkdir(parents=True, exist_ok=True)
-        if skills_dir.is_dir() and not skills_dir.is_symlink():
-            manifest = _load_manifest(skills_dir)
-            previous_skills = manifest.get("skills") if isinstance(manifest.get("skills"), dict) else {}
-            manifest_home = manifest.get("home")
-            same_owner = (manifest.get("owner") == "hermes-learning"
-                          and manifest_home == str(settings.home.resolve()))
-            foreign_owner = (
-                manifest.get("owner") == "hermes-learning"
-                and not same_owner
-                and isinstance(manifest_home, str)
-                and Path(manifest_home).is_dir()
-            )
-            if foreign_owner:
-                for name in sorted(materialized):
-                    shadowed[name] = "owned_by_other_learning_home"
-                candidates_to_prune = set()
-            else:
-                candidates_to_prune = set(previous_skills) - set(materialized) if same_owner else set()
-                for entry in skills_dir.iterdir():
-                    if entry.name not in materialized and _is_managed_symlink(entry, entry.name, manifest, settings):
-                        candidates_to_prune.add(entry.name)
-            for stale_name in sorted(candidates_to_prune):
-                stale_entry = skills_dir / stale_name
-                if _is_managed_symlink(stale_entry, stale_name, manifest, settings):
-                    stale_entry.unlink(missing_ok=True)
-                    removed.append(stale_name)
-
-            if not foreign_owner:
-                for name, snap in sorted(materialized.items()):
-                    dest = skills_dir / name
-                    if (dest.exists() or dest.is_symlink()) and not _is_managed_symlink(dest, name, manifest, settings):
-                        shadowed[name] = "unmanaged_host_entry"
-                        continue
-                    target = snap.resolve()
-                    if not dest.is_symlink() or Path(os.readlink(dest)) != target:
-                        _swap_symlink(dest, target)
-                    codex_projected[name] = {
-                        "version": eligible[name]["version"],
-                        "snapshot": str(target),
-                        "audience": eligible[name]["audience"],
-                    }
-                    projected[name] = eligible[name]["version"]
-
-                manifest_path = skills_dir / MANIFEST_NAME
-                if codex_projected:
-                    atomic_json(manifest_path, {
-                        "schema": 1,
-                        "owner": "hermes-learning",
-                        "home": str(settings.home.resolve()),
-                        "catalog_dir": str(cat.resolve()) if cat.exists() else str(cat),
-                        "updated_at": time.time(),
-                        "skills": codex_projected,
-                    })
-                elif same_owner and manifest_path.is_file() and not manifest_path.is_symlink():
-                    manifest_path.unlink(missing_ok=True)
-    else:
-        projected = {name: eligible[name]["version"] for name in sorted(materialized)}
-
-    active_versions = {eligible[name]["version"] for name in materialized}
+    summary = _projection_summary(settings, enabled, eligible, dry_run=False)
+    active_versions = set(summary["versions"].values())
     if snaps.is_dir() and not snaps.is_symlink():
         for child in sorted(snaps.iterdir()):
             if child.name.startswith("."):
@@ -341,17 +292,7 @@ def sync_published_skills(settings: Settings, store, *, dry_run: bool = False) -
             if child.name not in active_versions:
                 _remove_readonly_tree(child)
 
-    summary = {
-        "enabled": enabled,
-        "catalog_dir": str(cat),
-        "codex_skills_dir": str(settings.codex_skills_dir) if settings.codex_skills_dir else None,
-        "projected_skills": sorted(projected),
-        "catalog_skills": sorted(materialized),
-        "versions": {name: eligible[name]["version"] for name in sorted(materialized)},
-        "shadowed": shadowed,
-        "removed": removed,
-        "updated_at": time.time(),
-    }
+    summary["updated_at"] = time.time()
     if hasattr(store, "set"):
         try:
             store.set("native-skill-projection", summary)
@@ -360,29 +301,29 @@ def sync_published_skills(settings: Settings, store, *, dry_run: bool = False) -
     return summary
 
 
-def projection_status(settings: Settings, store) -> dict:
-    recorded = store.get("native-skill-projection")
-    cat = catalog_root(settings)
-    live_codex = []
-    if settings.codex_skills_dir and settings.codex_skills_dir.is_dir():
-        manifest = _load_manifest(settings.codex_skills_dir)
-        for name in sorted((manifest.get("skills") or {}).keys()):
-            entry = settings.codex_skills_dir / name
-            if _is_managed_symlink(entry, name, manifest, settings) and entry.exists():
-                live_codex.append(name)
-    return {
-        **(recorded or {
-            "enabled": bool(settings.native_skill_projection and settings.checked_publication),
-            "catalog_dir": str(cat),
+def _projection_summary(settings, enabled, eligible, *, dry_run):
+    codex = (_host_projection(settings, settings.codex_skills_dir, eligible, dry_run=dry_run)
+             if settings.codex_skills_dir else {"projected_skills": sorted(eligible), "shadowed": {}, "removed": []})
+    claude = (_host_projection(settings, settings.claude_skills_dir, eligible, dry_run=dry_run)
+              if settings.claude_skills_dir else None)
+    versions = {name: info["version"] for name, info in eligible.items()}
+    return {**codex, "enabled": enabled, "catalog_dir": str(catalog_root(settings)),
             "codex_skills_dir": str(settings.codex_skills_dir) if settings.codex_skills_dir else None,
-            "projected_skills": [],
-            "catalog_skills": [],
-            "versions": {},
-            "shadowed": {},
-        }),
-        "catalog_exists": cat.is_dir(),
-        "live_codex_symlinks": live_codex,
-    }
+            "claude": claude, "catalog_skills": sorted(versions), "versions": versions,
+            **({"dry_run": True} if dry_run else {})}
+
+
+def projection_status(settings: Settings, store) -> dict:
+    recorded = store.get("native-skill-projection") or _projection_summary(
+        settings, bool(settings.native_skill_projection and settings.checked_publication), {}, dry_run=True)
+    status = {**recorded, "catalog_exists": catalog_root(settings).is_dir()}
+    for executor, directory in (("codex", settings.codex_skills_dir), ("claude", settings.claude_skills_dir)):
+        links = []
+        if directory and directory.is_dir() and not directory.is_symlink():
+            links = sorted(entry.name for entry in directory.iterdir()
+                           if _is_managed_symlink(entry, settings) and entry.exists())
+        status[f"live_{executor}_symlinks"] = links
+    return status
 
 
 def configure_hermes_external_dir(settings: Settings, profile_home: Path, *, apply: bool = False) -> dict:

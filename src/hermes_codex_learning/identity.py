@@ -19,7 +19,8 @@ def build_identity(root: Path = ROOT) -> dict:
             if (path.is_file() and "__pycache__" not in relative.parts and path.suffix != ".pyc"
                     and not any(part.endswith(".egg-info") for part in relative.parts)):
                 files[str(relative)] = hashlib.sha256(path.read_bytes()).hexdigest()
-    for name in ("pyproject.toml", ".mcp.json", ".codex-plugin/plugin.json"):
+    for name in ("pyproject.toml", ".mcp.json", ".codex-plugin/plugin.json",
+                 ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"):
         path = root / name
         if path.is_file():
             files[name] = hashlib.sha256(path.read_bytes()).hexdigest()

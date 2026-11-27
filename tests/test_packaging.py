@@ -63,6 +63,36 @@ class PackagingTests(unittest.TestCase):
 
             self.assertEqual(info.read_bytes(), legacy_plist)
 
+    def test_claude_plugin_mcp_starts_from_an_unrelated_working_directory(self):
+        root = Path(__file__).resolve().parents[1]
+        manifest = json.loads((root / ".claude-plugin/plugin.json").read_text())
+        server = manifest["mcpServers"]["hermes_learning"]
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "bridge.json"
+            config.write_text(json.dumps({"home": directory, "project": directory,
+                                          "source": directory, "python": sys.executable}))
+            initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                          "params": {"protocolVersion": "2025-11-25"}}
+            args = [arg.replace("${CLAUDE_PLUGIN_ROOT}", str(root)) for arg in server["args"]]
+            result = subprocess.run([server["command"], *args], cwd=directory,
+                                    env={**os.environ, "HERMES_LEARNING_CONFIG": str(config)},
+                                    input=json.dumps(initialize) + "\n", capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["result"]["serverInfo"]["version"], __version__)
+
+    def test_manifests_select_separate_hook_files(self):
+        root = Path(__file__).resolve().parents[1]
+        codex = json.loads((root / ".codex-plugin/plugin.json").read_text())
+        codex_hooks = json.loads((root / codex["hooks"]).read_text())["hooks"]
+        claude_hooks = json.loads((root / "hooks/hooks.json").read_text())["hooks"]
+        common = {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop", "SessionEnd"}
+        self.assertEqual(set(codex_hooks), common | {"Interrupt"})
+        self.assertEqual(set(claude_hooks), common | {"PostToolUseFailure", "StopFailure"})
+        for groups in claude_hooks.values():
+            for group in groups:
+                for handler in group["hooks"]:
+                    self.assertIn("scripts/bridge\" hook --host claude", handler["command"])
+
     def test_manifest_starts_mcp_without_hook_environment_or_placeholder_expansion(self):
         root = Path(__file__).resolve().parents[1]
         server = json.loads((root / ".mcp.json").read_text())["mcpServers"]["hermes_learning"]

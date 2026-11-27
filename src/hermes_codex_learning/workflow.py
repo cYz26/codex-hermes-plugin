@@ -46,7 +46,7 @@ def action(payload: dict) -> str:
         return 'edit'
     if name in {'read', 'read_file', 'view_image', 'glob', 'grep'}:
         return 'inspect'
-    if name not in {'bash', 'exec_command', 'terminal', 'exec', 'wait', 'write_stdin'}:
+    if name not in {'bash', 'powershell', 'exec_command', 'terminal', 'exec', 'wait', 'write_stdin'}:
         return 'other'
     args = payload.get('tool_input')
     command = (args.get('command') or args.get('cmd')) if isinstance(args, dict) else None
@@ -67,7 +67,7 @@ def action(payload: dict) -> str:
 
 
 def project_event(payload: dict) -> dict:
-    from .normalize import _result_state
+    from .normalize import event_tool_state
     event = payload.get('hook_event_name')
     result = {key: payload[key] for key in ('hook_event_name', 'session_id', 'turn_id', 'cwd',
               'tool_use_id', 'transcript_path') if key in payload}
@@ -81,12 +81,10 @@ def project_event(payload: dict) -> dict:
         result['tool_input'] = {}
         state = 'running'
         if event == 'PostToolUse':
-            name = str(payload.get('tool_name', ''))
-            response = payload.get('tool_response')
             # Free-form result text is not an authoritative exit status.
-            state = _result_state(name, response)[0] if isinstance(response, dict) else 'unknown'
-            if isinstance(response, dict):
-                process = _result_state(name, response)[1]
+            state = 'unknown'
+            if 'bridge_tool_status' in payload or isinstance(payload.get('tool_response'), dict):
+                state, process, _ = event_tool_state(payload)
                 if process:
                     result['bridge_process'] = digest([payload.get('session_id'), process])
         args = payload.get('tool_input')

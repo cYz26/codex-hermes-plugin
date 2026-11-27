@@ -6,7 +6,8 @@ import re
 import time
 
 from . import native_reads
-from .normalize import _result_state
+from .claude_hooks import EXECUTOR as CLAUDE, has_test_result
+from .normalize import event_tool_state
 from .store import digest
 
 CORRECTION = re.compile(r"(?i)(?:correction[ \t]*[:：]|(?:更正|纠正)(?:一下)?[：:，,]|不对[，,：:]|应该改为)")
@@ -96,7 +97,10 @@ def same_test_recovered(store, data):
         if event.get("bridge_evidence_mode") == "workflow-v1":
             status = response.get("outcome") if isinstance(response, dict) else None
         else:
-            status = _result_state(event.get("tool_name", ""), response)[0]
+            status = event_tool_state(event)[0]
+        if source.get("executor") == CLAUDE and tool.get("test_key") and not has_test_result(
+                status, event.get("bridge_tool_status_source")):
+            continue
         # A receipt from the original launch of a background command cannot
         # borrow the terminal status of a later poll.
         if status in {"failed", "completed"} and status == tool["status"]:

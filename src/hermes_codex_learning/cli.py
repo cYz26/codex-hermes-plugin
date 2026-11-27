@@ -136,7 +136,8 @@ def main() -> int:
     add_parsers(commands)
     from .learning_cli import add_parser as add_learning_parser
     add_learning_parser(commands)
-    commands.add_parser("hook")
+    hook = commands.add_parser("hook")
+    hook.add_argument("--host", choices=["codex", "claude"], default="codex")
     commands.add_parser("mcp")
     notices = commands.add_parser("notices", help="UI-only SSH delivery; not exposed through MCP")
     notice_actions = notices.add_subparsers(dest="notice_action", required=True)
@@ -441,7 +442,7 @@ def main() -> int:
         return doctor(args)
     if args.command == "hook":
         from .capture import main as capture
-        return capture()
+        return capture(host=args.host)
     if args.command == "mcp":
         from .mcp import main as mcp
         return mcp()

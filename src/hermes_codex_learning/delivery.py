@@ -10,10 +10,12 @@ from .store import digest, dumps
 
 _SHELL_READERS = {"cat", "sed", "head", "tail", "bat", "less", "more", "awk", "python", "python3"}
 _READ_TOOLS = {"read", "read_file", "view"}
-_EXEC_TOOLS = {"bash", "exec_command", "terminal", "exec"}
+_EXEC_TOOLS = {"bash", "powershell", "exec_command", "terminal", "exec"}
 
 
 def _tool_succeeded(payload: dict, tool_kind: str) -> bool:
+    if "bridge_tool_status" in payload:
+        return payload["bridge_tool_status"] == "completed"
     raw = payload.get("tool_response")
     if raw is None:
         return False
@@ -78,7 +80,7 @@ def _resolve_projected_skill_file(cand: str, base_cwd: str | None, settings, pro
     snaps_resolved = snaps_root.resolve()
 
     matched_name = None
-    for candidate_root in filter(None, (settings.codex_skills_dir, catalog_root(settings))):
+    for candidate_root in filter(None, (settings.codex_skills_dir, settings.claude_skills_dir, catalog_root(settings))):
         try:
             rel_parts = raw_path.absolute().relative_to(candidate_root.absolute()).parts
         except ValueError:
@@ -179,6 +181,8 @@ def _capture_native_skill_read(store, payload: dict, project: str, settings, *,
             "bridge_project": project,
             "tool_response": {"structuredContent": safe},
         }
+        if payload.get("bridge_executor"):
+            event["bridge_executor"] = payload["bridge_executor"]
         with store.db:
             identifier = digest(["native_projection", project, event["session_id"], event["turn_id"],
                                  event["tool_use_id"], dedup])
@@ -246,6 +250,8 @@ def capture_delivery(store, payload: dict, project: str, *, settings=None) -> No
             if isinstance(value.get(key), str) and len(value[key]) <= (4096 if key=="delivery_token" else 256)}
     event = {key: payload[key] for key in ("session_id", "turn_id", "tool_use_id", "tool_name")}
     event.update(bridge_project=project, tool_response={"structuredContent": safe})
+    if payload.get("bridge_executor"):
+        event["bridge_executor"] = payload["bridge_executor"]
     with store.db:
         store.db.execute("INSERT OR IGNORE INTO delivery_events VALUES (?,?,NULL)",
                          (digest([token, project, event["session_id"], event["turn_id"], event["tool_use_id"]]), dumps(event)))

@@ -38,8 +38,12 @@ class Store:
     def __init__(self, root: Path):
         self.root = root
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.db = sqlite3.connect(root / "bridge.sqlite", timeout=5)
+        path = root / "bridge.sqlite"
+        new_database = not path.exists()
+        self.db = sqlite3.connect(path, timeout=5)
         self.db.row_factory = sqlite3.Row
+        if new_database:
+            self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript("""
@@ -86,6 +90,15 @@ class Store:
             CREATE INDEX IF NOT EXISTS events_pending ON events(delivered,created,id);
             CREATE INDEX IF NOT EXISTS events_chat_turn ON events(json_extract(payload,'$.session_id'),json_extract(payload,'$.turn_id'));
             CREATE INDEX IF NOT EXISTS turns_recovery ON turns(observed_revision,activity);
+            CREATE INDEX IF NOT EXISTS latest_turns_activity ON latest_turns(activity);
+            CREATE INDEX IF NOT EXISTS turns_open_activity ON turns(activity)
+              WHERE (stopped IS NULL OR stopped=0) AND json_extract(payload,'$._ended_by') IS NULL
+                AND json_extract(payload,'$.status') IN ('running','incomplete');
+            CREATE INDEX IF NOT EXISTS turns_retention ON turns(activity,id)
+              WHERE observed_revision=revision AND json_extract(payload,'$.status') IN ('completed','interrupted');
+            CREATE INDEX IF NOT EXISTS turns_open_claude_chat ON turns(json_extract(payload,'$.source.chat'))
+              WHERE json_extract(payload,'$.source.executor')='Claude Code' AND stopped IS NULL
+                AND json_extract(payload,'$._ended_by') IS NULL;
             CREATE INDEX IF NOT EXISTS delivery_events_pending ON delivery_events(delivered);
         """)
         if self.db.execute("PRAGMA user_version").fetchone()[0] < 2:
@@ -106,17 +119,24 @@ class Store:
         session, turn = payload.get("session_id"), payload.get("turn_id")
         tool_id = payload.get("tool_use_id")
         source = None
-        if session and turn and (tool_id or event in {"UserPromptSubmit", "Stop", "Interrupt", "CodexTranscriptComplete"}):
+        if session and turn and (tool_id or event in {"UserPromptSubmit", "Stop", "StopFailure", "Interrupt", "CodexTranscriptComplete"}):
             # Same identity + different content is a revision, not silently discarded.
             source = digest([session, turn, event, tool_id, digest(payload)])
         event_id = str(uuid.uuid4())
         with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
             if source:
                 retired = self.db.execute("SELECT id FROM retired_events WHERE source_key=?", (source,)).fetchone()
                 if retired:
                     return retired["id"]
-            self.db.execute("INSERT OR IGNORE INTO events VALUES (?,?,?,?,NULL,NULL)",
-                            (event_id, source, dumps(payload), time.time()))
+            # Retention may remove the highest rowid. Positions already exposed
+            # to recovery and progress must remain below every new event.
+            self.db.execute("""
+                INSERT OR IGNORE INTO events(rowid,id,source_key,payload,created)
+                VALUES (MAX(COALESCE((SELECT MAX(rowid) FROM events),0),
+                            COALESCE((SELECT MAX(CAST(value AS INTEGER)) FROM meta
+                                      WHERE key IN ('events-rowid-floor','recovery-cursor')),0))+1,?,?,?,?)
+            """, (event_id, source, dumps(payload), time.time()))
             if source:
                 event_id = self.db.execute("SELECT id FROM events WHERE source_key=?", (source,)).fetchone()[0]
         return event_id

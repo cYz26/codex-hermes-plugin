@@ -135,6 +135,40 @@ class ActiveLearningTests(unittest.TestCase):
         self.cycle()
         self.assertEqual(api.calls, 2)
 
+    def test_automatic_interval_survives_restart_and_leaves_explicit_and_retry_eligible(self):
+        api = self.bridge.api = ScriptedAPI()
+        def queue(identity, reason):
+            api.intents[identity] = {"id": identity, "handle": identity, "status": "queued",
+                                     "reason": reason, "revision": 1, "skills": True}
+
+        queue("threshold", "native_threshold")
+        queue("idle", "idle_flush")
+        started = 10_000
+        interval = self.settings.automatic_review_interval_seconds
+        with patch("time.time", return_value=started):
+            self.bridge.reviews()
+        self.assertEqual(list(api.attempts), ["threshold"])
+        self.assertEqual(self.bridge.store.get("review-queue")["automatic_review_not_before"], started + interval)
+
+        self.bridge.store.close()
+        self.bridge = Bridge(self.settings, api)
+        with patch("time.time", return_value=started + 1):
+            self.request()
+            learning_dispatch.prepare(self.bridge)
+            self.bridge.reviews()
+            queue("retry", "retry")
+            self.bridge.reviews()
+            self.bridge.reviews()
+        explicit = next(key for key, intent in api.intents.items() if intent["reason"] == "user_request")
+        self.assertEqual(list(api.attempts), ["threshold", explicit, "retry"])
+        self.assertEqual(api.intents["idle"]["status"], "queued")
+        self.assertEqual(self.bridge.store.get("review:last-automatic-started"), started)
+
+        with patch("time.time", return_value=started + interval):
+            self.bridge.reviews()
+        self.assertEqual(api.intents["idle"]["status"], "completed")
+        self.assertEqual(len(api.attempts), 4)
+
     def test_waits_for_selected_turn_and_honors_worker_pause(self):
         api = self.bridge.api = ScriptedAPI()
         self.turn("chat-a", "running", "Still executing")

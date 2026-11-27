@@ -90,7 +90,8 @@ def collect(home, previous, day, deadline, timezone, audit_chats, acceptance_cha
                     identity = row["id"].removesuffix(":result")
                     receipt_updates.append(identity)
                     result["notices"][identity] = {key: value.get(key) for key in (
-                        "intent_id", "project", "source_chat", "run_status", "started_at", "finished_at", "usage")}
+                        "intent_id", "project", "source_chat", "executor", "reason", "run_status",
+                        "started_at", "finished_at", "usage")}
                     result["notices"][identity]["notice_at"] = row["created"]
                 metadata = {row["key"]: json.loads(row["value"]) for row in db.execute(
                     "SELECT key,value FROM meta WHERE key IN ('artifact-read-cache','publications-v1','publication-decisions','loop-progress','native-lifecycle-status','native-curator-status')")}

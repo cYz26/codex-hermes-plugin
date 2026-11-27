@@ -57,6 +57,9 @@ def plugin_hash(root: Path = ROOT) -> str:
                      and "__pycache__" not in p.parts and p.suffix != ".pyc"
                      and not any(part.endswith(".egg-info") for part in p.relative_to(root).parts))
     paths.extend(root / name for name in ("pyproject.toml", ".codex-plugin/plugin.json", ".mcp.json"))
+    # Pre-Claude release bundles can still be verified.
+    paths.extend(path for name in ("plugin.json", "marketplace.json")
+                 if (path := root / ".claude-plugin" / name).is_file())
     return digest({str(p.relative_to(root)): file_hash(p) for p in sorted(paths)})
 
 

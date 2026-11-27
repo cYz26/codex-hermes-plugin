@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 
+from .claude_hooks import EXECUTOR as CLAUDE, POST_TOOL_SUCCESS, SHELL_FAILURE_EXIT, has_test_result
 from .normalize import _execution_result
 from .store import digest, dumps
 from .workflow import MODE, action
@@ -41,12 +42,15 @@ def _is_test(tool):
     return tool.get("action") == "test"
 
 
-def _test_outcome(tool, evidence_mode):
+def _test_outcome(tool, evidence_mode, executor):
     status = tool.get("status")
-    if evidence_mode == MODE:
-        return status if tool.get("name") == "workflow_test" else None
-    if status not in {"completed", "failed"} or not _is_test(tool):
+    is_test = tool.get("name") == "workflow_test" if evidence_mode == MODE else _is_test(tool)
+    if status not in {"completed", "failed"} or not is_test:
         return None
+    if executor == CLAUDE:
+        return status if has_test_result(status, tool.get("status_source")) else None
+    if evidence_mode == MODE:
+        return status
     # A generic host completion or transport failure does not supply an exit code.
     result, unknown = _execution_result(tool.get("result"))
     if unknown or not isinstance(result, dict) or type(result.get("exit_code")) is not int:
@@ -62,8 +66,8 @@ def _outcome_source(tool, evidence_mode):
     if tool.get("status_source") == "host_transcript" or (
             isinstance(result, dict) and result.get("status_source") == "host_transcript"):
         return "host_transcript"
-    if tool.get("status_source") == "hermes_lifecycle":
-        return "hermes_lifecycle"
+    if tool.get("status_source") in {"hermes_lifecycle", POST_TOOL_SUCCESS, SHELL_FAILURE_EXIT}:
+        return tool["status_source"]
     return "workflow_projection" if evidence_mode == MODE else "hook_exit_code"
 
 
@@ -79,19 +83,23 @@ def test_references(store, project, chat, turn):
     """, (chat, turn, project))
     outcomes = {row[0]: {"outcome": "pending"} for row in captured}
     rows = store.db.execute("""
-        SELECT tool.key, tool.value, json_extract(t.payload,'$._evidence_mode')
+        SELECT tool.key, tool.value, json_extract(t.payload,'$._evidence_mode'),
+          json_extract(t.payload,'$.source.executor'), json_extract(t.payload,'$._ended_by')
         FROM turns t JOIN json_each(t.payload,'$.tools') tool
         WHERE t.id=? AND json_extract(t.payload,'$.source.project')=?
     """, (digest([chat, turn]), project))
-    for tool_id, raw, evidence_mode in rows:
+    for tool_id, raw, evidence_mode, executor, ended_by in rows:
         tool = json.loads(raw)
         recognized = tool.get("name") == "workflow_test" if evidence_mode == MODE else _is_test(tool)
         if not recognized:
             continue
-        outcome = _test_outcome(tool, evidence_mode)
-        outcomes[tool_id] = {"outcome": outcome if outcome in {"completed", "failed"} else "pending"}
+        outcome = _test_outcome(tool, evidence_mode, executor)
         if outcome in {"completed", "failed"}:
-            outcomes[tool_id]["outcome_source"] = _outcome_source(tool, evidence_mode)
+            outcomes[tool_id] = {"outcome": outcome, "outcome_source": _outcome_source(tool, evidence_mode)}
+        elif executor == CLAUDE and ended_by:
+            outcomes[tool_id] = {"outcome": "interrupted" if tool["status"] == "interrupted" else "unknown"}
+        else:
+            outcomes[tool_id] = {"outcome": "pending"}
     return [{"source_event": {"chat": chat, "turn": turn, "tool_call": tool_id}, **result}
             for tool_id, result in list(outcomes.items())[:20]]
 
@@ -194,7 +202,8 @@ def _test_evidence(store, project, event):
     if data.get("status") == "retired":
         return "evidence_retired", None
     tool = data["tools"].get(event["tool_call"])
-    if tool and (outcome := _test_outcome(tool, data.get("_evidence_mode"))) in {"completed", "failed"}:
+    executor = data["source"].get("executor")
+    if tool and (outcome := _test_outcome(tool, data.get("_evidence_mode"), executor)) in {"completed", "failed"}:
         return outcome, _outcome_source(tool, data.get("_evidence_mode"))
     if store.db.execute("""
         SELECT 1 FROM events WHERE json_extract(payload,'$.session_id')=?
@@ -202,10 +211,12 @@ def _test_evidence(store, project, event):
           AND json_extract(payload,'$.tool_use_id')=? AND delivered IS NULL LIMIT 1
     """, (event["chat"], event["turn"], project, event["tool_call"])).fetchone():
         return "awaiting_ingestion", None
-    if tool and tool.get("status") == "running":
-        return "awaiting_host_completion", None
-    if data.get("_ended_by") not in {"Stop", "Interrupt"} and data.get("status") not in {"completed", "interrupted"}:
-        return "awaiting_host_completion", None
+    ended_by = data.get("_ended_by")
+    if not (executor == CLAUDE and ended_by):
+        if tool and tool.get("status") == "running":
+            return "awaiting_host_completion", None
+        if ended_by not in {"Stop", "Interrupt"} and data.get("status") not in {"completed", "interrupted"}:
+            return "awaiting_host_completion", None
     if not tool:
         return "reference_not_found", None
     if not (_is_test(tool) or data.get("_evidence_mode") == MODE and tool.get("name") == "workflow_test"):

@@ -1,0 +1,12 @@
+{
+  "name": "hermes-learning-local",
+  "description": "Project memory and shared skills backed by a local Hermes learning service.",
+  "owner": {"name": "Hermes Learning"},
+  "plugins": [
+    {
+      "name": "hermes-learning",
+      "source": "./",
+      "description": "Learn from Claude Code tasks and recall approved Hermes knowledge."
+    }
+  ]
+}

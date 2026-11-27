@@ -136,11 +136,12 @@ class LearningProgressTests(unittest.TestCase):
         self.event('Stop',turn='recoverable',last_assistant_message='The recommendation changes')
         for row in self.bridge.store.pending():merge_event(self.bridge.store,row)
         self.bridge.retry_completed_inputs()
-        self.assertEqual(self.observed,[])
-        self.bridge.store.set('last_input_retry',0)
+        self.assertEqual([body['source']['turn'] for body in self.observed], ['recoverable'])
+        retries = self.bridge.store.db.execute("SELECT value FROM meta WHERE key LIKE 'input-retry:%' AND value<>'null'")
+        self.assertEqual(retries.fetchall(), [])
+        self.bridge.store.set('last_input_retry', 0)
         self.bridge.retry_completed_inputs()
-        self.assertEqual(len(self.observed),1)
-        self.assertEqual(self.observed[0]['source']['turn'],'recoverable')
+        self.assertEqual(len(self.observed), 1)
 
     def test_reviewing_an_older_revision_keeps_the_newer_feedback_priority(self):
         old,new=digest(['chat','old']),digest(['chat','new'])

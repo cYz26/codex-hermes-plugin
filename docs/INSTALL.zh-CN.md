@@ -1,6 +1,6 @@
 # 安装与更新
 
-需要 Python 3.11+、Codex CLI 或带 Codex 的桌面 App，以及与 [兼容清单](../patches/compatibility.json) 匹配的 Hermes 源码。两种场景使用同一插件：在实际执行 Codex 任务的宿主安装插件与学习服务。macOS 本地宿主使用本页的 launchd 流程；Linux／SSH 宿主使用 [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md)，桌面 Mac 只需按 [SSH 通知](./SSH-NOTIFICATIONS.zh-CN.md) 安装接收器。
+需要 Python 3.11+、Codex 或 Claude Code，以及与 [兼容清单](../patches/compatibility.json) 匹配的 Hermes 源码。两个宿主插件共用同一学习服务。macOS 本地宿主使用本页的 launchd 流程；Linux／SSH 宿主使用 [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md)，桌面 Mac 只需按 [SSH 通知](./SSH-NOTIFICATIONS.zh-CN.md) 安装接收器。
 
 现有 Linux 学习服务可使用 `scripts/bridge install --settings /ABS/pilot/bridge.json` 预览不可变安装包，再加 `--apply --start` 排空复盘并替换服务。继续复用原配置、认证和学习数据，详见 [云端安装合同](./CLOUD-0.5.0.zh-CN.md)。
 
@@ -13,7 +13,33 @@ codex plugin marketplace add "$PWD" --json
 codex plugin add hermes-learning@hermes-learning-local --json
 ```
 
-已有本地来源时，更新仓库后只需再次执行第二条。Codex 插件目录中的名称为 **Hermes Learning**，图标由[插件清单](../.codex-plugin/plugin.json)统一引用。新开聊天加载更新后的插件。
+已有本地来源时，更新仓库后再次执行第二条。Codex 插件目录中的名称为 **Hermes Learning**，图标由[插件清单](../.codex-plugin/plugin.json)统一引用。双宿主版本把 Codex hooks 移到 `hooks/codex.json`；旧路径的批准不继承，需在 Codex 界面重新审阅并批准。新开聊天后用本页的回读命令确认。
+
+## Claude Code 插件
+
+已有 Hermes worker 时，按下文更新服务到同一构建，保留现有 `bridge.json`。在实际任务工作区开一个测试会话，用绝对路径加载插件；这不会全局安装：
+
+```bash
+claude --plugin-dir /absolute/path/to/codex-hermes-plugin
+```
+
+长期使用时，从干净的发布 checkout 或不可变安装包添加本地 marketplace，再安装插件：
+
+```bash
+claude plugin marketplace add /absolute/path/to/codex-hermes-plugin
+```
+
+```bash
+claude plugin install hermes-learning@hermes-learning-local
+```
+
+新开会话，在 `/mcp` 确认 `plugin:hermes-learning:hermes_learning` 已连接。若使用非默认配置，确保启动 Claude Code 的环境与 worker 指向同一份 `HERMES_LEARNING_CONFIG`。不要再手动添加同一个 MCP 服务。
+
+Claude Code 在 hook 中提供 `session_id`（对应 `chat` / `chat_id`）和 `prompt_id`（对应 `turn`）。插件 skills 可展开当前 `${CLAUDE_SESSION_ID}`。没有 `prompt_id` 的客户端仍可收到会话召回，但不归并回合正文。取消或一次性 `-p` 进程提前退出时可能缺少结束回执，插件不会读取 Claude 私有 transcript 来猜测结果。
+
+项目记忆和 MCP 技能召回不需要额外投影。要让通过发布检查的技能出现在 Claude Code 原生技能列表中，在同一个 `bridge.json` 的 `projection` 对象中设置 `claude_skills_dir` 为 `~/.claude/skills` 的对应路径（若使用自定义配置目录，填该目录下的 `skills`）。重启 worker 后新开会话；检查 `status` 的 `native_projection.claude` 与 `live_claude_symlinks`。投影复用不可变快照，不覆盖同名用户技能；项目私有或未投影版本继续用 `skill_load`。
+
+本地 CLI 2.1.330 已用于隔离验证。用 `claude plugin validate /absolute/path/to/codex-hermes-plugin` 检查清单，用 `learning_status` 在实际工作区核对采集和消费。CLI 通过不代表 Desktop 图形会话或线上模型复盘已验收。
 
 ## 新建 macOS 本地学习实例
 

@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from .store import Store, redact
 from .workflow import EXECUTOR, PROJECT
 
-PROMPT = '''You review fixed-vocabulary execution metadata observed from Codex.
+PROMPT = '''You review fixed-vocabulary execution metadata observed from coding agents.
 No task text, code, filenames or command output was admitted. Do not infer them.
 Only derive modest generic workflow guidance supported by the action/outcome sequence.
 An exit status is not proof of correctness or causation. Unknown is not success.

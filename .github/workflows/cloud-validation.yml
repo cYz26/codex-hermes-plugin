@@ -103,7 +103,7 @@ jobs:
           fi
           if ! git diff --quiet "$HERMES_RELEASE_TAG" HEAD -- \
             src scripts tests hermes-plugin hooks skills patches probes fixtures \
-            desktop macos assets pyproject.toml .codex-plugin/plugin.json .mcp.json; then
+            desktop macos assets pyproject.toml .codex-plugin .claude-plugin .mcp.json; then
             exit 0
           fi
           test -f "docs/RELEASE-${HERMES_RELEASE_TAG#v}.zh-CN.md"

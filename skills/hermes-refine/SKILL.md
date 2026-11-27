@@ -1,17 +1,17 @@
 ---
 name: hermes-refine
-description: Explicitly review a Codex conversation with Hermes and save lessons to project memory or skills when the user asks to learn or refine now.
+description: Review a Codex or Claude Code conversation with Hermes and save project memory or skills when the user asks to learn or refine now.
 ---
 
 Use this workflow when the user asks Hermes to learn from an executed task or
 refine this conversation. Ordinary work continues to use automatic learning.
 For a document, directory, URL or supplied notes, use the sibling `hermes-learn` skill.
 
-1. Resolve the actual chat workspace and host chat ID. In the Codex executor,
-   `CODEX_THREAD_ID` supplies the chat ID; read that single variable if necessary.
-   Do not select the most recent chat in a directory. If the host supplies no ID,
-   obtain the intended existing chat ID before submitting.
-2. Call `hermes_learning.request_learning` with `cwd`, `chat_id`, a fresh stable
+1. Resolve the actual chat workspace and host chat ID. In Codex use
+   `CODEX_THREAD_ID`. In Claude Code use `${CLAUDE_SESSION_ID}` when expanded by
+   the host. If the ID is unavailable, obtain the intended existing chat ID;
+   a workspace or its most recent chat does not identify this conversation.
+2. Call the Hermes Learning `request_learning` tool with `cwd`, `chat_id`, a fresh stable
    `request_id`, `mode="refine"`, and the user's `focus`. Choose `scope` from
    `both`, `memory`, `skills`. A repeated transport call uses the same request ID;
    another user-requested learning pass uses a new one, even on the same evidence.
@@ -22,7 +22,7 @@ For a document, directory, URL or supplied notes, use the sibling `hermes-learn`
    An explicit `through_turn` must be a real captured turn from this chat. If it is
    unfinished, the request returns `waiting_for_turn`; finish the current task and
    report the request ID rather than polling for the current turn to end itself.
-5. Query `hermes_learning.learning_request_status` with the same cwd/request ID.
+5. Query `learning_request_status` with the same cwd/request ID.
    Report queued, running, publishing, completed, failed or unknown accurately.
    Explain a truncated evidence snapshot or missing coverage. Report actual
    applied/staged changes and artifact versions; a completed review with no writes
@@ -35,6 +35,6 @@ Do not retry an unknown native attempt under a new ID to manufacture completion.
 If new MCP tools are unavailable in an already-running chat, the same installed
 plugin exposes `scripts/bridge learning request|status|cancel`; read its `--help`.
 Resolve `scripts/bridge` relative to this skill's plugin root and pass the actual
-chat workspace through `--cwd`, not the plugin directory. The CLI's `--chat`
-defaults to `CODEX_THREAD_ID`. Report `runtime_upgrade_required` as a deployment
+chat workspace through `--cwd`, not the plugin directory. Supply `--chat` for
+Claude Code; Codex defaults to `CODEX_THREAD_ID`. Report `runtime_upgrade_required` as a deployment
 gap rather than changing the runtime or configuration as part of ordinary use.

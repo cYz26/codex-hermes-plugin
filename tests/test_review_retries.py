@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import types
 import unittest
 from pathlib import Path
@@ -138,8 +139,13 @@ class NativeRetryContracts(unittest.TestCase):
         newest = self.newer_threshold(memory=False)
         self.service.runtime.outcomes = [{"run_status": "completed", "applied": []}] * 2
         bridge = self.bridge()
-        bridge.reviews()
-        bridge.reviews()
+        started = time.time()
+        with patch("time.time", return_value=started):
+            bridge.reviews()
+            bridge.reviews()
+            self.assertEqual([item["id"] for _, item in self.service.runtime.reviews], [self.intent])
+        with patch("time.time", return_value=started + bridge.settings.automatic_review_interval_seconds):
+            bridge.reviews()
         self.assertEqual([item["id"] for _, item in self.service.runtime.reviews], [self.intent, newest])
 
     def test_coalesced_unknown_attempt_does_not_replay_older_evidence(self):

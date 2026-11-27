@@ -6,7 +6,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [安装与更新](./INSTALL.zh-CN.md) | 同一 Codex 插件的安装、宿主选择和 macOS 本地服务 |
+| [安装与更新](./INSTALL.zh-CN.md) | Codex 与 Claude Code 插件、共用学习服务、macOS 本地部署 |
 | [本地 macOS 运行](./LOCAL-OPERATIONS.zh-CN.md) | launchd、原生认证、通知 scope 和 sent／read 回执 |
 | [Linux 运行与升级](./LINUX-GLOBAL-UPDATES.zh-CN.md) | 初始化、systemd、诊断、自动适配与回退 |
 | [SSH 桌面通知](./SSH-NOTIFICATIONS.zh-CN.md) | Mac 接收器、持久投递、图标诊断与授权恢复 |

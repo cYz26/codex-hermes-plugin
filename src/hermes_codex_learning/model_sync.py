@@ -391,7 +391,8 @@ def switch_pilot_model(settings: Settings, store, target_model_raw: str, *,
 
 
 def record_observed_codex_model(store, turn_data: dict) -> None:
-    if turn_data.get("source", {}).get("executor") == "Hermes":
+    from .normalize import CODEX_EXECUTORS
+    if turn_data.get("source", {}).get("executor", "Codex App") not in CODEX_EXECUTORS:
         return
     trace = turn_data.get("host_trace") or {}
     model = trace.get("model")

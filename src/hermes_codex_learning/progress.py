@@ -51,6 +51,7 @@ def summarize(store, *, project=None, chat=None, turn=None, limit=20, after_curs
     query = """WITH captured AS (
         SELECT json_extract(e.payload,'$.session_id') chat,json_extract(e.payload,'$.turn_id') turn,
           json_extract(e.payload,'$.bridge_project') project,json_extract(e.payload,'$.bridge_host') host,
+          COALESCE(MAX(json_extract(e.payload,'$.bridge_executor')), 'Codex App') executor,
           MIN(e.rowid) cursor,MAX(e.rowid) last_captured_position,MAX(CASE WHEN delivered IS NOT NULL THEN e.rowid END) last_consumed_position,
           COUNT(*) captured_events,SUM(delivered IS NULL) pending_events,MIN(created) captured_at,
           SUM(CASE WHEN json_extract(e.payload,'$.bridge_admission.body_retained')=0 OR json_extract(e.payload,'$.bridge_evidence_mode')='workflow-v1' THEN 1 ELSE 0 END) unretained_events,
@@ -130,7 +131,8 @@ def summarize(store, *, project=None, chat=None, turn=None, limit=20, after_curs
         if project and chat:
             execution["test_references"] = test_references(store, project, chat, row["turn"])
         mcp_recommendations = _mcp_recommendations(store, project, chat, row["turn"]) if project and chat else []
-        items.append({"source":{"host":row["host"],"project":row["project"],"chat":row["chat"],"turn":row["turn"]},
+        items.append({"source":{"host":row["host"],"project":row["project"],"chat":row["chat"],"turn":row["turn"],
+                                "executor":row["executor"]},
             "cursor":row["cursor"],"capture":{"events":row["captured_events"],"first_at":row["captured_at"],
                                                "body_retained":row["unretained_events"] < row["captured_events"],
                                                "body_coverage":"partial" if 0 < row["unretained_events"] < row["captured_events"] else "omitted" if row["unretained_events"] else "retained"},
@@ -169,5 +171,6 @@ def summarize(store, *, project=None, chat=None, turn=None, limit=20, after_curs
                        "oldest_age_seconds":max(0,now-pending[1]) if pending[1] else 0},
             "worker_position":{**phase,"age_seconds":max(0,now-phase["updated_at"]) if phase.get("updated_at") else None},
             "review_queue":{"updated_at":queue.get("updated_at"),"items":len(queue.get("intents",[])),
+                            "automatic_review_not_before":queue.get("automatic_review_not_before"),
                             "age_seconds":max(0,now-queue["updated_at"]) if queue.get("updated_at") else None},
             "semantics":"Capture, admission, review, candidate generation, publication, recall and host validation are separate facts."}

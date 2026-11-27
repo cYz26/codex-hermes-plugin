@@ -1,7 +1,7 @@
 # 主动复盘与资料学习（0.7.0）
 
 用户可以请求 Hermes 现在学习。`hermes-refine` 复盘已执行任务，`hermes-learn`
-从指定文档、代码、URL 和笔记提炼技能。Codex 使用现有工具采集资料；既有串行
+从指定文档、代码、URL 和笔记提炼技能。Codex 和 Claude Code 使用现有工具采集资料；既有串行
 Hermes worker 完成复盘、Memory／Skills 写入和受检查的版本发布。
 
 本变更实施用户在原生 `/refine`、`/learn` 对比研究后提出的“补充和完善这些能力”。
@@ -14,7 +14,7 @@ $hermes-refine 重点学习刚才定位根因和验证修复的方法
 $hermes-learn 学习我指定的 SDK 目录，重点是认证和分页，跳过废弃接口
 ```
 
-MCP 工具：
+Claude Code 对应命令为 `/hermes-learning:hermes-refine` 和 `/hermes-learning:hermes-learn`。两个宿主使用同一套 MCP 工具；Claude Code 插件工具名带 `mcp__plugin_hermes-learning_hermes_learning__` 前缀。
 
 | 工具 | 行为 |
 | --- | --- |
@@ -31,7 +31,7 @@ MCP 工具：
 `scope=memory|skills|both` 控制写入范围。默认 `memory_writes=add`；用户明确要求修正
 旧项目记忆时可以选择 `revise`，仍遵守原生写入策略和项目范围。
 
-Codex 的 `CODEX_THREAD_ID` 提供当前宿主聊天 ID。不能只凭 cwd 选择该目录最近的聊天。
+Codex 的 `CODEX_THREAD_ID` 和 Claude Code 插件 skill 中展开的 `${CLAUDE_SESSION_ID}` 分别提供当前聊天 ID。用实际 ID，不能只凭 cwd 选择该目录最近的聊天。
 默认仅使用提交时已观察到终态的回合。指定尚未结束的 `through_turn` 时返回
 `waiting_for_turn`，由后台在真实终态到达后处理；当前回合不能同步等待自己结束。
 
@@ -47,7 +47,7 @@ scripts/bridge learning start --cwd /ABS/PROJECT --request-id learn-001
 scripts/bridge learning status --cwd /ABS/PROJECT --request-id learn-001
 ```
 
-CLI 的 `--chat` 默认读取 `CODEX_THREAD_ID`，普通终端需要显式传入真实聊天 ID。
+CLI 的 `--chat` 默认读取 `CODEX_THREAD_ID`。Claude Code 或普通终端调用 CLI 时，用 `--chat` 显式传入真实聊天 ID。
 每个动作支持 `--settings`，遵循已有配置定位。上面的 ID 是示例，新任务应使用新 ID。
 
 ## 资料边界与结果

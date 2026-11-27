@@ -215,9 +215,11 @@ def status(store, project, *, settings=None):
     contributions = dict(store.db.execute(
         "SELECT COALESCE(json_extract(payload,'$.source.executor'),'Codex App'),COUNT(*) FROM turns "
         "WHERE json_extract(payload,'$.source.project') IS ? AND observed_revision IS NOT NULL GROUP BY 1", (project,)))
-    deliveries = [{"executor": "Hermes" if str(chat).startswith("hermes:") else "Codex App", "name": name, "version": version}
-                  for chat, name, version in store.db.execute(
-        "SELECT json_extract(value,'$.source_event[0]'),json_extract(value,'$.name'),json_extract(value,'$.version') "
+    deliveries = [{"executor": executor or ("Hermes" if str(chat).startswith("hermes:") else "Codex App"),
+                   "name": name, "version": version}
+                  for chat, name, version, executor in store.db.execute(
+        "SELECT json_extract(value,'$.source_event[0]'),json_extract(value,'$.name'),json_extract(value,'$.version'), "
+        "json_extract(value,'$.executor') "
         "FROM meta WHERE key LIKE 'issued-delivery:%' AND json_extract(value,'$.project') IS ? ORDER BY rowid DESC LIMIT 10",
         (project,))]
     published = []
