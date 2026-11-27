@@ -152,6 +152,39 @@ class NativeFirstRefactorTests(unittest.TestCase):
         self.assertEqual(saved["status"], "incomplete")
         self.assertEqual(saved["_ended_by"], "stale_timeout")
 
+    def test_latest_turns_cutoff_and_latest_activity_skip_excluded_chats(self):
+        settings = Settings(
+            self.home, self.project, self.root, Path("/usr/bin/python3"),
+            capture_scope="global", active_turn_timeout_seconds=600,
+        )
+        api = SimpleNamespace(read=lambda **kw: {})
+        bridge = Bridge(settings, api)
+        self.addCleanup(bridge.store.close)
+        now = time.time()
+        old_ts = now - 3600
+        recent_ts = now - 60
+        excluded_ts = now - 10
+        rows = [
+            ("chat-old", "turn-old", old_ts, {"source": {"chat": "chat-old"}, "status": "completed"}),
+            ("chat-recent", "turn-recent", recent_ts, {"source": {"chat": "chat-recent"}, "status": "completed"}),
+            ("chat-excluded", "turn-excluded", excluded_ts, {"source": {"chat": "chat-excluded"}, "status": "running"}),
+        ]
+        bridge.store.set("excluded-chat:chat-excluded", {"reason": "test"})
+        with bridge.store.db:
+            for chat, turn_id, activity, payload in rows:
+                bridge.store.db.execute(
+                    "INSERT INTO turns (id, payload, revision, observed_revision, stopped, activity) VALUES (?,?,?,?,?,?)",
+                    (turn_id, dumps(payload), 1, 1, activity, activity),
+                )
+                bridge.store.db.execute(
+                    "INSERT INTO latest_turns (chat, turn_id, activity) VALUES (?,?,?)",
+                    (chat, turn_id, activity),
+                )
+        recent = bridge.latest_turns(since=now - 600)
+        self.assertEqual([r["chat"] for r in recent], ["chat-recent"])
+        self.assertAlmostEqual(bridge.latest_activity(), recent_ts, places=3)
+        self.assertFalse(bridge.has_active_turns())
+
     def test_scrub_single_pass_and_secret_regex_avoid_quadratic_backtracking(self):
         from hermes_codex_learning.enterprise import scrub
         long_blob = "gcall_v1_" + ("A1b2C3d4E5" * 400)

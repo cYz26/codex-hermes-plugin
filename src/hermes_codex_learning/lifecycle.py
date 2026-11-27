@@ -197,7 +197,10 @@ def maintenance(bridge, **kwargs):
     bridge.store.set('state', 'maintaining')
     bridge.store.set('loop-progress', {'phase':'maintaining', 'scope':'native_library', 'updated_at':time.time()})
     if bridge.native_capabilities.get('skill_lifecycle'):
-        activity = max((row['activity'] for row in bridge.latest_turns()), default=None)
+        if hasattr(bridge, 'latest_activity'):
+            activity = bridge.latest_activity()
+        else:
+            activity = max((row['activity'] for row in bridge.latest_turns()), default=None)
         if activity is not None:
             kwargs['host_idle_seconds'] = max(0, time.time()-activity)
     token = _CURATION_SCOPE.set(scope)
