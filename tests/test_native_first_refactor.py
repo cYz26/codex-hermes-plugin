@@ -152,6 +152,31 @@ class NativeFirstRefactorTests(unittest.TestCase):
         self.assertEqual(saved["status"], "incomplete")
         self.assertEqual(saved["_ended_by"], "stale_timeout")
 
+    def test_scrub_single_pass_and_secret_regex_avoid_quadratic_backtracking(self):
+        from hermes_codex_learning.enterprise import scrub
+        long_blob = "gcall_v1_" + ("A1b2C3d4E5" * 400)
+        payload = {
+            "cookie": "session=abc",
+            "api_key": "raw-key",
+            "nested": {
+                "level2": {
+                    "level3": [
+                        long_blob,
+                        "Authorization: Bearer tok.123\nMY_API_KEY=supersecret",
+                    ]
+                }
+            },
+        }
+        t0 = time.monotonic()
+        cleaned = scrub(payload)
+        elapsed = time.monotonic() - t0
+        self.assertEqual(cleaned["cookie"], "[REDACTED]")
+        self.assertEqual(cleaned["api_key"], "[REDACTED]")
+        self.assertEqual(cleaned["nested"]["level2"]["level3"][0], long_blob)
+        self.assertIn("Authorization: [REDACTED]", cleaned["nested"]["level2"]["level3"][1])
+        self.assertIn("MY_API_KEY=[REDACTED]", cleaned["nested"]["level2"]["level3"][1])
+        self.assertLess(elapsed, 0.2)
+
     def test_model_sync_decoupled_effort_cap_and_same_protocol_fallback(self):
         codex_home = self.root / "codex"
         codex_home.mkdir()

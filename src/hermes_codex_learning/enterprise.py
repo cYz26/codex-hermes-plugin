@@ -12,11 +12,16 @@ import socket
 import time
 from pathlib import Path
 
-from .store import digest, redact
+from .store import digest, redact_key, redact_text
 
 MODE = "trusted_enterprise"
 LOCAL_MODE = "trusted_local"
 AUTHORITY = "operator_confirmed_enterprise_deployment"
+_EXPLICIT_L4 = re.compile(r"(?im)^\s*(?:密级|classification|sensitivity)\s*[:：]\s*L4\b")
+_COOKIE_KEY = re.compile(r"(?i)(?:set[-_])?cookie")
+_SENSITIVE_HEADER = re.compile(r"(?im)^(\s*(?:cookie|set-cookie|authorization)\s*:\s*)[^\r\n]+")
+_PRIVATE_KEY = re.compile(r"-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----.*?-----END (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----", flags=re.S)
+_JWT_TOKEN = re.compile(r"\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b")
 
 
 def is_trusted_local(policy) -> bool:
@@ -149,23 +154,21 @@ def explicitly_restricted(value):
     elif isinstance(value,list):
         return any(explicitly_restricted(item) for item in value)
     elif isinstance(value,str):
-        return bool(re.search(r"(?im)^\s*(?:密级|classification|sensitivity)\s*[:：]\s*L4\b",value))
+        return bool(_EXPLICIT_L4.search(value))
     return False
 
 
 def scrub(value):
-    value=redact(value)
     if isinstance(value,dict):
-        return {key:"[REDACTED]" if re.fullmatch(r"(?i)(?:set[-_])?cookie",key) else scrub(item)
+        return {key:"[REDACTED]" if (redact_key(key) or _COOKIE_KEY.fullmatch(key)) else scrub(item)
                 for key,item in value.items()}
     if isinstance(value,list):
         return [scrub(item) for item in value]
     if isinstance(value,str):
-        value=re.sub(r"(?im)^(\s*(?:cookie|set-cookie|authorization)\s*:\s*)[^\r\n]+",
-                     r"\1[REDACTED]",value)
-        value=re.sub(r"-----BEGIN (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----.*?-----END (?:OPENSSH |RSA |EC |DSA )?PRIVATE KEY-----",
-                     "[REDACTED PRIVATE KEY]",value,flags=re.S)
-        value=re.sub(r"\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b","[REDACTED TOKEN]",value)
+        value=redact_text(value)
+        value=_SENSITIVE_HEADER.sub(r"\1[REDACTED]",value)
+        value=_PRIVATE_KEY.sub("[REDACTED PRIVATE KEY]",value)
+        value=_JWT_TOKEN.sub("[REDACTED TOKEN]",value)
     return value
 
 
